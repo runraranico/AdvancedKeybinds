@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: Abrir configuracoes
+	OpenKeybindMenu.DisplayName: Abrir controles
+	OpenModConfigMenu.DisplayName: Abrir configuracao de mods
+}
+
+UI: {
+	Combo: {
+		Press: pressione uma tecla...
+		Empty: (vazio)
+		Unset: (nao definido)
+		Clear: Limpar
+		Undo: Desfazer
+		Save: Salvar
+		HintLine1: Clique com o botao esquerdo em um slot e pressione uma tecla ou botao do mouse.
+		HintLine2: Passe o cursor sobre um slot e clique com o botao direito para limpar.
+		HintLine3: Hold so pode ser ativado para entradas de uma unica tecla.
+		HintLine4: Ajuste o tempo de pressionamento com o controle ou a caixa numerica.
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: enquanto segura
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: ao soltar
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: Vincular só o clique esquerdo? Salve de novo para confirmar.
+		ConfirmLeftClickOnly: Vincular só o clique esquerdo? Salve de novo para confirmar.
+	}
+}

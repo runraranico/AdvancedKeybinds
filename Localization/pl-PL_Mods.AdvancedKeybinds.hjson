@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: Otworz ustawienia
+	OpenKeybindMenu.DisplayName: Otworz sterowanie
+	OpenModConfigMenu.DisplayName: Otworz konfiguracje modow
+}
+
+UI: {
+	Combo: {
+		Press: nacisnij klawisz...
+		Empty: (puste)
+		Unset: (nieustawione)
+		Clear: Wyczyść
+		Undo: Cofnij
+		Save: Zapisz
+		HintLine1: Kliknij lewym przyciskiem pole, a nastepnie nacisnij klawisz lub przycisk myszy.
+		HintLine2: Najedz kursorem na pole i kliknij prawym przyciskiem, aby wyczyscic.
+		HintLine3: Hold mozna wlaczyc tylko dla wejsc z pojedynczym klawiszem.
+		HintLine4: Ustaw czas przytrzymania suwakiem lub polem liczbowym.
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: podczas trzymania
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: po puszczeniu
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: Przypisać sam lewy przycisk? Zapisz ponownie, aby potwierdzić.
+		ConfirmLeftClickOnly: Przypisać sam lewy przycisk? Zapisz ponownie, aby potwierdzić.
+	}
+}

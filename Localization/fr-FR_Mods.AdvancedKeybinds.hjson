@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: Ouvrir les parametres
+	OpenKeybindMenu.DisplayName: Ouvrir les controles
+	OpenModConfigMenu.DisplayName: Ouvrir la configuration des mods
+}
+
+UI: {
+	Combo: {
+		Press: appuyez sur une touche...
+		Empty: (vide)
+		Unset: (non defini)
+		Clear: Effacer
+		Undo: Annuler
+		Save: Sauvegarder
+		HintLine1: Cliquez gauche sur un slot, puis appuyez sur une touche ou un bouton de souris.
+		HintLine2: Survolez un slot et cliquez droit pour effacer.
+		HintLine3: Hold ne peut etre active que pour une entree a une seule touche.
+		HintLine4: Reglez le temps d'appui avec le curseur ou la zone numerique.
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: maintenu
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: au relachement
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: Lier le clic gauche seul ? Enregistrez encore pour confirmer.
+		ConfirmLeftClickOnly: Lier le clic gauche seul ? Enregistrez encore pour confirmer.
+	}
+}

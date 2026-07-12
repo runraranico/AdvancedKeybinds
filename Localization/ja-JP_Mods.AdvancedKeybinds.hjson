@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: 設定を開く
+	OpenKeybindMenu.DisplayName: コントロールを開く
+	OpenModConfigMenu.DisplayName: MOD設定を開く
+}
+
+UI: {
+	Combo: {
+		Press: キーを押す...
+		Empty: (なし)
+		Unset: (未設定)
+		Clear: クリア
+		Undo: 取消
+		Save: 保存
+		HintLine1: 枠を左クリックしてキー/マウスを押してください
+		HintLine2: カーソルを枠に合わせて右クリックで解除
+		HintLine3: Hold設定は1キーの時のみ有効化できる
+		HintLine4: 押し時間はスライダー/数値で調整
+		HoldDefaultLabel: 初期値
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: 押し続けで有効
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: 離した時に有効
+		HoldPreviewWhileHeld: Hold 
+		HoldPreviewOnRelease: Hold↑ 
+		RejectLeftClickOnly: 左クリック単独でよろしいですか？もう一度保存で確定
+		ConfirmLeftClickOnly: 左クリック単独でよろしいですか？もう一度保存で確定
+	}
+}

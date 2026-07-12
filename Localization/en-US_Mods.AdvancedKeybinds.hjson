@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: Open Settings
+	OpenKeybindMenu.DisplayName: Open Controls
+	OpenModConfigMenu.DisplayName: Open Mod Configuration
+}
+
+UI: {
+	Combo: {
+		Press: press a key...
+		Empty: (empty)
+		Unset: (unset)
+		Clear: Clear
+		Undo: Undo
+		Save: Save
+		HintLine1: Left-click a slot, then press a key or mouse button.
+		HintLine2: Hover over a slot and right-click to clear it.
+		HintLine3: Hold can only be enabled for single-key inputs.
+		HintLine4: Set hold time with the slider or number box.
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: while held
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: on release
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: Bind Left-click alone? Save again to confirm.
+		ConfirmLeftClickOnly: Bind Left-click alone? Save again to confirm.
+	}
+}

@@ -1,0 +1,17 @@
+Adds advanced key and mouse bindings to vanilla and mod controls.
+
+How to use:
+Open the normal Controls / keybind settings screen, then click a control row to open the combo panel.
+
+- Chord bindings (up to 3 keys / mouse buttons)
+- Single-key Hold: while held or on release (duration adjustable)
+- Undo / Clear / Save in the combo panel
+- While the cursor is over a keybind box: right-click to unset, middle-click to restore default
+- Suppresses the Windows key while the game is focused (so Win can be bound).
+  When the game is inactive / unfocused, Windows key behavior returns to normal.
+
+Notes:
+- Hold works for single-key inputs only
+- Binding Left-click alone asks for confirmation (save again to confirm)
+- CapsLock Hold is for ANSI layouts; on Japanese/JIS keyboards, CapsLock tap works but Hold does not
+- Some mod-specific special inputs are not supported

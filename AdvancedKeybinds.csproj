@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\tModLoader.targets" />
+  <PropertyGroup>
+    <AssemblyName>AdvancedKeybinds</AssemblyName>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <!-- Diagnostic [AKDiag] logging is OFF. Enable only for local debugging: -->
+    <!-- AKDIAG_DEFINE_MARKER -->
+  </PropertyGroup>
+</Project>

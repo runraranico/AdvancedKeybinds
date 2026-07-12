@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: Abrir ajustes
+	OpenKeybindMenu.DisplayName: Abrir controles
+	OpenModConfigMenu.DisplayName: Abrir configuracion de mods
+}
+
+UI: {
+	Combo: {
+		Press: pulsa una tecla...
+		Empty: (vacio)
+		Unset: (sin asignar)
+		Clear: Borrar
+		Undo: Deshacer
+		Save: Guardar
+		HintLine1: Haz clic izquierdo en una casilla y luego pulsa una tecla o boton del raton.
+		HintLine2: Coloca el cursor sobre una casilla y haz clic derecho para borrar.
+		HintLine3: Hold solo se puede activar para entradas de una sola tecla.
+		HintLine4: Ajusta el tiempo de pulsacion con el deslizador o la caja numerica.
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: mantenido
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: al soltar
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: ¿Asignar solo clic izquierdo? Guarda otra vez para confirmar.
+		ConfirmLeftClickOnly: ¿Asignar solo clic izquierdo? Guarda otra vez para confirmar.
+	}
+}

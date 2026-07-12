@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: Открыть настройки
+	OpenKeybindMenu.DisplayName: Открыть управление
+	OpenModConfigMenu.DisplayName: Открыть настройки модов
+}
+
+UI: {
+	Combo: {
+		Press: нажмите клавишу...
+		Empty: (пусто)
+		Unset: (не назначено)
+		Clear: Очистить
+		Undo: Отменить
+		Save: Сохранить
+		HintLine1: Щелкните по слоту ЛКМ, затем нажмите клавишу или кнопку мыши.
+		HintLine2: Наведите курсор на слот и нажмите ПКМ, чтобы очистить.
+		HintLine3: Hold можно включить только для ввода одной клавишей.
+		HintLine4: Задайте время удержания ползунком или числовым полем.
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: при удержании
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: при отпускании
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: Назначить только левый клик? Сохраните ещё раз для подтверждения.
+		ConfirmLeftClickOnly: Назначить только левый клик? Сохраните ещё раз для подтверждения.
+	}
+}

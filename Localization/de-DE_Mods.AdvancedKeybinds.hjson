@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: Einstellungen öffnen
+	OpenKeybindMenu.DisplayName: Steuerung öffnen
+	OpenModConfigMenu.DisplayName: Mod-Konfiguration öffnen
+}
+
+UI: {
+	Combo: {
+		Press: Taste drücken...
+		Empty: (leer)
+		Unset: (nicht gesetzt)
+		Clear: Löschen
+		Undo: Rückgängig
+		Save: Speichern
+		HintLine1: Linksklick auf ein Feld, dann Taste oder Maustaste drücken.
+		HintLine2: Maus über ein Feld bewegen und Rechtsklick zum Löschen.
+		HintLine3: Hold kann nur bei Eingaben mit einer einzelnen Taste aktiviert werden.
+		HintLine4: Stelle die Haltezeit mit dem Regler oder dem Zahlenfeld ein.
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: gehalten
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: beim Loslassen
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: Linksklick allein belegen? Speichern erneut zum Bestätigen.
+		ConfirmLeftClickOnly: Linksklick allein belegen? Speichern erneut zum Bestätigen.
+	}
+}

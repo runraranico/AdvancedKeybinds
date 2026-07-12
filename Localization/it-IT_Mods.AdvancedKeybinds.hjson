@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: Apri impostazioni
+	OpenKeybindMenu.DisplayName: Apri controlli
+	OpenModConfigMenu.DisplayName: Apri configurazione mod
+}
+
+UI: {
+	Combo: {
+		Press: premi un tasto...
+		Empty: (vuoto)
+		Unset: (non impostato)
+		Clear: Cancella
+		Undo: Annulla
+		Save: Salva
+		HintLine1: Fai clic sinistro su uno slot, poi premi un tasto o un pulsante del mouse.
+		HintLine2: Passa il cursore su uno slot e clic destro per cancellare.
+		HintLine3: Hold puo essere attivato solo per input con un solo tasto.
+		HintLine4: Imposta il tempo di pressione con cursore o casella numerica.
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: tenuto premuto
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: al rilascio
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: Assegnare solo il clic sinistro? Salva di nuovo per confermare.
+		ConfirmLeftClickOnly: Assegnare solo il clic sinistro? Salva di nuovo per confermare.
+	}
+}

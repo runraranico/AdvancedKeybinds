@@ -1,0 +1,29 @@
+Keybinds: {
+	OpenSettingsMenu.DisplayName: 開啟設定
+	OpenKeybindMenu.DisplayName: 開啟控制
+	OpenModConfigMenu.DisplayName: 開啟模組設定
+}
+
+UI: {
+	Combo: {
+		Press: 按下按鍵...
+		Empty: (空)
+		Unset: (未設定)
+		Clear: 清除
+		Undo: 復原
+		Save: 保存
+		HintLine1: 左鍵點擊欄位，然後按下按鍵或滑鼠按鈕。
+		HintLine2: 將游標移到欄位上並右鍵點擊以清除。
+		HintLine3: Hold 設定只能對單鍵輸入啟用。
+		HintLine4: 用滑桿或數字框調整按住時間。
+		HoldDefaultLabel: Default
+		HoldWhileHeldTitle: Hold
+		HoldWhileHeldHint: 按住時
+		HoldOnReleaseTitle: Hold
+		HoldOnReleaseHint: 放開時
+		HoldPreviewWhileHeld: Hold
+		HoldPreviewOnRelease: Hold↑
+		RejectLeftClickOnly: 要單獨綁定左鍵嗎？再按一次儲存以確認。
+		ConfirmLeftClickOnly: 要單獨綁定左鍵嗎？再按一次儲存以確認。
+	}
+}
