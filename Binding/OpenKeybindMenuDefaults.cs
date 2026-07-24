@@ -3,19 +3,22 @@ using Terraria.ModLoader;
 namespace AdvancedKeybinds.Binding
 {
 	/// <summary>
-	/// Keeps mod-menu shortcut rows showing 未設定 on first launch while still exposing
-	/// registered defaults (L / K / O) via the reset button.
+	/// Keeps certain ModKeybind rows showing 未設定 on first launch while still exposing
+	/// registered defaults (L / K / O / U) via the reset button.
 	/// </summary>
 	internal static class OpenKeybindMenuDefaults
 	{
 		public static void ApplyStartupState()
 		{
-			if (ClientPrefs.OpenKeybindMenuCustomized)
-				return;
+			if (!ClientPrefs.OpenKeybindMenuCustomized)
+			{
+				TryStripRegisteredDefault(AdvancedKeybinds.OpenSettingsMenuHotkey, "L");
+				TryStripRegisteredDefault(AdvancedKeybinds.OpenKeybindMenuHotkey, "K");
+				TryStripRegisteredDefault(AdvancedKeybinds.OpenModConfigHotkey, "O");
+			}
 
-			TryStripRegisteredDefault(AdvancedKeybinds.OpenSettingsMenuHotkey, "L");
-			TryStripRegisteredDefault(AdvancedKeybinds.OpenKeybindMenuHotkey, "K");
-			TryStripRegisteredDefault(AdvancedKeybinds.OpenModConfigHotkey, "O");
+			if (!ClientPrefs.HoldTierHudHotkeyCustomized)
+				TryStripRegisteredDefault(AdvancedKeybinds.CycleHoldTierHudAnchorHotkey, "U");
 		}
 
 		private static void TryStripRegisteredDefault(ModKeybind hotkey, string expectedKey)
@@ -37,7 +40,7 @@ namespace AdvancedKeybinds.Binding
 					return;
 
 				// tModLoader may apply the registered default on load; strip it so the row stays unset.
-				VanillaRebindHelper.ClearVanillaBinding(actionId);
+				VanillaRebindHelper.ClearVanillaBinding(actionId, "startup-strip-registered-default");
 			}
 			catch
 			{
@@ -75,7 +78,20 @@ namespace AdvancedKeybinds.Binding
 				|| bind.Contains("MODの設定", System.StringComparison.OrdinalIgnoreCase);
 		}
 
-		/// <summary>Registered ModKeybind defaults (L / K / O) for middle-click row reset.</summary>
+		public static bool IsHoldTierHudHotkeyAction(string bind)
+		{
+			if (string.IsNullOrEmpty(bind))
+				return false;
+
+			if (IsActionId(bind, AdvancedKeybinds.CycleHoldTierHudAnchorHotkey))
+				return true;
+
+			return bind.Contains("CycleHoldTierHudAnchor", System.StringComparison.OrdinalIgnoreCase)
+				|| bind.Contains("Holdゲージを切替", System.StringComparison.OrdinalIgnoreCase)
+				|| bind.Contains("Cycle Hold HUD", System.StringComparison.OrdinalIgnoreCase);
+		}
+
+		/// <summary>Registered ModKeybind defaults (L / K / O / U) for middle-click row reset.</summary>
 		public static bool TryGetRegisteredDefaultKey(string actionId, out string key)
 		{
 			key = null;
@@ -100,6 +116,12 @@ namespace AdvancedKeybinds.Binding
 				return true;
 			}
 
+			if (IsActionId(actionId, AdvancedKeybinds.CycleHoldTierHudAnchorHotkey))
+			{
+				key = "U";
+				return true;
+			}
+
 			return false;
 		}
 
@@ -113,6 +135,20 @@ namespace AdvancedKeybinds.Binding
 		public static void MarkCustomized()
 		{
 			ClientPrefs.OpenKeybindMenuCustomized = true;
+		}
+
+		public static void MarkHoldTierHudHotkeyCustomized()
+		{
+			ClientPrefs.HoldTierHudHotkeyCustomized = true;
+		}
+
+		/// <summary>Marks the matching startup-unset group customized when the row is edited.</summary>
+		public static void MarkCustomizedIfTracked(string actionId)
+		{
+			if (IsOpenKeybindMenuAction(actionId))
+				MarkCustomized();
+			if (IsHoldTierHudHotkeyAction(actionId))
+				MarkHoldTierHudHotkeyCustomized();
 		}
 	}
 }

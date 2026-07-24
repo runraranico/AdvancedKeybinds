@@ -2,9 +2,136 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: Abrir ajustes
 	OpenKeybindMenu.DisplayName: Abrir controles
 	OpenModConfigMenu.DisplayName: Abrir configuracion de mods
+	CycleHoldTierHudAnchor.DisplayName: Alternar HUD de Hold
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: Ajustes
+
+		HoldTierHudCustomPositionX: {
+			Label: Posición personalizada X de la barra Hold
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Posición personalizada Y de la barra Hold
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: Pies
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: Ratón
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: Personalizado
+			Tooltip: Activa «Permitir arrastre» y clic central (pulsar la rueda) en la barra para mover
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: Teclas especiales / control de UI
+
+		Suppress: {
+			Label: Suprimir tecla Windows
+			Tooltip: Déjala activada si vinculas la tecla Windows
+		}
+
+		SuppressDebugUi: {
+			Label: Suprimir atajos de UI de depuración de Terraria
+			Tooltip: Impide que se abra la UI especial de Terraria con F7, F8, F10 y F11. Las teclas siguen disponibles para vinculaciones y acciones del mod.
+		}
+	}
+
+	Guide: {
+		NotesHeader: Bloquear cursor en la ventana
+
+		CursorConfineToggle: {
+			Label: Confinar cursor a la ventana
+			Tooltip: El cursor del ratón no puede salir de la ventana del juego. También puedes alternarlo con el atajo oculto [c/FF9B00:Ctrl+Shift+Alt+M]
+		}
+
+		CursorConfineOnLoad: {
+			Label: Activar automáticamente en la próxima carga del mod
+			Tooltip: Activado: iniciar con bloqueo en la próxima carga. Desactivado: iniciar sin bloqueo en la próxima carga
+		}
+	}
+
+	HoldTierHud: {
+		Header: Barra de Hold al soltar
+
+		Enabled: {
+			Label: Mostrar barra de Hold
+			Tooltip: Al mantener una tecla con 2+ Holds al soltar, muestra una barra de carga
+		}
+
+		AllowDrag: {
+			Label: Permitir arrastre
+			Tooltip: Si la posición de la barra es Personalizado, puedes hacer clic central para agarrarla y moverla.
+		}
+
+		CustomGaugeHoverTip: Activa «Permitir arrastre» y clic central (pulsar la rueda) en la barra para mover
+
+		Anchor: {
+			Label: Posición de la barra
+			Tooltip: Pies, ratón o personalizado (activa Permitir arrastre para definir). El atajo cicla Pies → Ratón → Personalizado → Pies
+		}
+
+		BarWidth: {
+			Label: Longitud de la barra
+			Tooltip: Ancho horizontal de la barra en píxeles (150–500). Predeterminado 200.
+		}
+
+		Color: {
+			Label: Color de la barra
+			Tooltip: Deslizadores Rojo / Verde / Azul
+		}
+
+		CustomPositionX: {
+			Label: Posición personalizada X
+			Tooltip: Coordenada horizontal en pantalla del ancla personalizada. Se establece al arrastrar la barra. -1 = aún no definida.
+		}
+
+		CustomPositionY: {
+			Label: Posición personalizada Y
+			Tooltip: Coordenada vertical en pantalla del ancla personalizada. Se establece al arrastrar la barra. -1 = aún no definida.
+		}
+	}
+
+	ColorChannel: {
+		Red.Label: Rojo
+		Green.Label: Verde
+		Blue.Label: Azul
+		Alpha.Label: Alfa
+	}
+}
+
+Hints.WinKeySuppress: Abre los ajustes de Advanced Keybinds y comprueba la supresión de la tecla Windows
+
+CursorConfine: {
+	Enabled: Bloqueo de cursor ACTIVADO
+	Disabled: Bloqueo de cursor DESACTIVADO
+	WindowsOnly: Bloquear el cursor en la ventana solo está disponible en Windows
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: Cuando el cursor selecciona un nombre de acción, clic derecho para dejar sin asignar (confirmación), clic central para restaurar el valor predeterminado
+		ConfirmUnsetHover: Clic derecho otra vez para dejar sin asignar
+	}
+
 	Combo: {
 		Press: pulsa una tecla...
 		Empty: (vacio)
@@ -13,9 +140,8 @@ UI: {
 		Undo: Deshacer
 		Save: Guardar
 		HintLine1: Haz clic izquierdo en una casilla y luego pulsa una tecla o boton del raton.
-		HintLine2: Coloca el cursor sobre una casilla y haz clic derecho para borrar.
-		HintLine3: Hold solo se puede activar para entradas de una sola tecla.
-		HintLine4: Ajusta el tiempo de pulsacion con el deslizador o la caja numerica.
+		HintLine2: Hold solo con 1 tecla.
+		HintLine3: Coloca el cursor sobre una casilla y clic derecho para quitar el ajuste.
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: mantenido
@@ -23,7 +149,30 @@ UI: {
 		HoldOnReleaseHint: al soltar
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
-		RejectLeftClickOnly: ¿Asignar solo clic izquierdo? Guarda otra vez para confirmar.
+		HoldMsInputTooltip: Introduce un valor de 10～10000
 		ConfirmLeftClickOnly: ¿Asignar solo clic izquierdo? Guarda otra vez para confirmar.
+		KeyInfoSelectHint: Selecciona una tecla
+		KeyInfoSelectGuide: Elegir una tecla
+		KeyInfoCurrent: Tecla original
+		KeyInfoDisplay: Nombre mostrado
+		KeyInfoDefault: Nombre por defecto
+		KeyInfoScan: ScanCode
+		KeyInfoNone: ninguno
+		KeyInfoPresent: presente
+		KeyInfoNamePlaceholder: Cambiar nombre mostrado de la tecla
+		KeyInfoPressHint: Pulsa una tecla
+		KeyInfoAwaitHeader: Tecla a cambiar
+		KeyInfoNameGuideLine1: Nuevo nombre mostrado
+		KeyInfoNameGuideLine2: Escribe el texto aquí
+		KeyInfoNameGuideLine3: Enter para confirmar
+		KeyInfoResetDisplays: Restablecer nombres mostrados
+		KeyInfoResetDisplaysLine1: Restablecer todos los
+		KeyInfoResetDisplaysLine2: nombres mostrados
+		KeyInfoResetDisplaysConfirm: ¿Restablecer todos los nombres mostrados personalizados a los valores por defecto?
+		KeyInfoDisplayRestored: Nombre mostrado {0} restaurado a {1}
+		SlotOriginalKey: Original: {0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: Hacia ti
+		MouseWheelDown: Lejos de ti
 	}
 }

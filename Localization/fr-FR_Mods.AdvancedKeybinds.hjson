@@ -2,28 +2,177 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: Ouvrir les parametres
 	OpenKeybindMenu.DisplayName: Ouvrir les controles
 	OpenModConfigMenu.DisplayName: Ouvrir la configuration des mods
+	CycleHoldTierHudAnchor.DisplayName: Basculer le HUD Hold
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: Parametres
+
+		HoldTierHudCustomPositionX: {
+			Label: Position personnalisée X de la jauge Hold
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Position personnalisée Y de la jauge Hold
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: Pieds
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: Souris
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: Personnalisé
+			Tooltip: Activez « Autoriser le glisser » et clic molette (appui sur la molette) sur la jauge pour déplacer
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: Touches spéciales / contrôle de l'UI
+
+		Suppress: {
+			Label: Supprimer la touche Windows
+			Tooltip: Laissez activé si vous liez la touche Windows
+		}
+
+		SuppressDebugUi: {
+			Label: Supprimer les raccourcis UI de débogage de Terraria
+			Tooltip: Empêche l'ouverture de l'UI spéciale de Terraria avec F7, F8, F10 et F11. Les touches restent utilisables pour les liaisons et actions du mod.
+		}
+	}
+
+	Guide: {
+		NotesHeader: Verrouiller le curseur à la fenêtre
+
+		CursorConfineToggle: {
+			Label: Confiner le curseur à la fenêtre
+			Tooltip: Le curseur de la souris ne peut pas sortir de la fenêtre du jeu. Vous pouvez aussi basculer avec le raccourci masqué [c/FF9B00:Ctrl+Shift+Alt+M]
+		}
+
+		CursorConfineOnLoad: {
+			Label: Activer automatiquement au prochain chargement du mod
+			Tooltip: Activé : démarrer avec verrouillage au prochain chargement. Désactivé : démarrer sans verrouillage au prochain chargement
+		}
+	}
+
+	HoldTierHud: {
+		Header: Jauge Hold à la relâche
+
+		Enabled: {
+			Label: Afficher la jauge Hold
+			Tooltip: En maintenant une touche avec 2+ Holds à la relâche, affiche une jauge de charge
+		}
+
+		AllowDrag: {
+			Label: Autoriser le glisser
+			Tooltip: Lorsque la position de la jauge est Personnalisé, vous pouvez cliquer au milieu pour la saisir et la déplacer.
+		}
+
+		CustomGaugeHoverTip: Activez « Autoriser le glisser » et clic molette (appui sur la molette) sur la jauge pour déplacer
+
+		Anchor: {
+			Label: Position de la jauge
+			Tooltip: Pieds, souris ou personnalisé (activez Autoriser le glisser pour définir). Le raccourci cycle Pieds → Souris → Personnalisé → Pieds
+		}
+
+		BarWidth: {
+			Label: Longueur de la jauge
+			Tooltip: Largeur horizontale de la barre en pixels (150–500). Par défaut 200.
+		}
+
+		Color: {
+			Label: Couleur de la jauge
+			Tooltip: Curseurs Rouge / Vert / Bleu
+		}
+
+		CustomPositionX: {
+			Label: Position personnalisée X
+			Tooltip: Coordonnée horizontale à l'écran pour l'ancre personnalisée. Définie automatiquement en glissant la jauge. -1 = pas encore définie.
+		}
+
+		CustomPositionY: {
+			Label: Position personnalisée Y
+			Tooltip: Coordonnée verticale à l'écran pour l'ancre personnalisée. Définie automatiquement en glissant la jauge. -1 = pas encore définie.
+		}
+	}
+
+	ColorChannel: {
+		Red.Label: Rouge
+		Green.Label: Vert
+		Blue.Label: Bleu
+		Alpha.Label: Alpha
+	}
+}
+
+Hints.WinKeySuppress: Ouvrez les paramètres d'Advanced Keybinds et vérifiez la suppression de la touche Windows
+
+CursorConfine: {
+	Enabled: Verrouillage du curseur ACTIVE
+	Disabled: Verrouillage du curseur DESACTIVE
+	WindowsOnly: Verrouiller le curseur a la fenetre est disponible uniquement sous Windows
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: Lorsque le curseur sélectionne un nom d'action, clic droit pour désassigner (confirmation), clic molette pour restaurer la valeur par défaut
+		ConfirmUnsetHover: Clic droit encore pour désassigner
+	}
+
 	Combo: {
 		Press: appuyez sur une touche...
 		Empty: (vide)
-		Unset: (non defini)
+		Unset: (non assigné)
 		Clear: Effacer
 		Undo: Annuler
-		Save: Sauvegarder
-		HintLine1: Cliquez gauche sur un slot, puis appuyez sur une touche ou un bouton de souris.
-		HintLine2: Survolez un slot et cliquez droit pour effacer.
-		HintLine3: Hold ne peut etre active que pour une entree a une seule touche.
-		HintLine4: Reglez le temps d'appui avec le curseur ou la zone numerique.
+		Save: Enregistrer
+		HintLine1: Clic gauche sur une case, puis appuyez sur une touche ou un bouton de souris.
+		HintLine2: Hold uniquement avec 1 touche.
+		HintLine3: Placez le curseur sur une case et clic droit pour effacer la liaison.
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: maintenu
 		HoldOnReleaseTitle: Hold
-		HoldOnReleaseHint: au relachement
+		HoldOnReleaseHint: à la relâche
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
-		RejectLeftClickOnly: Lier le clic gauche seul ? Enregistrez encore pour confirmer.
-		ConfirmLeftClickOnly: Lier le clic gauche seul ? Enregistrez encore pour confirmer.
+		HoldMsInputTooltip: Entrez une valeur de 10～10000
+		ConfirmLeftClickOnly: Lier uniquement le clic gauche ? Enregistrez à nouveau pour confirmer.
+		KeyInfoSelectHint: Sélectionnez une touche
+		KeyInfoSelectGuide: Choisir une touche
+		KeyInfoCurrent: Touche d'origine
+		KeyInfoDisplay: Nom affiché
+		KeyInfoDefault: Nom par défaut
+		KeyInfoScan: ScanCode
+		KeyInfoNone: aucun
+		KeyInfoPresent: présent
+		KeyInfoNamePlaceholder: Modifier le nom affiché de la touche
+		KeyInfoPressHint: Appuyez sur une touche
+		KeyInfoAwaitHeader: Touche à modifier
+		KeyInfoNameGuideLine1: Nouveau nom affiché
+		KeyInfoNameGuideLine2: Tapez le texte ici
+		KeyInfoNameGuideLine3: Entrée pour confirmer
+		KeyInfoResetDisplays: Réinitialiser les noms affichés
+		KeyInfoResetDisplaysLine1: Réinitialiser tous les
+		KeyInfoResetDisplaysLine2: noms affichés
+		KeyInfoResetDisplaysConfirm: Réinitialiser tous les noms affichés personnalisés aux valeurs par défaut ?
+		KeyInfoDisplayRestored: Nom affiché {0} restauré en {1}
+		SlotOriginalKey: Original : {0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: Vers soi
+		MouseWheelDown: Loin de soi
 	}
 }

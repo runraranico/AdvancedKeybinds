@@ -1,11 +1,100 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <Import Project="..\tModLoader.targets" />
   <PropertyGroup>
     <AssemblyName>AdvancedKeybinds</AssemblyName>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
-    <!-- Diagnostic [AKDiag] logging is OFF. Enable only for local debugging: -->
+    <!--
+      Diagnostics (AK_DIAGNOSTICS):
+      - Default FALSE for public / Workshop safety (no diag implementations in the DLL).
+      - Dev diagnostics: tools/Build-Diagnostics.ps1 or -p:EnableAkDiagnostics=true
+      - Public/Workshop: tools/Build-Public.ps1 -p:EnableAkDiagnostics=false
+        → removes diagnostic implementations and links stubs from AdvancedKeybinds.Dev
+        (stubs must stay OUTSIDE this project folder — tML globs **/*.cs here).
+    -->
+    <EnableAkDiagnostics Condition="'$(EnableAkDiagnostics)' == ''">false</EnableAkDiagnostics>
     <!-- AKDIAG_DEFINE_MARKER -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**;**/tools/**;**/_developer/**;**/*.Tests/**;**/AdvancedKeybinds.Core.Tests/**;**/AdvancedKeybinds.Dev/**;**/build/**</DefaultItemExcludes>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(EnableAkDiagnostics)' == 'true'">
+    <DefineConstants>$(DefineConstants);AK_DIAGNOSTICS</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="**/bin/**" />
+    <Compile Remove="**/obj/**" />
+    <Compile Remove="**/tools/**" />
+    <Compile Remove="**/_developer/**" />
+    <Compile Remove="**/build/**" />
+    <Compile Remove="**/*.Tests/**" />
+    <Compile Remove="**/AdvancedKeybinds.Core.Tests/**" />
+    <EmbeddedResource Remove="**/bin/**" />
+    <EmbeddedResource Remove="**/obj/**" />
+    <EmbeddedResource Remove="**/tools/**" />
+    <EmbeddedResource Remove="**/_developer/**" />
+    <EmbeddedResource Remove="**/build/**" />
+    <None Remove="**/bin/**" />
+    <None Remove="**/obj/**" />
+    <None Remove="**/tools/**" />
+    <None Remove="**/_developer/**" />
+  </ItemGroup>
+
+  <!-- Public build only: strip diagnostic implementations; link empty stubs from Dev tree. -->
+  <ItemGroup Condition="'$(EnableAkDiagnostics)' != 'true'">
+    <Compile Remove="Binding\AkDiagSwitch.cs" />
+    <Compile Remove="Binding\JisOemInGameDiagnostic.cs" />
+    <Compile Remove="Binding\KeyboardDiagMode.cs" />
+    <Compile Remove="Binding\CaptureResponsivenessDiag.cs" />
+    <Compile Remove="Binding\DisplayResolveDiag.cs" />
+    <Compile Remove="Binding\BindingMutationDiag.cs" />
+    <Compile Remove="Patches\WinChordDiag.cs" />
+    <Compile Remove="Patches\StartMenuDiag.cs" />
+    <Compile Remove="Patches\KeyboardDiagSystem.cs" />
+    <Compile Remove="Commands\ExpandedDiagnosticCommand.cs" />
+    <Compile Remove="Commands\AllKeyDiagnosticCommand.cs" />
+    <Compile Remove="Commands\FreezeCandidateDiagnosticCommand.cs" />
+    <Compile Remove="Diagnostics\LiveInputDiagnosticSession.cs" />
+    <Compile Remove="Diagnostics\DiagnosticEventPublisher.cs" />
+    <Compile Remove="Diagnostics\AdvancedKeybindsDiagnosticEvents.cs" />
+    <Compile Remove="Diagnostics\AllKeyDiagnosticRunner.cs" />
+    <Compile Remove="Diagnostics\FreezeCandidateAutoDiagnosticRunner.cs" />
+    <Compile Remove="Diagnostics\AdvancedKeybindsDiagnosticsApi.cs" />
+    <Compile Remove="Diagnostics\DiagnosticReportSupport.cs" />
+    <Compile Remove="Diagnostics\DiagnosticKeyEvaluator.cs" />
+    <Compile Remove="Diagnostics\SafeDiagnosticRunner.cs" />
+    <Compile Remove="Diagnostics\ZoomKeyLiveVerifySystem.cs" />
+    <Compile Remove="Diagnostics\AkCpuMeasureSystem.cs" />
+    <Compile Remove="Diagnostics\HoldHudProbe.cs" />
+    <Compile Remove="Diagnostics\ComboPanelEscPathDiag.cs" />
+    <Compile Remove="Logic\PhysicalKeyDupDiag.cs" />
+    <Compile Remove="Logic\AllKeyDiagnosticCore.cs" />
+    <Compile Remove="Logic\JisOemRegistrationDiagnostic.cs" />
+    <Compile Remove="Logic\FreezeCandidateAutoDiagnosticCore.cs" />
+    <Compile Remove="Logic\FreezeCandidateCatalog.cs" />
+    <Compile Remove="Logic\FreezeCandidateWin32.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\public-stubs\PublicDiagnosticStubs.cs"
+            Link="PublicDiagnosticStubs.cs" />
+  </ItemGroup>
+
+  <Target Name="RemoveStaleRootPrecompiledDll" BeforeTargets="Build">
+    <Delete Files="$(MSBuildProjectDirectory)\AdvancedKeybinds.dll;$(MSBuildProjectDirectory)\AdvancedKeybinds.pdb"
+            TreatErrorsAsWarnings="true" />
+  </Target>
+
+  <!-- Dev: merge KeyboardDiag localization into Localization/*.hjson before package. -->
+  <Target Name="MergeDiagLocalization" BeforeTargets="BeforeBuild" Condition="'$(EnableAkDiagnostics)' == 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\_developer\tools\Sync-DiagLocalization.ps1&quot; -Mode Merge -ModRoot &quot;$(MSBuildProjectDirectory)&quot;" />
+  </Target>
+
+  <!-- Public: ensure KeyboardDiag is absent from Localization before compile/package. -->
+  <Target Name="StripDiagLocalization" BeforeTargets="BeforeBuild" Condition="'$(EnableAkDiagnostics)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\_developer\tools\Sync-DiagLocalization.ps1&quot; -Mode Strip -ModRoot &quot;$(MSBuildProjectDirectory)&quot;" />
+  </Target>
+
+  <Target Name="AssertPublicDiagnosticsOff" BeforeTargets="Build" Condition="'$(EnableAkDiagnostics)' != 'true'">
+    <Error Condition="$(DefineConstants.Contains('AK_DIAGNOSTICS'))"
+           Text="Public build must not define AK_DIAGNOSTICS. Use Build-Public.ps1 / EnableAkDiagnostics=false." />
+  </Target>
 </Project>

@@ -52,6 +52,90 @@ namespace AdvancedKeybinds.Patches
 			_cachedMs = 0;
 		}
 
+		/// <summary>
+		/// OS cursor in game-window client pixels (backbuffer space).
+		/// Used when the window is unfocused and <see cref="Main.mouseX"/> is frozen —
+		/// callers ÷ UIScale to reach the same UI space as focused Main.mouse.
+		/// Unlike FNA <c>Mouse.GetState</c>, this is not clamped to the client when the
+		/// cursor is over another window (deactivate / screenshot clicks).
+		/// </summary>
+		public static bool TryGetClientCursor(out int x, out int y)
+		{
+			x = 0;
+			y = 0;
+			if (!OperatingSystem.IsWindows())
+				return false;
+
+			IntPtr hwnd = TryGet(preferForeground: false);
+			if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
+				return false;
+
+			if (!GetCursorPos(out POINT screen) || !ScreenToClient(hwnd, ref screen))
+				return false;
+
+			x = screen.X;
+			y = screen.Y;
+			return true;
+		}
+
+		/// <summary>Win32 client rect size (same space as <see cref="TryGetClientCursor"/>).</summary>
+		public static bool TryGetClientSize(out int width, out int height)
+		{
+			width = 0;
+			height = 0;
+			if (!OperatingSystem.IsWindows())
+				return false;
+
+			IntPtr hwnd = TryGet(preferForeground: false);
+			if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
+				return false;
+
+			if (!GetClientRect(hwnd, out RECT client))
+				return false;
+
+			width = Math.Max(0, client.Right - client.Left);
+			height = Math.Max(0, client.Bottom - client.Top);
+			return width > 0 && height > 0;
+		}
+
+		/// <summary>True when the OS cursor lies inside the game HWND client rect (not FNA-clamped).</summary>
+		public static bool IsOsCursorInsideClient()
+		{
+			if (!OperatingSystem.IsWindows())
+				return false;
+
+			IntPtr hwnd = TryGet(preferForeground: false);
+			if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
+				return false;
+
+			if (!GetCursorPos(out POINT screen) || !ScreenToClient(hwnd, ref screen))
+				return false;
+
+			if (!GetClientRect(hwnd, out RECT client))
+				return false;
+
+			int w = client.Right - client.Left;
+			int h = client.Bottom - client.Top;
+			return screen.X >= 0 && screen.Y >= 0 && screen.X < w && screen.Y < h;
+		}
+
+		/// <summary>
+		/// True when this process owns the foreground window. Deactivate clicks often flip
+		/// foreground before <see cref="Main.hasFocus"/> clears — used to keep purple wait.
+		/// </summary>
+		public static bool IsGameProcessForeground()
+		{
+			if (!OperatingSystem.IsWindows())
+				return Main.hasFocus;
+
+			IntPtr fg = GetForegroundWindow();
+			if (fg == IntPtr.Zero || !IsWindow(fg))
+				return Main.hasFocus;
+
+			GetWindowThreadProcessId(fg, out uint fgPid);
+			return fgPid == GetCurrentProcessId();
+		}
+
 		private static bool TryCache(IntPtr hwnd, uint pid, long now, out IntPtr result)
 		{
 			result = IntPtr.Zero;
@@ -185,6 +269,22 @@ namespace AdvancedKeybinds.Patches
 				|| name.Contains("hwnd", StringComparison.OrdinalIgnoreCase)
 				|| name.Contains("handle", StringComparison.OrdinalIgnoreCase);
 
+		[StructLayout(LayoutKind.Sequential)]
+		private struct POINT
+		{
+			public int X;
+			public int Y;
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
+		private struct RECT
+		{
+			public int Left;
+			public int Top;
+			public int Right;
+			public int Bottom;
+		}
+
 		[DllImport("user32.dll")]
 		private static extern bool IsWindow(IntPtr hWnd);
 
@@ -196,6 +296,15 @@ namespace AdvancedKeybinds.Patches
 
 		[DllImport("user32.dll")]
 		private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+		[DllImport("user32.dll")]
+		private static extern bool GetCursorPos(out POINT lpPoint);
+
+		[DllImport("user32.dll")]
+		private static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+		[DllImport("user32.dll")]
+		private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
 		[DllImport("kernel32.dll")]
 		private static extern uint GetCurrentProcessId();

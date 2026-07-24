@@ -15,8 +15,10 @@ namespace AdvancedKeybinds.Patches
 	{
 		private const uint MAPVK_VK_TO_VSC_EX = 0;
 		private const uint VK_SHIFT = 0x10;
+		private const uint VK_CANCEL = 0x03;
+		private const uint VK_PAUSE = 0x13;
+		private const uint VK_NUMLOCK = 0x90;
 		private const ushort SC_CAPITAL = 0x3A;
-		private const ushort SC_NUMLOCK = 0x45;
 		private const ushort SC_SCROLL = 0x46;
 
 		private static readonly HashSet<string> PendingEdges = new(StringComparer.OrdinalIgnoreCase);
@@ -77,14 +79,29 @@ namespace AdvancedKeybinds.Patches
 				if (!down || wasDown)
 					continue;
 
+				// Pause/Break map to scan 0x45 (same as NumLock). Do not emit a NumLock toggle edge.
+				if (vk == (int)VK_PAUSE || vk == (int)VK_CANCEL)
+				{
+					if (AkDiag.Enabled) AkDiag.Log($"KeyState Pause/Break edge (not NumLock) vk=0x{vk:X2}");
+					if (!IsModifierVk(vk))
+						_hadOtherKeyEdge = true;
+					continue;
+				}
+
+				// NumLock only from VK_NUMLOCK — never from MapVirtualKey scan 0x45 alone.
+				string token;
 				uint scan = MapVirtualKeyEx((uint)vk, MAPVK_VK_TO_VSC_EX, layout) & 0xFF;
-				string token = ScanToToggleToken(scan);
+				if (vk == (int)VK_NUMLOCK)
+					token = "NumLock";
+				else
+					token = ScanToToggleToken(scan);
+
 				if (token != null)
 				{
 					if (!PendingEdges.Add(token))
 						continue;
 
-					AkDiag.Log($"KeyState toggle edge token={token} vk=0x{vk:X2} scan=0x{scan:X2}");
+					if (AkDiag.Enabled) AkDiag.Log($"KeyState toggle edge token={token} vk=0x{vk:X2} scan=0x{scan:X2}");
 					continue;
 				}
 
@@ -97,11 +114,16 @@ namespace AdvancedKeybinds.Patches
 
 		private static void PollImeConversionEdge()
 		{
-			if (_hadOtherKeyEdge || IsShiftDown())
-				return;
-
 			if (!TryReadImeConversion(out int conversion))
+			{
+				if (_imeReady)
+				{
+					_imeReady = false;
+					if (AkDiag.Enabled) AkDiag.Log("IME→Caps skip reason=immFail");
+				}
+
 				return;
+			}
 
 			if (!_imeReady)
 			{
@@ -114,15 +136,35 @@ namespace AdvancedKeybinds.Patches
 				return;
 
 			_prevImeConversion = conversion;
+
+			if (_hadOtherKeyEdge)
+			{
+				if (AkDiag.Enabled) AkDiag.Log("IME→Caps skip reason=otherKeyEdge conv=0x" + conversion.ToString("X"));
+				return;
+			}
+
+			if (IsShiftDown())
+			{
+				if (AkDiag.Enabled) AkDiag.Log("IME→Caps skip reason=shift conv=0x" + conversion.ToString("X"));
+				return;
+			}
+
+			// 「半角／全角」 changes Imm conversion; do not treat that as CapsLock.
+			if (WindowsKeySuppressor.WasRecentHankakuZenkaku())
+			{
+				if (AkDiag.Enabled) AkDiag.Log("IME→Caps skip reason=hankaku/zenkaku conv=0x" + conversion.ToString("X"));
+				return;
+			}
+
 			if (!PendingEdges.Add("CapsLock"))
 				return;
 
-			AkDiag.Log("JP IME conversion edge mapped to CapsLock conv=0x" + conversion.ToString("X"));
+			if (AkDiag.Enabled) AkDiag.Log("JP IME conversion edge mapped to CapsLock conv=0x" + conversion.ToString("X"));
 		}
 
+		// Scan 0x45 intentionally omitted — Pause/Break share it; NumLock is VK-only above.
 		private static string ScanToToggleToken(uint scan) => scan switch {
 			SC_CAPITAL => "CapsLock",
-			SC_NUMLOCK => "NumLock",
 			SC_SCROLL => BindingRestrictions.ScrollLockToken,
 			_ => null,
 		};

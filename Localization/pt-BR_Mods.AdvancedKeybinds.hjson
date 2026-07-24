@@ -2,28 +2,177 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: Abrir configuracoes
 	OpenKeybindMenu.DisplayName: Abrir controles
 	OpenModConfigMenu.DisplayName: Abrir configuracao de mods
+	CycleHoldTierHudAnchor.DisplayName: Alternar HUD de Hold
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: Configuracoes
+
+		HoldTierHudCustomPositionX: {
+			Label: Posição personalizada X da barra Hold
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Posição personalizada Y da barra Hold
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: Pés
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: Mouse
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: Personalizado
+			Tooltip: Ative « Permitir arrastar » e clique do meio (pressionar a roda) na barra para mover
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: Teclas especiais / controle de UI
+
+		Suppress: {
+			Label: Suprimir tecla Windows
+			Tooltip: Mantenha ligado se você vincular a tecla Windows
+		}
+
+		SuppressDebugUi: {
+			Label: Suprimir atalhos de UI de depuração do Terraria
+			Tooltip: Impede que a UI especial do Terraria abra com F7, F8, F10 e F11. As teclas ainda podem ser usadas para binds e ações do mod.
+		}
+	}
+
+	Guide: {
+		NotesHeader: Travar cursor na janela
+
+		CursorConfineToggle: {
+			Label: Confinar cursor à janela
+			Tooltip: O cursor do mouse não pode sair da janela do jogo. Você também pode alternar com o atalho oculto [c/FF9B00:Ctrl+Shift+Alt+M]
+		}
+
+		CursorConfineOnLoad: {
+			Label: Ativar automaticamente no próximo carregamento do mod
+			Tooltip: Ligado: iniciar com travamento no próximo carregamento. Desligado: iniciar sem travamento no próximo carregamento
+		}
+	}
+
+	HoldTierHud: {
+		Header: Barra de Hold ao soltar
+
+		Enabled: {
+			Label: Mostrar barra de Hold
+			Tooltip: Ao segurar uma tecla com 2+ Holds ao soltar, mostra uma barra de carga
+		}
+
+		AllowDrag: {
+			Label: Permitir arrastar
+			Tooltip: Quando a posição da barra for Personalizado, você pode clicar com o botão do meio para agarrá-la e movê-la.
+		}
+
+		CustomGaugeHoverTip: Ative « Permitir arrastar » e clique do meio (pressionar a roda) na barra para mover
+
+		Anchor: {
+			Label: Posição da barra
+			Tooltip: Pés, mouse ou personalizado (ative Permitir arrastar para definir). O atalho cicla Pés → Mouse → Personalizado → Pés
+		}
+
+		BarWidth: {
+			Label: Comprimento da barra
+			Tooltip: Largura horizontal da barra em pixels (150–500). Padrão 200.
+		}
+
+		Color: {
+			Label: Cor da barra
+			Tooltip: Controles Vermelho / Verde / Azul
+		}
+
+		CustomPositionX: {
+			Label: Posição personalizada X
+			Tooltip: Coordenada horizontal na tela da âncora personalizada. Definida automaticamente ao arrastar a barra. -1 = ainda não definida.
+		}
+
+		CustomPositionY: {
+			Label: Posição personalizada Y
+			Tooltip: Coordenada vertical na tela da âncora personalizada. Definida automaticamente ao arrastar a barra. -1 = ainda não definida.
+		}
+	}
+
+	ColorChannel: {
+		Red.Label: Vermelho
+		Green.Label: Verde
+		Blue.Label: Azul
+		Alpha.Label: Alfa
+	}
+}
+
+Hints.WinKeySuppress: Abra as configurações do Advanced Keybinds e verifique a supressão da tecla Windows
+
+CursorConfine: {
+	Enabled: Travamento do cursor LIGADO
+	Disabled: Travamento do cursor DESLIGADO
+	WindowsOnly: Travar o cursor na janela esta disponivel apenas no Windows
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: Quando o cursor estiver selecionando um nome de ação, clique com o botão direito para deixar sem atribuição (confirmação), clique do meio para restaurar o padrão
+		ConfirmUnsetHover: Clique direito de novo para limpar
+	}
+
 	Combo: {
 		Press: pressione uma tecla...
 		Empty: (vazio)
-		Unset: (nao definido)
+		Unset: (não definido)
 		Clear: Limpar
 		Undo: Desfazer
 		Save: Salvar
-		HintLine1: Clique com o botao esquerdo em um slot e pressione uma tecla ou botao do mouse.
-		HintLine2: Passe o cursor sobre um slot e clique com o botao direito para limpar.
-		HintLine3: Hold so pode ser ativado para entradas de uma unica tecla.
-		HintLine4: Ajuste o tempo de pressionamento com o controle ou a caixa numerica.
+		HintLine1: Clique esquerdo em um slot e depois pressione uma tecla ou botão do mouse.
+		HintLine2: Hold apenas com 1 tecla.
+		HintLine3: Passe o cursor sobre um slot e clique direito para limpar a vinculação.
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
-		HoldWhileHeldHint: enquanto segura
+		HoldWhileHeldHint: enquanto pressionado
 		HoldOnReleaseTitle: Hold
 		HoldOnReleaseHint: ao soltar
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
-		RejectLeftClickOnly: Vincular só o clique esquerdo? Salve de novo para confirmar.
+		HoldMsInputTooltip: Digite um valor de 10～10000
 		ConfirmLeftClickOnly: Vincular só o clique esquerdo? Salve de novo para confirmar.
+		KeyInfoSelectHint: Selecione uma tecla
+		KeyInfoSelectGuide: Escolher uma tecla
+		KeyInfoCurrent: Tecla original
+		KeyInfoDisplay: Nome exibido
+		KeyInfoDefault: Nome padrão
+		KeyInfoScan: ScanCode
+		KeyInfoNone: nenhum
+		KeyInfoPresent: presente
+		KeyInfoNamePlaceholder: Alterar nome exibido da tecla
+		KeyInfoPressHint: Pressione uma tecla
+		KeyInfoAwaitHeader: Tecla a alterar
+		KeyInfoNameGuideLine1: Novo nome exibido
+		KeyInfoNameGuideLine2: Digite o texto aqui
+		KeyInfoNameGuideLine3: Enter para confirmar
+		KeyInfoResetDisplays: Redefinir nomes exibidos
+		KeyInfoResetDisplaysLine1: Redefinir todos os
+		KeyInfoResetDisplaysLine2: nomes exibidos
+		KeyInfoResetDisplaysConfirm: Redefinir todos os nomes exibidos personalizados para o padrão?
+		KeyInfoDisplayRestored: Nome exibido {0} restaurado para {1}
+		SlotOriginalKey: Original: {0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: Na sua direção
+		MouseWheelDown: Para longe
 	}
 }

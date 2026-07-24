@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using AdvancedKeybinds.Core;
 using Terraria.GameInput;
 
 namespace AdvancedKeybinds.Binding
@@ -8,6 +9,10 @@ namespace AdvancedKeybinds.Binding
 	/// <summary>
 	/// Reads and writes vanilla's own key configuration for the right slot's plain single-key taps.
 	/// The new combo panel never starts a vanilla listen, so no listen-state juggling is needed here.
+	/// Advanced-owned bindings write non-firing <see cref="AdvancedVanillaOwnershipMarker"/> entries
+	/// so ModKeybind.GetAssignedKeys stays non-empty without dual-firing through vanilla PlayerInput.
+	/// Mutations always touch Keyboard and KeyboardUI when present — other mods often EnsureDefault
+	/// both modes; writing only Keyboard left UI-mode Mouse3/empty residues after load.
 	/// </summary>
 	internal static class VanillaRebindHelper
 	{
@@ -39,6 +44,110 @@ namespace AdvancedKeybinds.Binding
 			return false;
 		}
 
+		/// <summary>
+		/// Keyboard + KeyboardUI configs (when present). Used for writes so both modes stay consistent.
+		/// </summary>
+		private static bool TryGetWritableKeyboardConfigs(List<KeyConfiguration> configs)
+		{
+			configs.Clear();
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null)
+				return false;
+
+			KeyConfiguration keyboard = null;
+			if (profile.InputModes.TryGetValue(InputMode.Keyboard, out keyboard)
+				&& keyboard?.KeyStatus != null)
+				configs.Add(keyboard);
+
+			if (profile.InputModes.TryGetValue(InputMode.KeyboardUI, out KeyConfiguration keyboardUi)
+				&& keyboardUi?.KeyStatus != null
+				&& !ReferenceEquals(keyboardUi, keyboard))
+				configs.Add(keyboardUi);
+
+			if (configs.Count > 0)
+				return true;
+
+			foreach (KeyValuePair<InputMode, KeyConfiguration> pair in profile.InputModes)
+			{
+				if (pair.Value?.KeyStatus == null)
+					continue;
+				configs.Add(pair.Value);
+				return true;
+			}
+
+			return false;
+		}
+
+		private static readonly List<KeyConfiguration> WritableScratch = new(2);
+
+		private static void WriteKeyStatusList(string trigger, IReadOnlyList<string> entries)
+		{
+			if (!TryGetWritableKeyboardConfigs(WritableScratch))
+				return;
+
+			for (int c = 0; c < WritableScratch.Count; c++)
+			{
+				KeyConfiguration config = WritableScratch[c];
+				if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys) || keys == null)
+				{
+					keys = new List<string>();
+					config.KeyStatus[trigger] = keys;
+				}
+
+				keys.Clear();
+				if (entries == null)
+					continue;
+				for (int i = 0; i < entries.Count; i++)
+				{
+					string entry = entries[i];
+					if (!string.IsNullOrEmpty(entry))
+						keys.Add(entry);
+				}
+			}
+
+			NotifyBindingChanged();
+		}
+
+		/// <summary>True when CurrentProfile has at least one writable keyboard KeyConfiguration.</summary>
+		public static bool IsProfileReady()
+			=> TryGetWritableKeyboardConfigs(WritableScratch);
+
+		/// <summary>
+		/// Zero-alloc: Keyboard (+ KeyboardUI when present) KeyStatus matches ownership for the given slots.
+		/// </summary>
+		public static bool AssignedOwnershipMatchesSlots(
+			string trigger,
+			bool hold,
+			string slot1,
+			string slot2,
+			string slot3)
+		{
+			if (string.IsNullOrEmpty(trigger) || !TryGetWritableKeyboardConfigs(WritableScratch))
+				return false;
+
+			for (int c = 0; c < WritableScratch.Count; c++)
+			{
+				KeyConfiguration config = WritableScratch[c];
+				config.KeyStatus.TryGetValue(trigger, out List<string> keys);
+				if (!BindingVanillaOwnershipSync.MatchesOwnershipFromSlots(keys, hold, slot1, slot2, slot3))
+					return false;
+			}
+
+			return true;
+		}
+
+		/// <summary>
+		/// Compares Keyboard KeyStatus to expected entries without allocating (missing/empty/None ≡ empty expected).
+		/// </summary>
+		public static bool AssignedKeysMatchExpected(string trigger, IReadOnlyList<string> expected)
+		{
+			if (string.IsNullOrEmpty(trigger) || !TryGetBindingConfiguration(out KeyConfiguration config))
+				return false;
+
+			config.KeyStatus.TryGetValue(trigger, out List<string> keys);
+			return BindingVanillaOwnershipSync.MatchesExpectedKeyStatus(keys, expected);
+		}
+
 		/// <summary>Returns the first vanilla-assigned key for an action, or null if unset.</summary>
 		public static string GetAssignedKey(string trigger)
 		{
@@ -51,58 +160,116 @@ namespace AdvancedKeybinds.Binding
 			return null;
 		}
 
-		public static void ClearVanillaBinding(string trigger)
+		/// <summary>Returns an independent copy of every vanilla key assigned to an action.</summary>
+		public static List<string> GetAssignedKeysSnapshot(string trigger)
 		{
 			if (string.IsNullOrEmpty(trigger) || !TryGetBindingConfiguration(out KeyConfiguration config))
-				return;
+				return new List<string>();
 
-			if (config.KeyStatus.TryGetValue(trigger, out List<string> keys))
-			{
-				keys.Clear();
-				NotifyBindingChanged();
-			}
+			if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys) || keys == null)
+				return new List<string>();
+
+			return new List<string>(keys);
 		}
 
-		public static void AssignVanillaBinding(string trigger, string key)
+		/// <summary>Human-readable vanilla KeyStatus list for diagnostics; "(unset)" when empty/missing.</summary>
+		public static string FormatAssignedKeys(string trigger)
 		{
-			if (string.IsNullOrEmpty(trigger) || string.IsNullOrEmpty(key) || !TryGetBindingConfiguration(out KeyConfiguration config))
+			if (string.IsNullOrEmpty(trigger) || !TryGetBindingConfiguration(out KeyConfiguration config))
+				return "(unset)";
+
+			if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys) || keys == null || keys.Count == 0)
+				return "(unset)";
+
+			return string.Join("+", keys);
+		}
+
+		public static void ClearVanillaBinding(string trigger, string reason = null)
+		{
+			if (string.IsNullOrEmpty(trigger))
 				return;
 
-			if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys))
-			{
-				keys = new List<string>();
-				config.KeyStatus[trigger] = keys;
-			}
+#if AK_DIAGNOSTICS
+			string before = FormatAssignedKeys(trigger);
+#endif
+			WriteKeyStatusList(trigger, Array.Empty<string>());
+#if AK_DIAGNOSTICS
+			BindingMutationDiag.LogVanillaMutation(trigger, before, FormatAssignedKeys(trigger), reason ?? "ClearVanillaBinding");
+#endif
+		}
 
-			keys.Clear();
-			keys.Add(key);
-			NotifyBindingChanged();
+		/// <summary>
+		/// Writes advanced-ownership markers into KeyStatus (creates the entry if missing).
+		/// Markers are not Keys/Mouse names, so vanilla will not activate them; AK owns firing.
+		/// </summary>
+		public static void AssignAdvancedOwnershipMarkers(
+			string trigger,
+			IReadOnlyList<string> bindingKeys,
+			string reason = null)
+		{
+			if (string.IsNullOrEmpty(trigger))
+				return;
+
+#if AK_DIAGNOSTICS
+			string before = FormatAssignedKeys(trigger);
+#endif
+			List<string> markers = AdvancedVanillaOwnershipMarker.BuildMarkers(bindingKeys);
+			WriteKeyStatusList(trigger, markers);
+#if AK_DIAGNOSTICS
+			BindingMutationDiag.LogVanillaMutation(
+				trigger,
+				before,
+				FormatAssignedKeys(trigger),
+				reason ?? "AssignAdvancedOwnershipMarkers");
+#endif
+		}
+
+		public static void AssignVanillaBinding(string trigger, string key, string reason = null)
+		{
+			if (string.IsNullOrEmpty(trigger) || string.IsNullOrEmpty(key))
+				return;
+
+#if AK_DIAGNOSTICS
+			string before = FormatAssignedKeys(trigger);
+#endif
+			WriteKeyStatusList(trigger, new[] { key });
+#if AK_DIAGNOSTICS
+			BindingMutationDiag.LogVanillaMutation(trigger, before, FormatAssignedKeys(trigger), reason ?? "AssignVanillaBinding");
+#endif
+		}
+
+		/// <summary>Restores the complete vanilla key list captured before a controls-screen edit.</summary>
+		public static void RestoreAssignedKeys(string trigger, IReadOnlyList<string> restoreKeys, string reason = null)
+		{
+			if (string.IsNullOrEmpty(trigger))
+				return;
+
+#if AK_DIAGNOSTICS
+			string before = FormatAssignedKeys(trigger);
+#endif
+			WriteKeyStatusList(trigger, restoreKeys ?? Array.Empty<string>());
+#if AK_DIAGNOSTICS
+			BindingMutationDiag.LogVanillaMutation(trigger, before, FormatAssignedKeys(trigger), reason ?? "RestoreAssignedKeys");
+#endif
 		}
 
 		/// <summary>
 		/// Restores <paramref name="trigger"/> to the keys stored in <see cref="PlayerInput.OriginalProfiles"/>
 		/// (same source as the per-row / profile defaults). Clears the list when the original had none.
 		/// </summary>
-		public static void ResetVanillaBindingToDefault(string trigger)
+		public static void ResetVanillaBindingToDefault(string trigger, string reason = null)
 		{
-			if (string.IsNullOrEmpty(trigger) || !TryGetBindingConfiguration(out KeyConfiguration config))
+			if (string.IsNullOrEmpty(trigger) || !IsProfileReady())
 				return;
 
-			if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys))
-				return;
-
-			keys.Clear();
+#if AK_DIAGNOSTICS
+			string before = FormatAssignedKeys(trigger);
+#endif
 			List<string> defaults = TryGetOriginalKeys(trigger);
-			if (defaults != null)
-			{
-				foreach (string key in defaults)
-				{
-					if (!string.IsNullOrEmpty(key))
-						keys.Add(key);
-				}
-			}
-
-			NotifyBindingChanged();
+			WriteKeyStatusList(trigger, defaults ?? (IReadOnlyList<string>)Array.Empty<string>());
+#if AK_DIAGNOSTICS
+			BindingMutationDiag.LogVanillaMutation(trigger, before, FormatAssignedKeys(trigger), reason ?? "ResetVanillaBindingToDefault");
+#endif
 		}
 
 		private static List<string> TryGetOriginalKeys(string trigger)

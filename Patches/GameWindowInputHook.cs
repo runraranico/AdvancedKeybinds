@@ -4,14 +4,18 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Core;
+using AdvancedKeybinds.Diagnostics;
 using AdvancedKeybinds.UI;
 using Terraria;
 
 namespace AdvancedKeybinds.Patches
 {
 	/// <summary>
-	/// Chains the game window WndProc to observe WM_KEYDOWN, WM_INPUT, and WM_IME_NOTIFY.
-	/// JP Caps Lock alone often never reaches WH_KEYBOARD_LL but may still arrive here.
+	/// Chains the game window WndProc. Keyboard acquisition uses only Microsoft keystroke
+	/// messages (WM_KEYDOWN/UP, WM_SYSKEYDOWN/UP) parsed per Keyboard Input Overview.
+	/// WM_INPUT / IME notify are not used as key-acquisition sources when
+	/// <see cref="Win32KeyboardAcquisitionPolicy.KeystrokeMessagesOnly"/> is true.
 	/// </summary>
 	internal static class GameWindowInputHook
 	{
@@ -23,6 +27,8 @@ namespace AdvancedKeybinds.Patches
 		private const int WM_HOTKEY = 0x0312;
 		private const int SC_KEYMENU = 0xF100;
 		private const int WM_INPUT = 0x00FF;
+		private const int WM_MOUSEWHEEL = 0x020A;
+		private const int WM_MOUSEHWHEEL = 0x020E;
 		private const int WM_IME_NOTIFY = 0x0282;
 		private const int IMN_SETCONVERSIONMODE = 0x0006;
 		private const uint RID_INPUT = 0x10000003;
@@ -34,7 +40,11 @@ namespace AdvancedKeybinds.Patches
 		private const ushort SC_CAPITAL = 0x3A;
 		private const ushort VK_CAPITAL = 0x14;
 		private const ushort SC_NUMLOCK = 0x45;
+		private const ushort VK_NUMLOCK = 0x90;
 		private const ushort SC_SCROLL = 0x46;
+		private const ushort SC_HIRAGANA = 0x70;
+		private const ushort VK_KANA = 0x15;
+		private const ushort VK_OEM_COPY = 0xF2;
 		private const uint VK_LWIN = 0x5B;
 		private const uint VK_RWIN = 0x5C;
 		private const uint VK_SHIFT = 0x10;
@@ -160,7 +170,7 @@ namespace AdvancedKeybinds.Patches
 
 				if (_wndProcInstalled && ShouldRehookForeground())
 				{
-					AkDiag.Log("GameWindowInputHook rehooking foreground hwnd was=0x" + _hookedHwnd.ToInt64().ToString("X"));
+					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook rehooking foreground hwnd was=0x" + _hookedHwnd.ToInt64().ToString("X"));
 					RestoreWndProc();
 					_wndProcInstalled = false;
 					_rawInputRegistered = false;
@@ -186,7 +196,7 @@ namespace AdvancedKeybinds.Patches
 				if (now - _lastDeferredLogMs > 5000)
 				{
 					_lastDeferredLogMs = now;
-					AkDiag.Log("GameWindowInputHook deferred: game window handle not ready.");
+					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook deferred: game window handle not ready.");
 				}
 			}
 		}
@@ -250,6 +260,10 @@ namespace AdvancedKeybinds.Patches
 			PendingEdges.Clear();
 			return edges;
 		}
+
+		/// <summary>Drops queued toggle edges without consuming them (capture begin / focus loss).</summary>
+		public static void ClearPendingEdges()
+			=> PendingEdges.Clear();
 
 		private static List<IntPtr> CollectWindowCandidates()
 		{
@@ -344,7 +358,7 @@ namespace AdvancedKeybinds.Patches
 				IntPtr previous = SetWindowLongPtr(target, GWLP_WNDPROC, proc);
 				if (previous == IntPtr.Zero)
 				{
-					AkDiag.Log("GameWindowInputHook SetWindowLongPtr failed hwnd=" + target + " err=" + Marshal.GetLastWin32Error());
+					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook SetWindowLongPtr failed hwnd=" + target + " err=" + Marshal.GetLastWin32Error());
 					return false;
 				}
 
@@ -352,13 +366,15 @@ namespace AdvancedKeybinds.Patches
 				_originalWndProc = previous;
 				_wndProcInstalled = true;
 				TryRegisterRawInput(target);
-				AkDiag.Log("GameWindowInputHook installed hwnd=" + target + " raw=" + _rawInputRegistered);
+				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook installed hwnd=" + target + " raw=" + _rawInputRegistered);
+#if AK_DIAGNOSTICS
 				StartMenuDiag.LogInstall("wndproc installed hwnd=0x" + target.ToInt64().ToString("X") + " rawMode=" + _rawInputMode);
+#endif
 				return true;
 			}
 			catch (Exception ex)
 			{
-				AkDiag.Log("GameWindowInputHook install failed hwnd=" + hwnd + ": " + ex.Message);
+				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook install failed hwnd=" + hwnd + ": " + ex.Message);
 				RestoreWndProc();
 				return false;
 			}
@@ -399,14 +415,20 @@ namespace AdvancedKeybinds.Patches
 			int cbSize = Marshal.SizeOf<RAWINPUTDEVICE>();
 			RemoveKeyboardRawInput(cbSize);
 
-			(string mode, uint flags, IntPtr target)[] strategies = {
-				("INPUT+NOHOTKEYS", RIDEV_INPUT | RIDEV_NOHOTKEYS, hwnd),
-				("NOHOTKEYS", RIDEV_NOHOTKEYS, hwnd),
-				("INPUT+NOHOTKEYS@global", RIDEV_INPUT | RIDEV_NOHOTKEYS, IntPtr.Zero),
-				("NOHOTKEYS@global", RIDEV_NOHOTKEYS, IntPtr.Zero),
-				("INPUT", RIDEV_INPUT, hwnd),
-				("GLOBAL", 0, IntPtr.Zero),
-			};
+			bool wantNoHotkeys = WindowsKeySuppressor.IsWinKeySuppressionEnabled();
+			(string mode, uint flags, IntPtr target)[] strategies = wantNoHotkeys
+				? new (string, uint, IntPtr)[] {
+					("INPUT+NOHOTKEYS", RIDEV_INPUT | RIDEV_NOHOTKEYS, hwnd),
+					("NOHOTKEYS", RIDEV_NOHOTKEYS, hwnd),
+					("INPUT+NOHOTKEYS@global", RIDEV_INPUT | RIDEV_NOHOTKEYS, IntPtr.Zero),
+					("NOHOTKEYS@global", RIDEV_NOHOTKEYS, IntPtr.Zero),
+					("INPUT", RIDEV_INPUT, hwnd),
+					("GLOBAL", 0, IntPtr.Zero),
+				}
+				: new (string, uint, IntPtr)[] {
+					("INPUT", RIDEV_INPUT, hwnd),
+					("GLOBAL", 0, IntPtr.Zero),
+				};
 
 			List<int> errors = new();
 			foreach ((string mode, uint flags, IntPtr target) in strategies)
@@ -425,17 +447,30 @@ namespace AdvancedKeybinds.Patches
 				{
 					_rawInputRegistered = true;
 					_rawInputMode = mode;
-					AkDiag.Log("GameWindowInputHook raw input registered mode=" + mode + " hwnd=" + target + " cb=" + cbSize);
+					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook raw input registered mode=" + mode + " hwnd=" + target + " cb=" + cbSize);
 					return;
 				}
 
 				errors.Add(err);
-				AkDiag.Log("GameWindowInputHook raw input failed mode=" + mode + " err=" + err);
+				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook raw input failed mode=" + mode + " err=" + err);
 			}
 
 			_rawInputRegistered = false;
 			_rawInputMode = "FAILED:" + string.Join("/", errors);
-			AkDiag.Log("GameWindowInputHook raw input registration failed err=" + _rawInputMode);
+			if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook raw input registration failed err=" + _rawInputMode);
+		}
+
+		/// <summary>Re-apply raw-input flags after Win-suppression config changes.</summary>
+		internal static void RefreshRawInputForWinSuppressSetting()
+		{
+			if (!_wndProcInstalled)
+				return;
+
+			IntPtr hwnd = _hookedHwnd;
+			if (hwnd == IntPtr.Zero)
+				hwnd = GameWindowHandle.TryGet(preferForeground: true);
+
+			TryRegisterRawInput(hwnd);
 		}
 
 		/// <summary>
@@ -474,13 +509,13 @@ namespace AdvancedKeybinds.Patches
 				inputOnly.dwFlags = 0;
 				inputOnly.hwndTarget = IntPtr.Zero;
 				if (!TryRegisterRawInputDevice(inputOnly, cbSize, out err))
-					AkDiag.Log("GameWindowInputHook temp hotkeys enable failed err=" + err);
+					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook temp hotkeys enable failed err=" + err);
 			}
 			else
 			{
 				_rawInputRegistered = true;
 				_rawInputMode = "INPUT(temp-os-hotkeys)";
-				AkDiag.Log("GameWindowInputHook temporarily enabled OS Win hotkeys for virtual-desktop chord.");
+				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook temporarily enabled OS Win hotkeys for virtual-desktop chord.");
 			}
 
 			try
@@ -496,6 +531,9 @@ namespace AdvancedKeybinds.Patches
 		private static void TryRefreshNoHotkeys()
 		{
 			if (!_wndProcInstalled || _hookedHwnd == IntPtr.Zero)
+				return;
+
+			if (!WindowsKeySuppressor.IsWinKeySuppressionEnabled())
 				return;
 
 			if (_rawInputMode.Contains("NOHOTKEYS", StringComparison.Ordinal))
@@ -517,11 +555,11 @@ namespace AdvancedKeybinds.Patches
 			if (TryRegisterRawInputDevice(device, cbSize, out int err))
 			{
 				_rawInputMode = _rawInputMode + "+NOHOTKEYS";
-				AkDiag.Log("GameWindowInputHook refreshed NOHOTKEYS hwnd=" + _hookedHwnd);
+				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook refreshed NOHOTKEYS hwnd=" + _hookedHwnd);
 			}
 			else
 			{
-				AkDiag.Log("GameWindowInputHook NOHOTKEYS refresh failed err=" + err + " mode=" + _rawInputMode);
+				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook NOHOTKEYS refresh failed err=" + err + " mode=" + _rawInputMode);
 			}
 		}
 
@@ -569,13 +607,25 @@ namespace AdvancedKeybinds.Patches
 				{
 					case WM_KEYDOWN:
 					case WM_SYSKEYDOWN:
-						HandleKeyDown(wParam, lParam);
+						HandleKeyDown(msg, wParam, lParam);
+						break;
+					case WM_KEYUP:
+					case WM_SYSKEYUP:
+						HandleKeyUp(msg, wParam, lParam);
 						break;
 					case WM_INPUT:
-						HandleRawInput(lParam);
+						// Acquisition discarded: Microsoft keystroke messages only.
+						// Still allow Win swallow / diagnostic publish without feeding held state.
+						HandleRawInputDiagnosticsOnly(lParam);
 						break;
 					case WM_IME_NOTIFY:
-						HandleImeNotify(wParam);
+						HandleImeNotifyDiagnosticsOnly(wParam);
+						break;
+					case WM_MOUSEWHEEL:
+						HandleMouseWheel(wParam);
+						break;
+					case WM_MOUSEHWHEEL:
+						HandleMouseHWheel(wParam);
 						break;
 				}
 			}
@@ -583,7 +633,9 @@ namespace AdvancedKeybinds.Patches
 			{
 			}
 
+#if AK_DIAGNOSTICS
 			StartMenuDiag.LogForwarded(msg, wParam);
+#endif
 			return CallWindowProc(_originalWndProc, hWnd, msg, wParam, lParam);
 		}
 
@@ -596,7 +648,9 @@ namespace AdvancedKeybinds.Patches
 			if (!WindowsKeySuppressor.ShouldBlockStartMenuShortcuts())
 				return false;
 
+#if AK_DIAGNOSTICS
 			StartMenuDiag.LogInstall("WndProc WM_HOTKEY swallowed");
+#endif
 			return true;
 		}
 
@@ -609,12 +663,14 @@ namespace AdvancedKeybinds.Patches
 
 			int cmd = wParam.ToInt32() & 0xFFF0;
 			bool block = WindowsKeySuppressor.ShouldBlockShellStartMenuCommand(cmd);
+#if AK_DIAGNOSTICS
 			StartMenuDiag.LogSyscmd(cmd, block, block ? "swallowed" : "suppression-off");
+#endif
 
 			if (!block)
 				return false;
 
-			AkDiag.Log("WndProc WM_SYSCOMMAND blocked cmd=0x" + cmd.ToString("X4"));
+			if (AkDiag.Enabled) AkDiag.Log("WndProc WM_SYSCOMMAND blocked cmd=0x" + cmd.ToString("X4"));
 			return true;
 		}
 
@@ -627,18 +683,20 @@ namespace AdvancedKeybinds.Patches
 				return false;
 
 			uint vk = (uint)(wParam.ToInt64() & 0xFF);
-			bool ctrl = WindowsKeySuppressor.IsControlDownForDiag();
 			if (WindowsKeySuppressor.TryApplyCtrlEscCaptureOrBlock(vk, isDown, out bool swallowCtrlEsc))
 			{
+#if AK_DIAGNOSTICS
+				bool ctrl = WindowsKeySuppressor.IsControlDownForDiag();
 				if (vk == VK_ESCAPE && ctrl)
 				{
 					string reason = swallowCtrlEsc ? "ctrl+esc" : "ctrl+esc reason=" + WindowsKeySuppressor.DescribeWhyNotBlocking();
 					StartMenuDiag.LogWndProc(msg, vk, swallowCtrlEsc, reason);
 				}
+#endif
 
 				if (swallowCtrlEsc)
 				{
-					AkDiag.Log("WndProc Ctrl+Esc blocked");
+					if (AkDiag.Enabled) AkDiag.Log("WndProc Ctrl+Esc blocked");
 					return true;
 				}
 			}
@@ -714,7 +772,9 @@ namespace AdvancedKeybinds.Patches
 			if (!WindowsKeySuppressor.TryApplyWindowsKeyBlock(vk, isDown, isUp, out bool blocked))
 				return false;
 
+#if AK_DIAGNOSTICS
 			StartMenuDiag.LogRaw(vk, isDown, blocked, blocked ? "win" : "reason=" + WindowsKeySuppressor.DescribeWhyNotBlocking());
+#endif
 
 			if (!blocked)
 				return false;
@@ -746,62 +806,202 @@ namespace AdvancedKeybinds.Patches
 			}
 		}
 
-		private static void HandleKeyDown(IntPtr wParam, IntPtr lParam)
+		private static void HandleKeyDown(uint msg, IntPtr wParam, IntPtr lParam)
 		{
-			uint vk = (uint)(wParam.ToInt64() & 0xFF);
-			uint scan = (uint)(((ulong)lParam.ToInt64() >> 16) & 0xFF);
+			Win32KeystrokeMessage.Parsed k = Win32KeystrokeMessage.Parse(wParam, lParam);
+			string messageName = msg == WM_SYSKEYDOWN ? "WM_SYSKEYDOWN" : "WM_KEYDOWN";
+			string source = messageName;
+			if (AdvancedKeybindsDiagnosticEvents.HasKeyMessageSubscribers)
+			{
+				DiagnosticEventPublisher.PublishKeyMessage(
+					messageName,
+					k.Vk,
+					k.Scan,
+					k.Extended,
+					isKeyDown: true,
+					lParam.ToInt64());
+			}
 
-			_lastKeydownScan = (ushort)scan;
+			_lastKeydownScan = k.Scan;
 			_lastKeydownScanMs = Environment.TickCount64;
 
 			if (WindowsKeySuppressor.IsSlotCapturePassthrough)
-				AkDiag.Log($"WndProc keydown vk=0x{vk:X2} scan=0x{scan:X2}");
+			{
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+						"WndProc keydown vk=0x" + k.Vk.ToString("X2")
+						+ " scan=0x" + k.Scan.ToString("X2")
+						+ " extended=" + k.Extended
+						+ " (MS keystroke parse)");
+				}
 
-			QueueScanEdge((ushort)scan, (ushort)vk, "WndProc");
+				if (AkDiag.Enabled)
+				{
+					CaptureResponsivenessDiag.NoteRawKeyDown(
+						k.Vk,
+						k.Scan,
+						k.Extended,
+						messageName,
+						k.WasKeyDown);
+				}
+			}
+
+			ApplyMicrosoftKeystroke(k, isDown: true, source);
 		}
 
-		private static void HandleRawInput(IntPtr lParam)
+		private static void HandleKeyUp(uint msg, IntPtr wParam, IntPtr lParam)
+		{
+			Win32KeystrokeMessage.Parsed k = Win32KeystrokeMessage.Parse(wParam, lParam);
+			string messageName = msg == WM_SYSKEYUP ? "WM_SYSKEYUP" : "WM_KEYUP";
+			string source = messageName;
+			if (AdvancedKeybindsDiagnosticEvents.HasKeyMessageSubscribers)
+			{
+				DiagnosticEventPublisher.PublishKeyMessage(
+					messageName,
+					k.Vk,
+					k.Scan,
+					k.Extended,
+					isKeyDown: false,
+					lParam.ToInt64());
+			}
+			if (WindowsKeySuppressor.IsSlotCapturePassthrough && AkDiag.Enabled)
+			{
+				CaptureResponsivenessDiag.NoteRawKeyUp(
+					k.Vk,
+					k.Scan,
+					k.Extended,
+					messageName);
+			}
+
+			ApplyMicrosoftKeystroke(k, isDown: false, source);
+		}
+
+		/// <summary>Single acquisition entry: Microsoft keystroke messages only.</summary>
+		private static void ApplyMicrosoftKeystroke(Win32KeystrokeMessage.Parsed k, bool isDown, string source)
+		{
+			if (WindowsKeySuppressor.IsHankakuZenkakuPhysicalKey(k.Vk, k.Scan))
+			{
+				WindowsKeySuppressor.ApplyHankakuZenkakuPhysical(k.Vk, k.Scan, isDown, source);
+				return;
+			}
+
+			if (WindowsKeySuppressor.IsKanaPhysicalKey(k.Vk, k.Scan))
+			{
+				WindowsKeySuppressor.ApplyKanaPhysical(k.Vk, k.Scan, isDown, source);
+				return;
+			}
+
+			WindowsKeySuppressor.ApplyJisIntlScan(k.Scan, isDown, source);
+			WindowsKeySuppressor.ApplyPhysicalKeyEvent(k.Vk, k.Scan, k.Extended, isDown, source);
+			if (isDown)
+				QueueScanEdge(k.Scan, (ushort)k.Vk, source);
+		}
+
+		/// <summary>
+		/// WM_INPUT is no longer an acquisition path (Microsoft keystroke messages only).
+		/// Publishes diagnostics and may swallow Win for Start-menu blocking.
+		/// </summary>
+		private static void HandleRawInputDiagnosticsOnly(IntPtr lParam)
 		{
 			if (!TryReadRawKeyboard(lParam, out RawInputData raw))
 				return;
 
-			if ((raw.keyboard.Flags & RI_KEY_BREAK) != 0)
-				return;
+			bool isUp = (raw.keyboard.Flags & RI_KEY_BREAK) != 0;
+			if (AdvancedKeybindsDiagnosticEvents.HasRawInputSubscribers)
+			{
+				DiagnosticEventPublisher.PublishRawInput(
+					raw.keyboard.VKey,
+					raw.keyboard.MakeCode,
+					raw.keyboard.Flags,
+					isUp,
+					raw.header.hDevice);
+			}
 
-			QueueScanEdge(raw.keyboard.MakeCode, raw.keyboard.VKey, "WM_INPUT");
+			// Do not call ApplyPhysicalKeyEvent / ApplyKana / ApplyJis / QueueScanEdge.
 		}
 
-		private static void HandleImeNotify(IntPtr wParam)
+		/// <summary>
+		/// IME notify is not used to synthesize CapsLock edges under keystroke-message-only policy.
+		/// </summary>
+		private static void HandleImeNotifyDiagnosticsOnly(IntPtr wParam)
 		{
 			int notify = wParam.ToInt32();
 			if (notify != IMN_SETCONVERSIONMODE)
 				return;
 
-			if (!KeyboardLayoutHelper.IsJapaneseKeyboardLayout() || IsShiftDown())
+			if (!AdvancedKeybindsDiagnosticEvents.HasImeStateSubscribers)
 				return;
 
-			long now = Environment.TickCount64;
-			if (now - _lastImeCapsEdgeMs < 100)
-				return;
+			DiagnosticEventPublisher.PublishImeState(
+				new DiagnosticImeState {
+					ImeOpen = "Unknown",
+					ConversionMode = "Changed",
+					SentenceMode = "Unknown",
+					Composing = "Unknown",
+					CandidateWindowActive = "Unknown",
+					ImeContextAvailable = "Unknown"
+				},
+				"WM_IME_NOTIFY");
 
-			if (now - _lastKeydownScanMs < 60 && _lastKeydownScan != 0 && _lastKeydownScan != SC_CAPITAL)
-				return;
+			if (WindowsKeySuppressor.WasRecentHankakuZenkaku())
+				WindowsKeySuppressor.NoteImeConversionToggleForCaptureRecovery("WM_IME_NOTIFY");
+		}
 
-			_lastImeCapsEdgeMs = now;
-			QueueToken("CapsLock", "WM_IME_NOTIFY");
+		private static void HandleMouseWheel(IntPtr wParam)
+		{
+			short delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+			MouseInputHelper.OnWin32WheelDelta(delta);
+		}
+
+		private static void HandleMouseHWheel(IntPtr wParam)
+		{
+			short delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+			MouseInputHelper.OnWin32WheelDelta(delta);
 		}
 
 		private static void QueueScanEdge(ushort makeCode, ushort vKey, string source)
 		{
-			string token = makeCode switch {
-				SC_CAPITAL => "CapsLock",
-				SC_NUMLOCK => "NumLock",
-				SC_SCROLL => BindingRestrictions.ScrollLockToken,
-				_ => vKey == 0x14 ? "CapsLock" : null,
-			};
+			// Pause/Break share make-code 0x45 with NumLock — never emit NumLock for them or bare 0x45.
+			if (WindowsKeySuppressor.IsPauseOrBreakVk(vKey))
+			{
+				if (AkDiag.Enabled) AkDiag.Log($"GameWindowInputHook skip Pause/Break as toggle make=0x{makeCode:X2} vk=0x{vKey:X2} src={source}");
+				return;
+			}
+
+			// Caps/Scroll may use scan; NumLock only when VK is NumLock (never scan 0x45 alone).
+			string token;
+			if (makeCode == SC_CAPITAL || vKey == VK_CAPITAL)
+				token = "CapsLock";
+			else if (vKey == VK_NUMLOCK)
+				token = "NumLock";
+			else if (makeCode == SC_SCROLL)
+				token = BindingRestrictions.ScrollLockToken;
+			else
+				token = null;
+
+			if (token == null && makeCode == SC_NUMLOCK)
+			{
+				if (AkDiag.Enabled) AkDiag.Log($"GameWindowInputHook skip scan45 without VK_NUMLOCK vk=0x{vKey:X2} src={source}");
+				return;
+			}
+
+			// JP kana is NLS (often no sticky GetAsyncKeyState) — make/break + edge latch.
+			if (token == null
+				&& (makeCode == SC_HIRAGANA || vKey == VK_OEM_COPY || vKey == VK_KANA))
+			{
+				WindowsKeySuppressor.ApplyKanaPhysical(
+					vKey,
+					makeCode,
+					isDown: true,
+					source + " make=0x" + makeCode.ToString("X2") + " vk=0x" + vKey.ToString("X2"));
+				return;
+			}
 
 			if (token == null)
+			{
 				return;
+			}
 
 			// Shift+Caps on JP keyboards toggles OS Caps Lock (vk=0x14). Do not treat that LED-on
 			// state as a held combo key on later frames.
@@ -816,11 +1016,8 @@ namespace AdvancedKeybinds.Patches
 			if (!PendingEdges.Add(token))
 				return;
 
-			AkDiag.Log("GameWindowInputHook edge " + source + " token=" + token);
+			if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook edge " + source + " token=" + token);
 		}
-
-		private static bool IsShiftDown()
-			=> (GetAsyncKeyState((int)VK_SHIFT) & 0x8000) != 0;
 
 	}
 }

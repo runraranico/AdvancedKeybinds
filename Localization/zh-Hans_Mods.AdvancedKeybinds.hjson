@@ -2,9 +2,136 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: 打开设置
 	OpenKeybindMenu.DisplayName: 打开控制
 	OpenModConfigMenu.DisplayName: 打开模组配置
+	CycleHoldTierHudAnchor.DisplayName: 切换 Hold HUD
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: 设置
+
+		HoldTierHudCustomPositionX: {
+			Label: Hold 量条自定义位置 X
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Hold 量条自定义位置 Y
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: 脚下
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: 鼠标
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: 自定义
+			Tooltip: 启用“允许拖动”后，用中键（按下滚轮）点击量条即可移动
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: 特殊按键与 UI 控制
+
+		Suppress: {
+			Label: 抑制 Windows 键
+			Tooltip: 若绑定 Windows 键，请保持开启
+		}
+
+		SuppressDebugUi: {
+			Label: 屏蔽 Terraria 调试 UI 快捷键
+			Tooltip: 防止用 F7、F8、F10、F11 打开 Terraria 的特殊 UI。这些键仍可用于键位绑定和模组操作。
+		}
+	}
+
+	Guide: {
+		NotesHeader: 将光标锁定到窗口
+
+		CursorConfineToggle: {
+			Label: 将光标限制在窗口内
+			Tooltip: 鼠标光标将无法移出游戏窗口画面。也可以通过隐藏快捷键 [c/FF9B00:Ctrl+Shift+Alt+M] 切换
+		}
+
+		CursorConfineOnLoad: {
+			Label: 下次加载模组时自动启用
+			Tooltip: 开启：下次加载模组时以光标锁定开启状态开始。关闭：下次加载时以关闭状态开始
+		}
+	}
+
+	HoldTierHud: {
+		Header: 松开时 Hold 量条
+
+		Enabled: {
+			Label: 显示 Hold 量条
+			Tooltip: 按住带有 2 个及以上“松开时”Hold 的键时，显示充能量条
+		}
+
+		AllowDrag: {
+			Label: 允许拖动
+			Tooltip: 当量条位置为自定义时，可用中键抓住并移动量条。
+		}
+
+		CustomGaugeHoverTip: 启用“允许拖动”后，用中键（按下滚轮）点击量条即可移动
+
+		Anchor: {
+			Label: 量条位置
+			Tooltip: 脚下、鼠标或自定义（需启用允许拖动）。快捷键循环：脚下 → 鼠标 → 自定义 → 脚下
+		}
+
+		BarWidth: {
+			Label: 量条长度
+			Tooltip: 水平条宽度（像素，150–500）。默认 200。
+		}
+
+		Color: {
+			Label: 量条颜色
+			Tooltip: 红 / 绿 / 蓝 滑块
+		}
+
+		CustomPositionX: {
+			Label: 自定义位置 X
+			Tooltip: 自定义锚点的屏幕横坐标。拖动量条时自动设定。-1 = 尚未设定。
+		}
+
+		CustomPositionY: {
+			Label: 自定义位置 Y
+			Tooltip: 自定义锚点的屏幕纵坐标。拖动量条时自动设定。-1 = 尚未设定。
+		}
+	}
+
+	ColorChannel: {
+		Red.Label: 红
+		Green.Label: 绿
+		Blue.Label: 蓝
+		Alpha.Label: 透明度
+	}
+}
+
+Hints.WinKeySuppress: 打开 Advanced Keybinds 设置并检查 Windows 键抑制
+
+CursorConfine: {
+	Enabled: 光标锁定 开
+	Disabled: 光标锁定 关
+	WindowsOnly: 将光标锁定到窗口仅支持 Windows
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: 光标选中操作名时，右键设为未设置（需确认），中键恢复默认
+		ConfirmUnsetHover: 再右键一次设为未设置
+	}
+
 	Combo: {
 		Press: 按下按键...
 		Empty: (空)
@@ -13,9 +140,8 @@ UI: {
 		Undo: 撤销
 		Save: 保存
 		HintLine1: 左键点击槽位，然后按下按键或鼠标按钮。
-		HintLine2: 将光标移到槽位上并右键点击以清除。
-		HintLine3: Hold 设置只能对单键输入启用。
-		HintLine4: 用滑块或数字框调整按住时间。
+		HintLine2: Hold 仅限 1 键时可用。
+		HintLine3: 将光标移到槽位上并右键点击以清除设置。
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 按住时
@@ -23,7 +149,30 @@ UI: {
 		HoldOnReleaseHint: 松开时
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
-		RejectLeftClickOnly: 要单独绑定左键吗？再按一次保存以确认。
+		HoldMsInputTooltip: 可输入 10～10000
 		ConfirmLeftClickOnly: 要单独绑定左键吗？再按一次保存以确认。
+		KeyInfoSelectHint: 请选择按键
+		KeyInfoSelectGuide: 选择按键
+		KeyInfoCurrent: 原始按键
+		KeyInfoDisplay: 显示名称
+		KeyInfoDefault: 默认名称
+		KeyInfoScan: ScanCode
+		KeyInfoNone: 无
+		KeyInfoPresent: 有
+		KeyInfoNamePlaceholder: 更改按键显示名称
+		KeyInfoPressHint: 请按下按键
+		KeyInfoAwaitHeader: 要更改的按键
+		KeyInfoNameGuideLine1: 新的显示名称
+		KeyInfoNameGuideLine2: 在此输入文字
+		KeyInfoNameGuideLine3: 按 Enter 确认
+		KeyInfoResetDisplays: 重置显示名称
+		KeyInfoResetDisplaysLine1: 将所有登记显示
+		KeyInfoResetDisplaysLine2: 还原为默认
+		KeyInfoResetDisplaysConfirm: 要将所有自定义按键显示名称还原为默认吗？
+		KeyInfoDisplayRestored: 已将显示名称 {0} 还原为 {1}
+		SlotOriginalKey: 原始：{0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: 朝自己滚
+		MouseWheelDown: 向外滚
 	}
 }

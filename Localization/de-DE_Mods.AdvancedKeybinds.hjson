@@ -2,9 +2,136 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: Einstellungen öffnen
 	OpenKeybindMenu.DisplayName: Steuerung öffnen
 	OpenModConfigMenu.DisplayName: Mod-Konfiguration öffnen
+	CycleHoldTierHudAnchor.DisplayName: Hold-HUD umschalten
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: Einstellungen
+
+		HoldTierHudCustomPositionX: {
+			Label: Hold-Leiste benutzerdefinierte Position X
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Hold-Leiste benutzerdefinierte Position Y
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: Füße
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: Maus
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: Benutzerdefiniert
+			Tooltip: Aktiviere „Ziehen erlauben“ und die Leiste mit Mittelklick (Mausrad drücken) verschieben
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: Spezielle Tasten / UI-Steuerung
+
+		Suppress: {
+			Label: Windows-Taste unterdrücken
+			Tooltip: Eingeschaltet lassen, wenn du die Windows-Taste belegst
+		}
+
+		SuppressDebugUi: {
+			Label: Terraria-Debug-UI-Hotkeys unterdrücken
+			Tooltip: Verhindert, dass Terrarias spezielle UI mit F7, F8, F10 und F11 geöffnet wird. Die Tasten können weiterhin für Tastenbelegungen und Mod-Aktionen verwendet werden.
+		}
+	}
+
+	Guide: {
+		NotesHeader: Mauszeiger im Fenster sperren
+
+		CursorConfineToggle: {
+			Label: Mauszeiger im Fenster halten
+			Tooltip: Der Mauszeiger kann das Spielfenster nicht verlassen. Du kannst das auch über das versteckte Kürzel [c/FF9B00:Ctrl+Shift+Alt+M] umschalten
+		}
+
+		CursorConfineOnLoad: {
+			Label: Beim nächsten Mod-Laden automatisch aktivieren
+			Tooltip: An: beim nächsten Mod-Laden mit Sperre starten. Aus: beim nächsten Laden ohne Sperre starten
+		}
+	}
+
+	HoldTierHud: {
+		Header: Hold beim Loslassen
+
+		Enabled: {
+			Label: Hold-Leiste anzeigen
+			Tooltip: Zeigt beim Halten einer Taste mit 2+ Holds beim Loslassen eine Ladeleiste
+		}
+
+		AllowDrag: {
+			Label: Ziehen erlauben
+			Tooltip: Wenn die Leistenposition auf Benutzerdefiniert steht, kannst du die Leiste per Mittelklick greifen und verschieben.
+		}
+
+		CustomGaugeHoverTip: Aktiviere „Ziehen erlauben“ und die Leiste mit Mittelklick (Mausrad drücken) verschieben
+
+		Anchor: {
+			Label: Leistenposition
+			Tooltip: Füße, Maus oder benutzerdefiniert (Ziehen erlauben aktivieren). Die Umschalttaste wechselt Füße → Maus → Benutzerdefiniert → Füße
+		}
+
+		BarWidth: {
+			Label: Leistenlänge
+			Tooltip: Breite der horizontalen Leiste in Pixeln (150–500). Standard 200.
+		}
+
+		Color: {
+			Label: Leistenfarbe
+			Tooltip: Farbe mit Rot-/Grün-/Blau-Schiebereglern
+		}
+
+		CustomPositionX: {
+			Label: Benutzerdefinierte Position X
+			Tooltip: Horizontale Bildschirmkoordinate für den benutzerdefinierten Anker. Wird beim Ziehen der Leiste automatisch gesetzt. -1 = noch nicht gesetzt.
+		}
+
+		CustomPositionY: {
+			Label: Benutzerdefinierte Position Y
+			Tooltip: Vertikale Bildschirmkoordinate für den benutzerdefinierten Anker. Wird beim Ziehen der Leiste automatisch gesetzt. -1 = noch nicht gesetzt.
+		}
+	}
+
+	ColorChannel: {
+		Red.Label: Rot
+		Green.Label: Grün
+		Blue.Label: Blau
+		Alpha.Label: Alpha
+	}
+}
+
+Hints.WinKeySuppress: Öffne die Advanced Keybinds-Einstellungen und prüfe die Windows-Taste-Unterdrückung
+
+CursorConfine: {
+	Enabled: Mauszeiger-Sperre AN
+	Disabled: Mauszeiger-Sperre AUS
+	WindowsOnly: Mauszeiger im Fenster sperren ist nur unter Windows verfügbar
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: Wenn der Cursor einen Aktionsnamen auswählt, Rechtsklick = nicht zugewiesen (Bestätigung), Mittelklick = Standard wiederherstellen
+		ConfirmUnsetHover: Nochmals Rechtsklick zum Zurücksetzen
+	}
+
 	Combo: {
 		Press: Taste drücken...
 		Empty: (leer)
@@ -13,9 +140,8 @@ UI: {
 		Undo: Rückgängig
 		Save: Speichern
 		HintLine1: Linksklick auf ein Feld, dann Taste oder Maustaste drücken.
-		HintLine2: Maus über ein Feld bewegen und Rechtsklick zum Löschen.
-		HintLine3: Hold kann nur bei Eingaben mit einer einzelnen Taste aktiviert werden.
-		HintLine4: Stelle die Haltezeit mit dem Regler oder dem Zahlenfeld ein.
+		HintLine2: Hold nur bei 1 Taste möglich.
+		HintLine3: Maus über ein Feld und Rechtsklick zum Aufheben der Belegung.
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: gehalten
@@ -23,7 +149,30 @@ UI: {
 		HoldOnReleaseHint: beim Loslassen
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
-		RejectLeftClickOnly: Linksklick allein belegen? Speichern erneut zum Bestätigen.
+		HoldMsInputTooltip: Geben Sie einen Wert von 10～10000 ein
 		ConfirmLeftClickOnly: Linksklick allein belegen? Speichern erneut zum Bestätigen.
+		KeyInfoSelectHint: Taste auswählen
+		KeyInfoSelectGuide: Taste wählen
+		KeyInfoCurrent: Originaltaste
+		KeyInfoDisplay: Anzeigename
+		KeyInfoDefault: Standardname
+		KeyInfoScan: ScanCode
+		KeyInfoNone: keine
+		KeyInfoPresent: vorhanden
+		KeyInfoNamePlaceholder: Tasten-Anzeigenamen ändern
+		KeyInfoPressHint: Taste drücken
+		KeyInfoAwaitHeader: Zu ändernde Taste
+		KeyInfoNameGuideLine1: Neuer Anzeigename
+		KeyInfoNameGuideLine2: Text hier eingeben
+		KeyInfoNameGuideLine3: Enter zum Bestätigen
+		KeyInfoResetDisplays: Anzeigenamen zurücksetzen
+		KeyInfoResetDisplaysLine1: Alle Anzeigenamen
+		KeyInfoResetDisplaysLine2: auf Standard zurück
+		KeyInfoResetDisplaysConfirm: Alle benutzerdefinierten Tasten-Anzeigenamen auf Standard zurücksetzen?
+		KeyInfoDisplayRestored: Anzeigename {0} auf {1} zurückgesetzt
+		SlotOriginalKey: Original: {0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: Zu sich
+		MouseWheelDown: Weg von sich
 	}
 }

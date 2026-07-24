@@ -2,9 +2,137 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: 설정 열기
 	OpenKeybindMenu.DisplayName: 조작 열기
 	OpenModConfigMenu.DisplayName: 모드 설정 열기
+	CycleHoldTierHudAnchor.DisplayName: Hold 게이지 전환
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: 설정
+
+		HoldTierHudCustomPositionX: {
+			Label: Hold 게이지 사용자 지정 위치 X
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Hold 게이지 사용자 지정 위치 Y
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: 발밑
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: 마우스
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: 사용자 지정
+			Tooltip: 「드래그 허용」을 켠 뒤, 게이지를 가운데 클릭(마우스 휠 누름)하여 이동
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: 특수 키·UI 제어
+
+		Suppress: {
+			Label: Windows 키 억제
+			Tooltip: Windows 키를 할당하는 경우 켜 두세요
+		}
+
+		SuppressDebugUi: {
+			Label: Terraria 디버그 UI 단축키 억제
+			Tooltip: F7, F8, F10, F11로 Terraria의 특수 UI가 열리지 않게 합니다. 키는 키 바인드와 모드 액션에 계속 사용할 수 있습니다.
+		}
+	}
+
+	Guide: {
+		NotesHeader: 창에 커서 잠금
+
+		CursorConfineToggle: {
+			Label: 커서를 창 안에 고정
+			Tooltip: 마우스 커서가 게임 창 화면 밖으로 나갈 수 없게 됩니다. 숨겨진 단축키 [c/FF9B00:Ctrl+Shift+Alt+M] 로도 전환할 수 있습니다
+		}
+
+		CursorConfineOnLoad: {
+			Label: 다음 모드 로드 시 자동으로 켜기
+			Tooltip: 켜짐: 다음 모드 로드 시 커서 고정을 켠 상태로 시작. 꺼짐: 끈 상태로 시작
+		}
+	}
+
+	HoldTierHud: {
+		Header: 뗄 때 Hold 게이지
+
+		Enabled: {
+			Label: Hold 게이지 표시
+			Tooltip: 「뗄 때」Hold가 2개 이상인 키를 누르고 있을 때 충전 게이지를 표시합니다
+		}
+
+		AllowDrag: {
+			Label: 드래그 허용
+			Tooltip: 게이지 위치가 사용자 지정이면 가운데 클릭으로 바를 잡아 이동할 수 있습니다.
+		}
+
+		CustomGaugeHoverTip: 「드래그 허용」을 켠 뒤, 게이지를 가운데 클릭(마우스 휠 누름)하여 이동
+
+		Anchor: {
+			Label: 게이지 위치
+			Tooltip: 발밑, 마우스, 사용자 지정(드래그 허용을 켜서 설정). 단축키는 발밑 → 마우스 → 사용자 지정 → 발밑 순으로 순환
+		}
+
+		BarWidth: {
+			Label: 게이지 길이
+			Tooltip: 가로 바 너비(픽셀, 150–500). 기본값 200.
+		}
+
+		Color: {
+			Label: 게이지 색
+			Tooltip: 빨강 / 초록 / 파랑 슬라이더
+		}
+
+		CustomPositionX: {
+			Label: 사용자 지정 위치 X
+			Tooltip: 사용자 지정 앵커의 화면 가로 좌표. 게이지를 드래그하면 자동 설정. -1 = 아직 미설정.
+		}
+
+		CustomPositionY: {
+			Label: 사용자 지정 위치 Y
+			Tooltip: 사용자 지정 앵커의 화면 세로 좌표. 게이지를 드래그하면 자동 설정. -1 = 아직 미설정.
+		}
+	}
+
+
+	ColorChannel: {
+		Red.Label: 빨강
+		Green.Label: 초록
+		Blue.Label: 파랑
+		Alpha.Label: 투명도
+	}
+}
+
+Hints.WinKeySuppress: Advanced Keybinds 설정을 열고 Windows 키 억제를 확인하세요
+
+CursorConfine: {
+	Enabled: 커서 잠금 켜짐
+	Disabled: 커서 잠금 꺼짐
+	WindowsOnly: 창에 커서 잠금은 Windows에서만 사용할 수 있습니다
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: 커서가 조작 이름을 선택하고 있을 때, 오른쪽 클릭으로 미설정(확인 필요), 가운데 클릭으로 기본값으로 되돌립니다
+		ConfirmUnsetHover: 다시 오른쪽 클릭하면 미설정됩니다
+	}
+
 	Combo: {
 		Press: 키를 누르세요...
 		Empty: (비어 있음)
@@ -13,9 +141,8 @@ UI: {
 		Undo: 실행 취소
 		Save: 저장
 		HintLine1: 슬롯을 왼쪽 클릭한 뒤 키나 마우스 버튼을 누르세요.
-		HintLine2: 슬롯 위에 커서를 올리고 오른쪽 클릭하면 해제됩니다.
-		HintLine3: Hold 설정은 단일 키 입력일 때만 활성화할 수 있습니다.
-		HintLine4: 유지 시간은 슬라이더 또는 숫자 칸에서 조정하세요.
+		HintLine2: Hold는 1키일 때만 가능
+		HintLine3: 슬롯에 커서를 올리고 오른쪽 클릭으로 설정 해제
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 누르고 있는 동안
@@ -23,7 +150,31 @@ UI: {
 		HoldOnReleaseHint: 뗄 때
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
+		HoldMsInputTooltip: 10～10000 사이 값을 입력할 수 있습니다
 		RejectLeftClickOnly: 왼쪽 클릭만 등록할까요? 확인하려면 저장을 다시 누르세요.
 		ConfirmLeftClickOnly: 왼쪽 클릭만 등록할까요? 확인하려면 저장을 다시 누르세요.
+		KeyInfoSelectHint: 키를 선택하세요
+		KeyInfoSelectGuide: 키를 선택
+		KeyInfoCurrent: 원래 키
+		KeyInfoDisplay: 표시 이름
+		KeyInfoDefault: 기본 이름
+		KeyInfoScan: ScanCode
+		KeyInfoNone: 없음
+		KeyInfoPresent: 있음
+		KeyInfoNamePlaceholder: 키 표시 이름 변경
+		KeyInfoPressHint: 키를 누르세요
+		KeyInfoAwaitHeader: 변경할 키
+		KeyInfoNameGuideLine1: 새 표시 이름
+		KeyInfoNameGuideLine2: 여기에 입력
+		KeyInfoNameGuideLine3: Enter로 확정
+		KeyInfoResetDisplays: 표시 이름 초기화
+		KeyInfoResetDisplaysLine1: 모든 등록 표시를
+		KeyInfoResetDisplaysLine2: 기본값으로 되돌림
+		KeyInfoResetDisplaysConfirm: 변경한 키 표시 이름을 모두 기본값으로 되돌릴까요?
+		KeyInfoDisplayRestored: 표시 이름 {0}을(를) {1}(으)로 되돌렸습니다
+		SlotOriginalKey: 원래 키: {0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: 몸 쪽으로
+		MouseWheelDown: 바깥쪽으로
 	}
 }

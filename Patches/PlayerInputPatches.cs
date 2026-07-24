@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Diagnostics;
 using AdvancedKeybinds.UI;
 using Terraria;
 using Terraria.GameInput;
@@ -20,8 +21,20 @@ namespace AdvancedKeybinds.Patches
 			if (updateInput != null)
 			{
 				ModDetours.Apply(updateInput, (orig_Void orig) => {
+#if AK_DIAGNOSTICS
+					AkCpuMeasureSystem.TickPhase("PlayerInput");
+					AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdPlayerInputDetour);
+#endif
+					try
+					{
+#if AK_DIAGNOSTICS
+					if (LiveInputDiagnosticSession.IsActive)
+						LiveInputDiagnosticSession.Poll();
+#endif
 					GameWindowInputHook.EnsureInstalledIfNeeded();
 					KeybindingUiPatches.SyncPhysicalRowMouseEdges();
+
+					ComboPanel.BeginInputTickEscapeCaptureState();
 
 					// HandleEscape must see Escape before any parent-menu swallow.
 					if (ComboPanel.IsOpen)
@@ -33,23 +46,55 @@ namespace AdvancedKeybinds.Patches
 					if (ComboPanel.ShouldSwallowMenuEscape())
 						ComboPanel.PrepareParentMenuForEscape();
 
+#if AK_DIAGNOSTICS
+					AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdWinKeySuppressorBlock);
+#endif
 					WindowsKeySuppressor.EnsureInstalled();
 					WindowsKeySuppressor.PollWinKeyReleaseGuard();
 					WindowsKeySuppressor.FlushDeferredWinActions();
+#if AK_DIAGNOSTICS
+					AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdWinKeySuppressorBlock);
+#endif
 
-					orig();
+#if AK_DIAGNOSTICS
+					ComboPanelEscPathDiag.Note("PlayerInput.beforeOrig");
+#endif
+				orig();
+#if AK_DIAGNOSTICS
+					ComboPanelEscPathDiag.Note("PlayerInput.afterOrig");
+#endif
+					ComboPanel.SuppressEscapeAfterVanillaInputRebuild();
 
-					if (ComboPanel.IsOpen)
-					{
-						ComboPanel.PollSlotCaptureIfActive();
-						ComboPanel.GuardModalInput();
+				if (ComboPanel.IsOpen)
+				{
+					ComboPanel.PollSlotCaptureIfActive();
+					ComboPanel.GuardModalInput();
+				}
+				else if (ComboPanel.ShouldSwallowMenuEscape())
+				{
+					ComboPanel.PrepareParentMenuForEscape();
+				}
+
+				ApplyAdvancedBindingsToTriggers();
+#if AK_DIAGNOSTICS
+				try
+				{
+					AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdZoomTick);
+					ZoomKeyLiveVerifySystem.TickFromGameLoop("PlayerInput");
+					AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdZoomTick);
+				}
+				catch (System.Exception)
+				{
+					// Never let investigation verifier break the input detour.
+				}
+#endif
 					}
-					else if (ComboPanel.ShouldSwallowMenuEscape())
+					finally
 					{
-						ComboPanel.PrepareParentMenuForEscape();
+#if AK_DIAGNOSTICS
+						AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdPlayerInputDetour);
+#endif
 					}
-
-					ApplyAdvancedBindingsToTriggers();
 				});
 			}
 			else
@@ -60,24 +105,25 @@ namespace AdvancedKeybinds.Patches
 
 		private static void ApplyAdvancedBindingsToTriggers()
 		{
+#if AK_DIAGNOSTICS
+			AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdBindingInputEngine);
+#endif
 			BindingInputEngine.Update();
+#if AK_DIAGNOSTICS
+			AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdBindingInputEngine);
+#endif
 
 			TriggersSet justPressed = PlayerInput.Triggers.JustPressed;
 			TriggersSet current = PlayerInput.Triggers.Current;
+			TriggersSet justReleased = PlayerInput.Triggers.JustReleased;
 
-			foreach (KeyValuePair<string, ComboBinding> pair in BindingStorage.AllBindings)
-			{
-				string actionId = pair.Key;
-
-				if (BindingInputEngine.WasJustPressed(actionId))
-					justPressed.KeyStatus[actionId] = true;
-
-				if (BindingInputEngine.IsCurrent(actionId))
-					current.KeyStatus[actionId] = true;
-			}
-
+			BindingInputEngine.ApplyResultsToTriggers(justPressed, current);
+			// AK-owned actions: discard vanilla/default edges for that action id only (not global keys).
+			BindingInputEngine.ApplyOwnershipToTriggers(justPressed, current, justReleased);
 			SuppressConflictingVanillaTriggers(justPressed);
 		}
+
+		private static readonly List<string> _suppressScratch = new(8);
 
 		/// <summary>
 		/// Stops a plain vanilla single-key trigger from also firing when its key is currently being
@@ -85,7 +131,7 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		private static void SuppressConflictingVanillaTriggers(TriggersSet justPressed)
 		{
-			List<string> toSuppress = null;
+			_suppressScratch.Clear();
 
 			foreach (KeyValuePair<string, bool> pair in justPressed.KeyStatus)
 			{
@@ -96,14 +142,11 @@ namespace AdvancedKeybinds.Patches
 					continue; // this trigger was fired by us, keep it
 
 				if (BindingInputEngine.ShouldSuppressVanillaTrigger(pair.Key, GetAssignedKeys(pair.Key)))
-					(toSuppress ??= new List<string>()).Add(pair.Key);
+					_suppressScratch.Add(pair.Key);
 			}
 
-			if (toSuppress == null)
-				return;
-
-			foreach (string actionId in toSuppress)
-				justPressed.KeyStatus[actionId] = false;
+			for (int i = 0; i < _suppressScratch.Count; i++)
+				justPressed.KeyStatus[_suppressScratch[i]] = false;
 		}
 
 		private static List<string> GetAssignedKeys(string actionId)

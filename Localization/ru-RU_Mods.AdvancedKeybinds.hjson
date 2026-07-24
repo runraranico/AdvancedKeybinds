@@ -2,9 +2,136 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: Открыть настройки
 	OpenKeybindMenu.DisplayName: Открыть управление
 	OpenModConfigMenu.DisplayName: Открыть настройки модов
+	CycleHoldTierHudAnchor.DisplayName: Переключить Hold HUD
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: Настройки
+
+		HoldTierHudCustomPositionX: {
+			Label: Своя позиция X индикатора Hold
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Своя позиция Y индикатора Hold
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: Ноги
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: Мышь
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: Своя
+			Tooltip: Включите « Разрешить перетаскивание » и нажмите средней кнопкой мыши (нажатие колёсика) на полосу, чтобы переместить
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: Особые клавиши / управление UI
+
+		Suppress: {
+			Label: Блокировать клавишу Windows
+			Tooltip: Оставляйте включённым, если привязываете клавишу Windows
+		}
+
+		SuppressDebugUi: {
+			Label: Блокировать горячие клавиши отладочного UI Terraria
+			Tooltip: Не даёт открываться специальному UI Terraria по F7, F8, F10 и F11. Клавиши по-прежнему можно использовать для привязок и действий мода.
+		}
+	}
+
+	Guide: {
+		NotesHeader: Блокировка курсора в окне
+
+		CursorConfineToggle: {
+			Label: Удерживать курсор в окне
+			Tooltip: Курсор мыши не может выйти за пределы окна игры. Также можно переключать скрытым сочетанием [c/FF9B00:Ctrl+Shift+Alt+M]
+		}
+
+		CursorConfineOnLoad: {
+			Label: Автоматически включать при следующей загрузке мода
+			Tooltip: Вкл.: старт с блокировкой при следующей загрузке. Выкл.: старт без блокировки при следующей загрузке
+		}
+	}
+
+	HoldTierHud: {
+		Header: Индикатор Hold при отпускании
+
+		Enabled: {
+			Label: Показывать индикатор Hold
+			Tooltip: При удержании клавиши с 2+ Hold при отпускании показывает полосу зарядки
+		}
+
+		AllowDrag: {
+			Label: Разрешить перетаскивание
+			Tooltip: Если позиция индикатора — «Своя», средней кнопкой мыши можно схватить и переместить полосу.
+		}
+
+		CustomGaugeHoverTip: Включите « Разрешить перетаскивание » и нажмите средней кнопкой мыши (нажатие колёсика) на полосу, чтобы переместить
+
+		Anchor: {
+			Label: Позиция индикатора
+			Tooltip: Ноги, мышь или своя (включите Разрешить перетаскивание). Горячая клавиша циклирует Ноги → Мышь → Своя → Ноги
+		}
+
+		BarWidth: {
+			Label: Длина индикатора
+			Tooltip: Ширина горизонтальной полосы в пикселях (150–500). По умолчанию 200.
+		}
+
+		Color: {
+			Label: Цвет индикатора
+			Tooltip: Ползунки Красный / Зелёный / Синий
+		}
+
+		CustomPositionX: {
+			Label: Своя позиция X
+			Tooltip: Горизонтальная экранная координата своей привязки. Задаётся автоматически при перетаскивании. -1 = ещё не задана.
+		}
+
+		CustomPositionY: {
+			Label: Своя позиция Y
+			Tooltip: Вертикальная экранная координата своей привязки. Задаётся автоматически при перетаскивании. -1 = ещё не задана.
+		}
+	}
+
+	ColorChannel: {
+		Red.Label: Красный
+		Green.Label: Зелёный
+		Blue.Label: Синий
+		Alpha.Label: Альфа
+	}
+}
+
+Hints.WinKeySuppress: Откройте настройки Advanced Keybinds и проверьте подавление клавиши Windows
+
+CursorConfine: {
+	Enabled: Блокировка курсора ВКЛ
+	Disabled: Блокировка курсора ВЫКЛ
+	WindowsOnly: Блокировка курсора в окне доступна только в Windows
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: Когда курсор выбирает имя действия, ПКМ — сбросить (с подтверждением), СКМ — вернуть значение по умолчанию
+		ConfirmUnsetHover: ПКМ ещё раз — сбросить
+	}
+
 	Combo: {
 		Press: нажмите клавишу...
 		Empty: (пусто)
@@ -13,9 +140,8 @@ UI: {
 		Undo: Отменить
 		Save: Сохранить
 		HintLine1: Щелкните по слоту ЛКМ, затем нажмите клавишу или кнопку мыши.
-		HintLine2: Наведите курсор на слот и нажмите ПКМ, чтобы очистить.
-		HintLine3: Hold можно включить только для ввода одной клавишей.
-		HintLine4: Задайте время удержания ползунком или числовым полем.
+		HintLine2: Hold только при 1 клавише.
+		HintLine3: Наведите курсор на слот и ПКМ, чтобы снять назначение.
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: при удержании
@@ -23,7 +149,30 @@ UI: {
 		HoldOnReleaseHint: при отпускании
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
-		RejectLeftClickOnly: Назначить только левый клик? Сохраните ещё раз для подтверждения.
+		HoldMsInputTooltip: Введите значение от 10～10000
 		ConfirmLeftClickOnly: Назначить только левый клик? Сохраните ещё раз для подтверждения.
+		KeyInfoSelectHint: Выберите клавишу
+		KeyInfoSelectGuide: Выбрать клавишу
+		KeyInfoCurrent: Исходная клавиша
+		KeyInfoDisplay: Отображаемое имя
+		KeyInfoDefault: Имя по умолчанию
+		KeyInfoScan: ScanCode
+		KeyInfoNone: нет
+		KeyInfoPresent: есть
+		KeyInfoNamePlaceholder: Изменить отображаемое имя клавиши
+		KeyInfoPressHint: Нажмите клавишу
+		KeyInfoAwaitHeader: Клавиша для изменения
+		KeyInfoNameGuideLine1: Новое отображаемое имя
+		KeyInfoNameGuideLine2: Введите текст здесь
+		KeyInfoNameGuideLine3: Enter для подтверждения
+		KeyInfoResetDisplays: Сбросить отображаемые имена
+		KeyInfoResetDisplaysLine1: Сбросить все
+		KeyInfoResetDisplaysLine2: отображаемые имена
+		KeyInfoResetDisplaysConfirm: Сбросить все пользовательские отображаемые имена клавиш к значениям по умолчанию?
+		KeyInfoDisplayRestored: Отображаемое имя {0} восстановлено в {1}
+		SlotOriginalKey: Исходная: {0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: К себе
+		MouseWheelDown: От себя
 	}
 }

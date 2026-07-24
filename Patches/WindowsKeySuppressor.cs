@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Core;
+using AdvancedKeybinds.Diagnostics;
 using Terraria;
+using Terraria.ModLoader;
 
 namespace AdvancedKeybinds.Patches
 {
@@ -36,6 +39,7 @@ namespace AdvancedKeybinds.Patches
 		private const int WM_KEYUP = 0x0101;
 		private const int WM_SYSKEYDOWN = 0x0104;
 		private const int WM_SYSKEYUP = 0x0105;
+		private const int LLKHF_INJECTED = 0x10;
 
 		private const uint VK_LWIN = 0x5B;
 		private const uint VK_RWIN = 0x5C;
@@ -52,12 +56,48 @@ namespace AdvancedKeybinds.Patches
 		private const uint SC_LWIN = 0x5B;
 		private const uint SC_RWIN = 0x5C;
 		private const int LLKHF_EXTENDED = 0x01;
+		private const uint VK_CANCEL = 0x03; // Ctrl+Pause / Break
+		private const uint VK_PAUSE = 0x13;
 		private const uint VK_CAPITAL = 0x14;
+		private const uint VK_KANA = 0x15;
 		private const uint VK_NUMLOCK = 0x90;
 		private const uint VK_SCROLL = 0x91;
+		/// <summary>kbd106 「カタカナ／ひらがな」 — also <c>VK_DBE_HIRAGANA</c> (NLS toggle; not a sticky down).</summary>
+		private const uint VK_OEM_COPY = 0xF2;
+		/// <summary>kbd106 「半角／全角」 KEYDOWN often reports <c>VK_OEM_AUTO</c> (break may use <c>VK_OEM_ENLW</c>).</summary>
+		private const uint VK_OEM_AUTO = 0xF3;
+		/// <summary>kbd106 「半角／全角」 KEYUP companion of <see cref="VK_OEM_AUTO"/>.</summary>
+		private const uint VK_OEM_ENLW = 0xF4;
+		/// <summary>Alternate VK for 「半角／全角・漢字」 on some IME configurations.</summary>
+		private const uint VK_KANJI = 0x19;
+		private const uint SC_HIRAGANA = 0x70;
+		/// <summary>kbd106 「半角／全角」 make-code (same slot as US OemTilde / grave).</summary>
+		private const uint SC_HANKAKU_ZENKAKU = 0x29;
+		/// <summary>kbd106 「ろ」 left of R-Shift → <c>VK_OEM_102</c> / <see cref="Microsoft.Xna.Framework.Input.Keys.OemBackslash"/>.</summary>
+		private const uint SC_INTL_RO = 0x73;
+		/// <summary>kbd106 「¥」 left of Backspace → <c>VK_OEM_5</c> / <see cref="Microsoft.Xna.Framework.Input.Keys.OemPipe"/>.</summary>
+		private const uint SC_INTL_YEN = 0x7D;
+		/// <summary>Number-row key left of ^/¥ on JIS (legend <c>-</c>). Same make-code as US OemMinus.</summary>
+		private const uint SC_JIS_OEM_MINUS = 0x0C;
+		/// <summary>Number-row key left of ¥ on JIS (legend <c>^</c>). Same make-code as US OemPlus.</summary>
+		private const uint SC_JIS_OEM_EQUAL = 0x0D;
+		/// <summary>
+		/// ISO 102 key left of L-Shift (also ABNT2 extra). Same VK_OEM_102 as JIS ろ, but different
+		/// make-code — registration uses <c>SC:0x56:Normal</c> so it does not collide with ろ.
+		/// </summary>
+		private const uint SC_ISO_102 = 0x56;
+		/// <summary>kbd106 「変換」 → <c>VK_CONVERT</c>.</summary>
+		private const uint SC_CONVERT = 0x79;
+		/// <summary>kbd106 「無変換」 → <c>VK_NONCONVERT</c>.</summary>
+		private const uint SC_NONCONVERT = 0x7B;
 		private const uint SC_CAPITAL = 0x3A;
 		private const uint SC_NUMLOCK = 0x45;
 		private const uint SC_SCROLL = 0x46;
+		/// <summary>
+		/// After 「半角／全角」, Imm conversion → CapsLock false edges and FNA OemTilde (grave scancode)
+		/// masquerades can linger briefly. Keep longer than a single Imm notify pulse.
+		/// </summary>
+		private const int HankakuZenkakuCapsSuppressMs = 400;
 
 		private const uint INPUT_KEYBOARD = 1;
 		private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
@@ -91,6 +131,69 @@ namespace AdvancedKeybinds.Patches
 
 		public static bool IsCapsLockPhysicallyDown { get; private set; }
 		public static bool IsNumLockPhysicallyDown { get; private set; }
+
+		/// <summary>
+		/// Physical Down for slot-capture held snapshots. Prefer hook make/break when installed
+		/// (swallow can clear GetAsyncKeyState early). Never uses FNA/LED toggle bits.
+		/// </summary>
+		public static bool IsToggleLockPhysicallyDownForCapture(string token)
+		{
+			if (string.Equals(token, "CapsLock", StringComparison.OrdinalIgnoreCase))
+			{
+				if (IsCapsLockPhysicallyDown)
+					return true;
+				return !IsInstalled && IsPhysicalKeyDown(VK_CAPITAL);
+			}
+
+			if (string.Equals(token, "NumLock", StringComparison.OrdinalIgnoreCase))
+			{
+				if (IsNumLockPhysicallyDown)
+					return true;
+				return !IsInstalled && IsPhysicalKeyDown(VK_NUMLOCK);
+			}
+
+			if (string.Equals(token, BindingRestrictions.ScrollLockToken, StringComparison.OrdinalIgnoreCase))
+			{
+				if (IsScrollLockPhysicallyDown)
+					return true;
+				return !IsInstalled && IsPhysicalKeyDown(VK_SCROLL);
+			}
+
+			return false;
+		}
+
+		/// <summary>OS toggle / LED latch (GetKeyState low bit). Never treat as physical Down.</summary>
+		public static bool IsToggleLockLedOn(string token)
+		{
+			if (!OperatingSystem.IsWindows())
+				return false;
+
+			uint vk = token switch {
+				_ when string.Equals(token, "CapsLock", StringComparison.OrdinalIgnoreCase) => VK_CAPITAL,
+				_ when string.Equals(token, "NumLock", StringComparison.OrdinalIgnoreCase) => VK_NUMLOCK,
+				_ when string.Equals(token, BindingRestrictions.ScrollLockToken, StringComparison.OrdinalIgnoreCase) => VK_SCROLL,
+				_ => 0u
+			};
+			if (vk == 0)
+				return false;
+			return (GetKeyState((int)vk) & 0x0001) != 0;
+		}
+
+		/// <summary>
+		/// Pause/Break via Microsoft keystroke make/break (VK_PAUSE / VK_CANCEL).
+		/// Never inferred from scan 0x45 alone (shared with NumLock).
+		/// </summary>
+		public static bool IsPausePhysicallyDown
+			=> OperatingSystem.IsWindows()
+				&& (IsFallbackVkHeld(VK_PAUSE) || IsFallbackVkHeld(VK_CANCEL));
+
+		/// <summary>
+		/// Win32 virtual-key high bit. Used when FNA/SDL <c>KeyboardState</c> drops layout-dependent OEM keys
+		/// (JIS <c>@</c>/<c>^</c>/<c>¥</c> → SDLK_AT/CARET/¥ not in FNA keycode map).
+		/// </summary>
+		public static bool IsVirtualKeyPhysicallyDown(uint vkCode)
+			=> OperatingSystem.IsWindows() && IsPhysicalKeyDown(vkCode);
+
 		public static bool IsScrollLockPhysicallyDown { get; private set; }
 		public static bool IsInstalled => _hookId != IntPtr.Zero;
 
@@ -110,6 +213,105 @@ namespace AdvancedKeybinds.Patches
 		// Latched on KEYDOWN so SlotCapture can bind toggle keys even when the press is shorter than a frame.
 		private static volatile string _pendingToggleLockCaptureToken;
 		private static long _pendingToggleLockCaptureTick;
+
+		// JP kana key is NLS (scan 0x70 / VK_OEM_COPY): GetAsyncKeyState rarely stays down — edge latch.
+		private static volatile string _pendingKanaCaptureToken;
+		private static long _pendingKanaCaptureTick;
+		private static long _lastKanaEdgeMs;
+		private static readonly HashSet<string> _gameplayKanaEdges = new(StringComparer.OrdinalIgnoreCase);
+		private const int KanaEdgeCoalesceMs = 100;
+		/// <summary>WndProc KEYDOWN for VK-aligned Keys that FNA KeyboardState misses (e.g. Oem8 / VK_OEM_8).</summary>
+		private static volatile string _pendingWin32KeysCaptureToken;
+		private static long _pendingWin32KeysCaptureTick;
+		private const int Win32KeysCaptureLatchMaxAgeMs = 500;
+
+		private readonly struct GenericScanId : IEquatable<GenericScanId>
+		{
+			public readonly ushort Scan;
+			public readonly bool Extended;
+
+			public GenericScanId(ushort scan, bool extended)
+			{
+				Scan = (ushort)(scan & 0xFF);
+				Extended = extended;
+			}
+
+			public bool Equals(GenericScanId other)
+				=> Scan == other.Scan && Extended == other.Extended;
+
+			public override bool Equals(object obj)
+				=> obj is GenericScanId other && Equals(other);
+
+			public override int GetHashCode()
+				=> HashCode.Combine(Scan, Extended);
+		}
+
+		private static readonly Dictionary<GenericScanId, bool> _genericScanHeld = new();
+		private static readonly Dictionary<GenericScanId, long> _genericScanDownSinceMs = new();
+		/// <summary>
+		/// Measured scan recorded per VK on KEYDOWN (non-special). Used so orphan Keys/VK
+		/// supplements do not reintroduce layout-table aliases (e.g. OemOpenBrackets→0x1A vs JIS SC 0x1B).
+		/// </summary>
+		private static readonly Dictionary<uint, GenericScanId> _vkMeasuredScan = new();
+		/// <summary>Last measured WM_KEY* event per VK (same-event alias suppression; not layout tables).</summary>
+		private static readonly Dictionary<uint, MeasuredPhysicalKeyEvent> _vkLastMeasuredEvent = new();
+		private static long _physicalKeyEventSequence;
+		/// <summary>EventSequence → one canonical registration candidate (world-portable).</summary>
+		private static readonly EventSequenceUnifier _eventSequenceUnifier = new();
+		/// <summary>
+		/// VKs whose capture identity is <c>VK:</c> (FNA Keys missing). Kept in sync with make/break
+		/// so gameplay <see cref="SupplementFallbackVkTokens"/> matches registration tokens.
+		/// </summary>
+		private static readonly HashSet<uint> _fallbackVkHeld = new();
+		private static volatile string _pendingPhysicalCaptureToken;
+		private static long _pendingPhysicalCaptureTick;
+		private static readonly HashSet<string> _gameplayPhysicalEdges = new(StringComparer.OrdinalIgnoreCase);
+		private const int PhysicalCaptureLatchMaxAgeMs = 500;
+		/// <summary>Make/break held bit for 「カタカナ／ひらがな」(GetAsyncKeyState is unreliable for NLS).</summary>
+		private static bool _kanaPhysicallyDown;
+		private static long _kanaPhysicalDownSinceMs;
+		private const int KanaPhysicalDownMaxMs = 1500;
+		/// <summary>Latched Imm conversion toggle for capture ghost recovery (consumed by SlotCapture).</summary>
+		private static bool _imeConversionToggleForRecovery;
+		/// <summary>Capture latch TTL — long enough for click-release then NLS press at low FPS.</summary>
+		private const int NlsCaptureLatchMaxAgeMs = 2000;
+
+		/// <summary>
+		/// Last 「半角／全角」 KEYDOWN seen on any hook path. Used so IME→Caps mapping does not fire
+		/// when the OS/IME toggles conversion for hankaku/zenkaku (scan often never reaches WM_KEYDOWN).
+		/// </summary>
+		private static long _lastHankakuZenkakuEdgeMs;
+
+		/// <summary>True while 「半角／全角」 is physically held (make…break tracked on hook paths).</summary>
+		private static bool _hankakuZenkakuPhysicallyDown;
+		private static long _hankakuPhysicalDownSinceMs;
+		/// <summary>
+		/// NLS KEYUP is often missing after IME swallows break; clear stuck "held" so Caps/Oem filters
+		/// do not stay armed forever.
+		/// </summary>
+		private const int HankakuPhysicalDownMaxMs = 1500;
+
+		// NLS hankaku/zenkaku: GetAsyncKeyState / Snapshot rarely see a sticky down — edge latch like kana.
+		private static volatile string _pendingHankakuCaptureToken;
+		private static long _pendingHankakuCaptureTick;
+		private static long _lastHankakuBindEdgeMs;
+		private static readonly HashSet<string> _gameplayHankakuEdges = new(StringComparer.OrdinalIgnoreCase);
+		private const int HankakuBindEdgeCoalesceMs = 100;
+
+		// JIS/ISO scans: under US layout Windows often never raises the JP OEM/IME VKs, so VK polling
+		// alone misses ¥ / ろ (and 変換／無変換). Track held state + KEYDOWN latch from make/break.
+		private static bool _jisIntlYenDown;
+		private static bool _jisIntlRoDown;
+		private static bool _jisIntlIso102Down;
+		private static bool _jisOemMinusDown;
+		private static bool _jisOemEqualDown;
+		private static bool _jisConvertDown;
+		private static bool _jisNonConvertDown;
+		private static volatile string _pendingJisIntlCaptureToken;
+		private static long _pendingJisIntlCaptureTick;
+		private static long _lastJisIntlScanEdgeMs;
+		private static readonly HashSet<string> _gameplayJisIntlEdges = new(StringComparer.OrdinalIgnoreCase);
+		private const int JisIntlScanEdgeCoalesceMs = 100;
 
 		// Physical-key edge detection during slot capture (high bit / hook state; not LED latch).
 		private static bool _prevCapsHighBit;
@@ -253,6 +455,9 @@ namespace AdvancedKeybinds.Patches
 		[DllImport("user32.dll")]
 		private static extern short GetAsyncKeyState(int vKey);
 
+		[DllImport("user32.dll")]
+		private static extern short GetKeyState(int nVirtKey);
+
 		[DllImport("user32.dll", SetLastError = true)]
 		private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
@@ -365,15 +570,19 @@ namespace AdvancedKeybinds.Patches
 
 			if (_hookId != IntPtr.Zero && _hookThreadId != threadId)
 			{
+#if AK_DIAGNOSTICS
 				StartMenuDiag.LogInstall(
 					"hook wrong thread hookTid=0x" + _hookThreadId.ToString("X")
 					+ " currentTid=0x" + threadId.ToString("X") + " reinstalling");
+#endif
 				UninstallHookCore();
 			}
 
 			if (_hookId == IntPtr.Zero && _attempted && _hookThreadId != 0 && _hookThreadId != threadId)
 			{
+#if AK_DIAGNOSTICS
 				StartMenuDiag.LogInstall("hook prior attempt on worker thread; retrying on main");
+#endif
 				_attempted = false;
 			}
 
@@ -403,11 +612,11 @@ namespace AdvancedKeybinds.Patches
 				else
 				{
 					_hookThreadId = threadId;
-					AdvancedKeybinds.Instance?.Logger.Info(
-						"Advanced Keybinds installed the keyboard suppression hook (Windows + toggle-lock keys).");
 					EnsureThreadKeyboardHook(threadId);
+#if AK_DIAGNOSTICS
 					string threadNote = _threadHookId != IntPtr.Zero ? " threadHook=ok" : " threadHook=fail:" + Marshal.GetLastWin32Error();
 					StartMenuDiag.LogInstall("keyboard hook installed tid=0x" + threadId.ToString("X") + threadNote);
+#endif
 					GameWindowInputHook.EnsureInstalledIfNeeded();
 				}
 			}
@@ -496,6 +705,18 @@ namespace AdvancedKeybinds.Patches
 			_winPressStartedWhileFgCore = false;
 			_pendingWinCaptureToken = null;
 			_pendingWinCaptureTick = 0;
+			_pendingKanaCaptureToken = null;
+			_pendingKanaCaptureTick = 0;
+			_lastKanaEdgeMs = 0;
+			_gameplayKanaEdges.Clear();
+			_kanaPhysicallyDown = false;
+			_kanaPhysicalDownSinceMs = 0;
+			_imeConversionToggleForRecovery = false;
+			_lastHankakuZenkakuEdgeMs = 0;
+			_hankakuZenkakuPhysicallyDown = false;
+			_hankakuPhysicalDownSinceMs = 0;
+			ClearHankakuBindEdges();
+			ClearJisIntlScanState();
 			_prevCapsHighBit = false;
 			_prevNumHighBit = false;
 			_prevScrollHighBit = false;
@@ -545,12 +766,30 @@ namespace AdvancedKeybinds.Patches
 
 		private static bool ShouldSuppressShellInput()
 		{
+			if (!IsWinKeySuppressionEnabled())
+				return false;
+
 			// Non-active: never swallow Win — OS and other apps keep full Win access.
 			if (!IsGameForegroundCore())
 				return false;
 
 			// Active: suppress Win for gameplay, combo panel, and slot capture.
 			return true;
+		}
+
+		/// <summary>Mod Config default-on; when false, Win / Ctrl+Esc reach the OS normally.</summary>
+		internal static bool IsWinKeySuppressionEnabled()
+		{
+			AdvancedKeybindsConfig config = ModContent.GetInstance<AdvancedKeybindsConfig>();
+			return config == null || config.SuppressWindowsKey;
+		}
+
+		/// <summary>Called when the user turns Win suppression off in Mod Config.</summary>
+		internal static void OnSuppressionDisabled()
+		{
+			ReleaseWinSuppressionState();
+			_modalWindowsKeySuppress = false;
+			GameWindowInputHook.RefreshRawInputForWinSuppressSetting();
 		}
 
 		private static bool IsAnyWinPhysicallyDown()
@@ -615,7 +854,7 @@ namespace AdvancedKeybinds.Patches
 
 		/// <summary>Custom Win chord handling only while we swallow the Win key (Terraria is fgCore).</summary>
 		private static bool ShouldUseCustomWinChordHandling()
-			=> IsGameForegroundCore();
+			=> IsWinKeySuppressionEnabled() && IsGameForegroundCore();
 
 		private static bool IsWinHeldForChord()
 			=> AnyWindowsDown || IsAnyWinPhysicallyDown() || _winPressActiveWhileSuppressing;
@@ -651,13 +890,17 @@ namespace AdvancedKeybinds.Patches
 
 			if (!ShouldUseCustomWinChordHandling())
 			{
+#if AK_DIAGNOSTICS
 				WinChordDiag.Log(path, vk, "native", "reason=inactive");
+#endif
 				return false;
 			}
 
 			if (!IsWinHeldForChord())
 			{
+#if AK_DIAGNOSTICS
 				WinChordDiag.Log(path, vk, "skip", "reason=no-win-held");
+#endif
 				return false;
 			}
 
@@ -685,14 +928,18 @@ namespace AdvancedKeybinds.Patches
 			long now = Environment.TickCount64;
 			if (now - _lastSnipRequestTick < SnipCooldownMs)
 			{
+#if AK_DIAGNOSTICS
 				WinChordDiag.Log(path, VK_S, "snip-cooldown", "ms=" + (now - _lastSnipRequestTick));
+#endif
 				return false;
 			}
 
 			_lastSnipRequestTick = now;
 			_snipRequested = true;
 			swallowed = true;
+#if AK_DIAGNOSTICS
 			WinChordDiag.Log(path, VK_S, "snip-request", "queued");
+#endif
 			return true;
 		}
 
@@ -718,7 +965,9 @@ namespace AdvancedKeybinds.Patches
 			uint chordWinVk = ResolveChordWinVk();
 			RequestArrowChord(vk, chordWinVk, monitorMove: true, virtualDesktop: false);
 			swallowed = true;
+#if AK_DIAGNOSTICS
 			WinChordDiag.Log(path, vk, "move-request", "win=0x" + chordWinVk.ToString("X"));
+#endif
 			return true;
 		}
 
@@ -744,7 +993,9 @@ namespace AdvancedKeybinds.Patches
 			uint chordWinVk = ResolveChordWinVk();
 			RequestArrowChord(vk, chordWinVk, monitorMove: false, virtualDesktop: true);
 			swallowed = true;
+#if AK_DIAGNOSTICS
 			WinChordDiag.Log(path, vk, "vd-request", "win=0x" + chordWinVk.ToString("X"));
+#endif
 			return true;
 		}
 
@@ -834,6 +1085,9 @@ namespace AdvancedKeybinds.Patches
 		/// <summary>Why suppression is off (for StartMenuDiag).</summary>
 		internal static string DescribeWhyNotBlocking()
 		{
+			if (!IsWinKeySuppressionEnabled())
+				return "config-disabled";
+
 			if (_modalWindowsKeySuppress || IsSlotCapturePassthrough)
 				return "would-block-ui";
 
@@ -851,7 +1105,8 @@ namespace AdvancedKeybinds.Patches
 
 		internal static string DescribeSuppressState()
 		{
-			return "fg=" + IsGameForeground()
+			return "enabled=" + IsWinKeySuppressionEnabled()
+				+ " fg=" + IsGameForeground()
 				+ " fgCore=" + IsGameForegroundCore()
 				+ " hook=" + IsInstalled
 				+ " wndProc=" + GameWindowInputHook.IsInstalledForDiag
@@ -901,7 +1156,9 @@ namespace AdvancedKeybinds.Patches
 				else
 					IsRightWindowsDown = false;
 
+#if AK_DIAGNOSTICS
 				StartMenuDiag.LogWndProc((uint)(isUp ? WM_KEYUP : WM_KEYDOWN), vk, blocked: false, "win reason=" + DescribeWhyNotBlocking());
+#endif
 				return true;
 			}
 
@@ -913,7 +1170,9 @@ namespace AdvancedKeybinds.Patches
 			else if (isDown && IsGameForeground())
 				QueueGameplayWinEdge(vk);
 
+#if AK_DIAGNOSTICS
 			StartMenuDiag.LogWndProc((uint)(isUp ? WM_KEYUP : WM_KEYDOWN), vk, blocked: true, "win");
+#endif
 
 			return true;
 		}
@@ -970,7 +1229,9 @@ namespace AdvancedKeybinds.Patches
 					|| _snipRequested || _pendingArrowChordVk != 0)
 				{
 					ReleaseWinSuppressionState();
+#if AK_DIAGNOSTICS
 					WinChordDiag.Log("poll", 0, "released", "reason=inactive");
+#endif
 				}
 
 				return;
@@ -1029,11 +1290,1322 @@ namespace AdvancedKeybinds.Patches
 			return true;
 		}
 
+		/// <summary>
+		/// kbd106 「カタカナ／ひらがな」 (scan 0x70 / <c>VK_OEM_COPY</c> / <c>VK_KANA</c>).
+		/// NLS toggle — held-state polling via GetAsyncKeyState is unreliable; use KEYDOWN edges.
+		/// CapsLock (scan 0x3A) on JP can emit <c>VK_OEM_COPY</c> (0xF2) — never treat that as kana.
+		/// </summary>
+		internal static bool IsKanaPhysicalKey(uint vkCode, uint scanCode)
+		{
+			uint make = scanCode & 0xFF;
+			// Caps position: OEM_COPY pulse must not queue a Kana capture edge.
+			if (make == SC_CAPITAL)
+				return false;
+			return make == SC_HIRAGANA
+				|| vkCode == VK_OEM_COPY
+				|| vkCode == VK_KANA;
+		}
+
+		/// <summary>
+		/// Tracks kana make+break for capture held / ghost recovery. KEYDOWN also queues the bind latch.
+		/// </summary>
+		public static void ApplyKanaPhysical(uint vkCode, uint scanCode, bool isDown, string source)
+		{
+			if (!Win32KeyboardAcquisitionPolicy.AllowAcquisitionFrom(source))
+				return;
+
+			if (!IsKanaPhysicalKey(vkCode, scanCode))
+				return;
+
+			if (!isDown)
+			{
+				if (_kanaPhysicallyDown)
+				{
+					_kanaPhysicallyDown = false;
+					_kanaPhysicalDownSinceMs = 0;
+					if (AkDiag.Enabled) AkDiag.Log("Kana KEYUP src=" + source);
+				}
+
+				return;
+			}
+
+			bool rising = !_kanaPhysicallyDown;
+			_kanaPhysicallyDown = true;
+			if (rising)
+				_kanaPhysicalDownSinceMs = Environment.TickCount64;
+			if (rising && IsGameForegroundCore())
+				QueueKanaEdge(source);
+		}
+
+		/// <summary>
+		/// Physical held bit from make/break (NLS). Prefer this over GetAsyncKeyState for capture.
+		/// Clears itself when KEYUP was missed past <see cref="KanaPhysicalDownMaxMs"/>.
+		/// </summary>
+		public static bool IsKanaPhysicallyDown
+		{
+			get
+			{
+				if (!_kanaPhysicallyDown)
+					return false;
+
+				if (_kanaPhysicalDownSinceMs != 0
+					&& Environment.TickCount64 - _kanaPhysicalDownSinceMs > KanaPhysicalDownMaxMs)
+				{
+					_kanaPhysicallyDown = false;
+					_kanaPhysicalDownSinceMs = 0;
+					if (AkDiag.Enabled) AkDiag.Log("Kana physical-down timeout cleared (missed KEYUP?)");
+					return false;
+				}
+
+				return true;
+			}
+		}
+
+		/// <summary>
+		/// Imm conversion-mode changed (typically after 「全角/半角」). Consumed once by SlotCapture recovery.
+		/// </summary>
+		public static void NoteImeConversionToggleForCaptureRecovery(string source)
+		{
+			_imeConversionToggleForRecovery = true;
+			if (AkDiag.Enabled) AkDiag.Log("IME conversion toggle → capture recovery latch src=" + source);
+		}
+
+		public static bool TryConsumeImeConversionToggleForCaptureRecovery()
+		{
+			if (!_imeConversionToggleForRecovery)
+				return false;
+
+			_imeConversionToggleForRecovery = false;
+			return true;
+		}
+
+		/// <summary>AKDIAG: NLS / JIS latch + ghost held snapshot for SlotCapture.</summary>
+		public static string FormatNlsCaptureDiag()
+		{
+			return "kanaPhys=" + IsKanaPhysicallyDown
+				+ " kanaLatch=" + (_pendingKanaCaptureToken != null)
+				+ " hankakuPhys=" + IsHankakuZenkakuPhysicallyDown
+				+ " hankakuLatch=" + (_pendingHankakuCaptureToken != null)
+				+ " hankakuRecent=" + WasRecentHankakuZenkaku()
+				+ " jisLatch=" + (_pendingJisIntlCaptureToken != null)
+				+ " jisYen=" + _jisIntlYenDown
+				+ " jisRo=" + _jisIntlRoDown
+				+ " jisConv=" + _jisConvertDown
+				+ " jisNonConv=" + _jisNonConvertDown
+				+ " imeConvRecov=" + _imeConversionToggleForRecovery;
+		}
+
+		/// <summary>
+		/// kbd106 「半角／全角」 (<c>VK_OEM_AUTO</c> / <c>VK_OEM_ENLW</c>, or <c>VK_KANJI</c> on JP only,
+		/// or scan 0x29 on JP physical / JP layout). Always pass through to OS/IME (never swallow).
+		/// Bind via <see cref="BindingRestrictions.HankakuZenkakuToken"/> edge latch — not as OemTilde.
+		/// <c>VK_KANJI</c> (0x19) is Hanja on Korean layouts — must NOT be treated as hankaku there.
+		/// Scan 0x29 alone is NOT enough: on US hardware that slot is OemTilde / grave and stays OemTilde.
+		/// </summary>
+		internal static bool IsHankakuZenkakuPhysicalKey(uint vkCode, uint scanCode)
+		{
+			if (vkCode == VK_OEM_AUTO || vkCode == VK_OEM_ENLW)
+				return true;
+
+			// VK_KANJI is 「漢字」/半角全角 only on Japanese IME boards; Korean uses the same VK for Hanja.
+			if (vkCode == VK_KANJI
+				&& (KeyboardLayoutHelper.IsJapanesePhysicalKeyboard()
+					|| KeyboardLayoutHelper.IsJapaneseKeyboardLayout()))
+				return true;
+
+			if ((scanCode & 0xFF) != SC_HANKAKU_ZENKAKU)
+				return false;
+
+			// Same PC make-code as US grave/tilde — only treat as hankaku on JIS HW or JP layout.
+			return KeyboardLayoutHelper.IsJapanesePhysicalKeyboard()
+				|| KeyboardLayoutHelper.IsJapaneseKeyboardLayout();
+		}
+
+		/// <summary>
+		/// Tracks hankaku/zenkaku make+break. KEYDOWN arms IME→Caps suppress, OemTilde masquerade
+		/// filtering, and the bindable <see cref="BindingRestrictions.HankakuZenkakuToken"/> edge.
+		/// </summary>
+		public static void ApplyHankakuZenkakuPhysical(uint vkCode, uint scanCode, bool isDown, string source)
+		{
+			if (!Win32KeyboardAcquisitionPolicy.AllowAcquisitionFrom(source))
+				return;
+
+			if (!IsHankakuZenkakuPhysicalKey(vkCode, scanCode))
+				return;
+
+			if (!isDown)
+			{
+				_hankakuZenkakuPhysicallyDown = false;
+				_hankakuPhysicalDownSinceMs = 0;
+				if (AkDiag.Enabled) AkDiag.Log("Hankaku/Zenkaku KEYUP src=" + source);
+				return;
+			}
+
+			_hankakuZenkakuPhysicallyDown = true;
+			_hankakuPhysicalDownSinceMs = Environment.TickCount64;
+			if (IsGameForegroundCore())
+				NoteHankakuZenkakuEdge(source);
+		}
+
+		/// <summary>
+		/// Records a hankaku/zenkaku KEYDOWN for Caps suppress + bind latch.
+		/// Key always reaches OS/IME (hooks CallNext); we only latch our token.
+		/// </summary>
+		public static void NoteHankakuZenkakuEdge(string source)
+		{
+			_lastHankakuZenkakuEdgeMs = Environment.TickCount64;
+			QueueHankakuZenkakuEdge(source);
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"Hankaku/Zenkaku KEYDOWN edge src=" + source
+				+ " token=" + BindingRestrictions.HankakuZenkakuToken
+				+ " capture=" + IsSlotCapturePassthrough
+				+ " (IME pass-through; bind via edge)");
+			}
+		}
+
+		/// <summary>True shortly after 「半角／全角」 — suppress JP IME→CapsLock false edges only.</summary>
+		public static bool WasRecentHankakuZenkaku(int withinMs = HankakuZenkakuCapsSuppressMs)
+		{
+			if (_lastHankakuZenkakuEdgeMs == 0)
+				return false;
+			return Environment.TickCount64 - _lastHankakuZenkakuEdgeMs < withinMs;
+		}
+
+		/// <summary>
+		/// Imm / conversion-mode CapsLock fakes after 「半角／全角」.
+		/// Does NOT block real VK_CAPITAL / hook Caps (英数) — those must always bind and fire.
+		/// </summary>
+		public static bool ShouldSuppressImeFalseCapsLock()
+			=> WasRecentHankakuZenkaku();
+
+		/// <summary>Physical held bit from make/break (NLS; GetAsyncKeyState often useless).</summary>
+		public static bool IsHankakuZenkakuPhysicallyDown
+		{
+			get
+			{
+				if (!_hankakuZenkakuPhysicallyDown)
+					return false;
+
+				if (_hankakuPhysicalDownSinceMs != 0
+					&& Environment.TickCount64 - _hankakuPhysicalDownSinceMs > HankakuPhysicalDownMaxMs)
+				{
+					_hankakuZenkakuPhysicallyDown = false;
+					_hankakuPhysicalDownSinceMs = 0;
+					if (AkDiag.Enabled) AkDiag.Log("Hankaku/Zenkaku physical-down timeout cleared (missed KEYUP?)");
+					return false;
+				}
+
+				return true;
+			}
+		}
+
+		/// <summary>
+		/// FNA maps JIS 「半角／全角」 (scan 0x29 / SDL grave) to <c>Keys.OemTilde</c>, which shows as
+		/// <c>@</c> under JP layout. Real JP <c>@</c> still uses Win32 <c>VK_OEM_3</c> — only the
+		/// scancode masquerade is suppressed so capture binds <see cref="BindingRestrictions.HankakuZenkakuToken"/> instead.
+		/// </summary>
+		public static bool ShouldIgnoreOemTildeScancodeMasquerade()
+			=> IsHankakuZenkakuPhysicallyDown || WasRecentHankakuZenkaku();
+
+		/// <summary>Queues 「半角／全角」 KEYDOWN for capture + one-frame gameplay (same pattern as kana).</summary>
+		public static void QueueHankakuZenkakuEdge(string source)
+		{
+			long now = Environment.TickCount64;
+			if (now - _lastHankakuBindEdgeMs < HankakuBindEdgeCoalesceMs)
+			{
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+					"Hankaku/Zenkaku KEYDOWN coalesce-skip src=" + source
+					+ " capture=" + IsSlotCapturePassthrough);
+				}
+				return;
+			}
+
+			_lastHankakuBindEdgeMs = now;
+			_pendingHankakuCaptureToken = BindingRestrictions.HankakuZenkakuToken;
+			_pendingHankakuCaptureTick = now;
+			_gameplayHankakuEdges.Add(BindingRestrictions.HankakuZenkakuToken);
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"Hankaku/Zenkaku KEYDOWN queued token="
+				+ BindingRestrictions.HankakuZenkakuToken
+				+ " src=" + source
+				+ " capture=" + IsSlotCapturePassthrough
+				+ " latchAgeMaxMs=" + NlsCaptureLatchMaxAgeMs);
+			}
+		}
+
+		public static bool TryConsumeHankakuZenkakuCapture(out string token)
+		{
+			token = _pendingHankakuCaptureToken;
+			if (token == null)
+				return false;
+
+			if (Environment.TickCount64 - _pendingHankakuCaptureTick > NlsCaptureLatchMaxAgeMs)
+			{
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+					"Hankaku/Zenkaku latch expired ageMs>" + NlsCaptureLatchMaxAgeMs
+					+ " capture=" + IsSlotCapturePassthrough
+					+ " (rejected if WaitingForRelease drained late)");
+				}
+				_pendingHankakuCaptureToken = null;
+				_pendingHankakuCaptureTick = 0;
+				token = null;
+				return false;
+			}
+
+			_pendingHankakuCaptureToken = null;
+			_pendingHankakuCaptureTick = 0;
+			_gameplayHankakuEdges.Remove(token);
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"Hankaku/Zenkaku latch consumed→SlotCapture edges token=" + token
+				+ " capture=" + IsSlotCapturePassthrough
+				+ " (ACCEPT/REJECT decided by session phase)");
+			}
+			return true;
+		}
+
+		/// <summary>One-frame gameplay edges for 「半角／全角」.</summary>
+		public static IReadOnlyCollection<string> DrainGameplayHankakuZenkakuEdges()
+		{
+			if (_gameplayHankakuEdges.Count == 0)
+				return Array.Empty<string>();
+
+			string[] edges = new string[_gameplayHankakuEdges.Count];
+			_gameplayHankakuEdges.CopyTo(edges);
+			_gameplayHankakuEdges.Clear();
+			return edges;
+		}
+
+		private static void ClearHankakuBindEdges()
+		{
+			_pendingHankakuCaptureToken = null;
+			_pendingHankakuCaptureTick = 0;
+			_lastHankakuBindEdgeMs = 0;
+			_gameplayHankakuEdges.Clear();
+		}
+
+		/// <summary>Queues a kana press edge (hook / WndProc / Raw). Coalesces duplicate sources.</summary>
+		public static void QueueKanaEdge(string source)
+		{
+			long now = Environment.TickCount64;
+			if (now - _lastKanaEdgeMs < KanaEdgeCoalesceMs)
+			{
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+					"Kana KEYDOWN coalesce-skip src=" + source
+					+ " capture=" + IsSlotCapturePassthrough);
+				}
+				return;
+			}
+
+			_lastKanaEdgeMs = now;
+			_pendingKanaCaptureToken = "Kana";
+			_pendingKanaCaptureTick = now;
+			_gameplayKanaEdges.Add("Kana");
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"Kana KEYDOWN queued src=" + source
+				+ " capture=" + IsSlotCapturePassthrough
+				+ " latchAgeMaxMs=" + NlsCaptureLatchMaxAgeMs);
+			}
+		}
+
+		public static bool TryConsumeKanaCapture(out string token)
+		{
+			token = _pendingKanaCaptureToken;
+			if (token == null)
+				return false;
+
+			if (Environment.TickCount64 - _pendingKanaCaptureTick > NlsCaptureLatchMaxAgeMs)
+			{
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+					"Kana latch expired ageMs>" + NlsCaptureLatchMaxAgeMs
+					+ " capture=" + IsSlotCapturePassthrough);
+				}
+				_pendingKanaCaptureToken = null;
+				_pendingKanaCaptureTick = 0;
+				token = null;
+				return false;
+			}
+
+			_pendingKanaCaptureToken = null;
+			_pendingKanaCaptureTick = 0;
+			_gameplayKanaEdges.Remove(token);
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"Kana latch consumed→SlotCapture edges token=" + token
+				+ " capture=" + IsSlotCapturePassthrough
+				+ " (ACCEPT/REJECT decided by session phase)");
+			}
+			return true;
+		}
+
+		/// <summary>Latch physical capture token (VK / SC fallback ids).</summary>
+		public static void QueuePhysicalCaptureEdge(
+			string token,
+			uint vk,
+			ushort scan,
+			bool extended,
+			string source)
+		{
+			if (string.IsNullOrEmpty(token))
+				return;
+
+			if (!IsSlotCapturePassthrough && !KeyboardDiagMode.IsActive)
+				return;
+
+			long now = Environment.TickCount64;
+			_pendingPhysicalCaptureToken = token;
+			_pendingPhysicalCaptureTick = now;
+			_pendingWin32KeysCaptureToken = token;
+			_pendingWin32KeysCaptureTick = now;
+			_gameplayPhysicalEdges.Add(token);
+
+			KeyboardDiagMode.NotifyPhysicalKeyEvent(
+				vk,
+				scan,
+				extended,
+				captureToken: token,
+				captureSuccess: true,
+				captureFailReason: null,
+				source: source);
+
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"PhysicalCapture edge token=" + token
+				+ " vk=0x" + vk.ToString("X2")
+				+ " scan=0x" + (scan & 0xFF).ToString("X2")
+				+ " extended=" + extended
+				+ " src=" + source
+				+ " " + KeyboardLayoutHelper.FormatPhysicalKeyCaptureDiag(
+				vk,
+				adoptedToken: token,
+				eventScan: scan,
+				eventExtended: extended));
+			}
+		}
+
+		public static bool TryConsumePhysicalCapture(out string token)
+		{
+			token = _pendingPhysicalCaptureToken ?? _pendingWin32KeysCaptureToken;
+			if (token == null)
+				return false;
+
+			long tick = _pendingPhysicalCaptureToken != null
+				? _pendingPhysicalCaptureTick
+				: _pendingWin32KeysCaptureTick;
+			int maxAge = PhysicalCaptureLatchMaxAgeMs;
+
+			if (Environment.TickCount64 - tick > maxAge)
+			{
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+					"PhysicalCapture latch expired ageMs>" + maxAge
+					+ " token=" + token
+					+ " capture=" + IsSlotCapturePassthrough);
+				}
+				_pendingPhysicalCaptureToken = null;
+				_pendingPhysicalCaptureTick = 0;
+				_pendingWin32KeysCaptureToken = null;
+				_pendingWin32KeysCaptureTick = 0;
+				token = null;
+				return false;
+			}
+
+			_pendingPhysicalCaptureToken = null;
+			_pendingPhysicalCaptureTick = 0;
+			_pendingWin32KeysCaptureToken = null;
+			_pendingWin32KeysCaptureTick = 0;
+			_gameplayPhysicalEdges.Remove(token);
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"PhysicalCapture latch consumed→SlotCapture edges token=" + token
+				+ " capture=" + IsSlotCapturePassthrough);
+			}
+			return true;
+		}
+
+		/// <summary>One-frame gameplay edges for VK/SC fallback tokens.</summary>
+		public static IReadOnlyCollection<string> DrainGameplayPhysicalEdges()
+		{
+			if (_gameplayPhysicalEdges.Count == 0)
+				return Array.Empty<string>();
+
+			string[] edges = new string[_gameplayPhysicalEdges.Count];
+			_gameplayPhysicalEdges.CopyTo(edges);
+			_gameplayPhysicalEdges.Clear();
+			return edges;
+		}
+
+		public static bool IsGenericScanTokenDown(string token)
+		{
+			if (!PhysicalKeyToken.TryParseScan(token, out ushort scan, out bool extended))
+				return false;
+
+			return _genericScanHeld.TryGetValue(new GenericScanId(scan, extended), out bool down) && down;
+		}
+
+		public static void SupplementGenericScanTokens(HashSet<string> pressed)
+		{
+			if (pressed == null)
+				return;
+
+			foreach (KeyValuePair<GenericScanId, bool> pair in _genericScanHeld)
+			{
+				if (!pair.Value)
+					continue;
+
+				pressed.Add(PhysicalKeyToken.FormatScan(pair.Key.Scan, pair.Key.Extended));
+			}
+		}
+
+		/// <summary>
+		/// Adds <c>VK:</c> tokens for keys held via Win32 KEYDOWN make/break.
+		/// Trust hook make/break — do NOT drop on <c>GetAsyncKeyState</c> false
+		/// (NLS / OEM keys often fail AsyncKeyState while still physically held).
+		/// Ghosts are cleared on KEYUP / focus-loss / <see cref="ClearUnconfirmedScanHeldFlags"/>.
+		/// </summary>
+		/// <summary>
+		/// Adds special-key Keys/VK held tokens, and orphan VK holds that have no measured SC sibling
+		/// already present in <paramref name="pressed"/>.
+		/// </summary>
+		public static void SupplementSpecialOrOrphanFallbackTokens(HashSet<string> pressed)
+		{
+			if (pressed == null || _fallbackVkHeld.Count == 0)
+				return;
+
+			foreach (uint heldVk in _fallbackVkHeld)
+			{
+				if (!PhysicalKeyToken.IsValidVirtualKey(heldVk))
+					continue;
+
+				string vkToken = PhysicalKeyToken.FormatVk(heldVk);
+				string keysName = null;
+				if (Enum.IsDefined(typeof(Microsoft.Xna.Framework.Input.Keys), (int)heldVk))
+				{
+					var key = (Microsoft.Xna.Framework.Input.Keys)heldVk;
+					if (key != Microsoft.Xna.Framework.Input.Keys.None)
+						keysName = key.ToString();
+				}
+
+				if (MeasuredPhysicalKeyNormalizer.IsSpecialHandledVirtualKey(heldVk))
+				{
+					if (!string.IsNullOrEmpty(keysName))
+						pressed.Add(keysName);
+					else
+						pressed.Add(vkToken);
+					continue;
+				}
+
+				ushort measuredScan = 0;
+				bool measuredExt = false;
+				bool sameEvent = false;
+				long lastSeq = 0;
+				if (_vkMeasuredScan.TryGetValue(heldVk, out GenericScanId measured))
+				{
+					measuredScan = measured.Scan;
+					measuredExt = measured.Extended;
+				}
+
+				if (_vkLastMeasuredEvent.TryGetValue(heldVk, out MeasuredPhysicalKeyEvent lastEv)
+					&& lastEv.HasMeasuredScan
+					&& lastEv.IsDown)
+				{
+					sameEvent = true;
+					lastSeq = lastEv.EventSequence;
+					if (measuredScan == 0)
+					{
+						measuredScan = lastEv.ScanCode;
+						measuredExt = lastEv.Extended;
+					}
+				}
+
+				// Priority: EventSequence → measured SC → AreSamePhysical (last resort).
+				if (MeasuredVkCoverage.ShouldSuppressOrphanKeysOrVk(
+					heldVk, measuredScan, measuredExt, keysName, pressed,
+					sameEvent, eventSequence: lastSeq, existingEventSequence: lastSeq))
+					continue;
+
+				// True orphan (no measured SC): Keys name or VK: fallback only.
+				pressed.Add(!string.IsNullOrEmpty(keysName) ? keysName : vkToken);
+			}
+		}
+
+		public static void SupplementFallbackVkTokens(HashSet<string> pressed)
+		{
+			if (pressed == null || _fallbackVkHeld.Count == 0)
+				return;
+
+			foreach (uint heldVk in _fallbackVkHeld)
+			{
+				if (!PhysicalKeyToken.IsValidVirtualKey(heldVk))
+					continue;
+
+				pressed.Add(PhysicalKeyToken.FormatVk(heldVk));
+			}
+		}
+
+		/// <summary>True while a KEYDOWN for this VK was seen and KEYUP has not yet cleared it.</summary>
+		public static bool IsFallbackVkHeld(uint vk)
+			=> PhysicalKeyToken.IsValidVirtualKey(vk) && _fallbackVkHeld.Contains(vk);
+
+		/// <summary>
+		/// Soft reconcile for scan-held ghosts when KEYUP was missed.
+		/// Drops scan flags that have been held without a matching VK make for too long.
+		/// </summary>
+		public static void ReconcileGenericScanHeldGhosts()
+		{
+			if (_genericScanHeld.Count == 0)
+				return;
+
+			long now = Environment.TickCount64;
+			List<GenericScanId> stale = null;
+			foreach (KeyValuePair<GenericScanId, bool> pair in _genericScanHeld)
+			{
+				if (!pair.Value)
+					continue;
+
+				if (!_genericScanDownSinceMs.TryGetValue(pair.Key, out long sinceMs))
+				{
+					_genericScanDownSinceMs[pair.Key] = now;
+					continue;
+				}
+
+				// 3s without KEYUP: treat as missed break (capture clears separately).
+				if (now - sinceMs < 3000)
+					continue;
+
+				stale ??= new List<GenericScanId>();
+				stale.Add(pair.Key);
+			}
+
+			if (stale == null)
+				return;
+
+			for (int i = 0; i < stale.Count; i++)
+			{
+				_genericScanHeld.Remove(stale[i]);
+				_genericScanDownSinceMs.Remove(stale[i]);
+			}
+		}
+
+		/// <summary>
+		/// Universal physical key tracker: scan held state + VK fallback held + capture/diag latch.
+		/// During normal gameplay, rising edges for VK/SC identities also feed one-frame gameplay edges
+		/// so JustPressed / Hold-release share the same tokens as registration.
+		/// </summary>
+		public static void ApplyPhysicalKeyEvent(
+			uint vk,
+			ushort scan,
+			bool extended,
+			bool isDown,
+			string source)
+		{
+			if (!Win32KeyboardAcquisitionPolicy.AllowAcquisitionFrom(source))
+				return;
+
+			scan = (ushort)(scan & 0xFF);
+			var id = new GenericScanId(scan, extended);
+
+			if (!isDown)
+			{
+				_genericScanHeld.Remove(id);
+				_genericScanDownSinceMs.Remove(id);
+				if (PhysicalKeyToken.IsValidVirtualKey(vk))
+				{
+					_fallbackVkHeld.Remove(vk);
+					_vkMeasuredScan.Remove(vk);
+					_vkLastMeasuredEvent.Remove(vk);
+				}
+
+				long upSeq = ++_physicalKeyEventSequence;
+				EventSequenceUnifyResult upResult = _eventSequenceUnifier.ObserveUp(
+					scan, extended, vk, upSeq);
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+						"EventSequence KeyUp seq=" + upResult.EventSequence
+						+ " released=" + (upResult.CanonicalToken ?? "-")
+						+ " sc=0x" + (scan & 0xFF).ToString("X2")
+						+ " ext=" + (extended ? 1 : 0)
+						+ " vk=0x" + vk.ToString("X2"));
+				}
+
+				if (JisOemInGameDiagnostic.IsSessionActive)
+				{
+					JisOemInGameDiagnostic.ObserveKeyUp(
+						vk, scan, extended, source, FormatHeldDiagSnapshot(),
+						eventSequence: upResult.EventSequence);
+				}
+
+				return;
+			}
+
+			bool scanRising = !_genericScanHeld.TryGetValue(id, out bool wasScanDown) || !wasScanDown;
+			_genericScanHeld[id] = true;
+			_genericScanDownSinceMs[id] = Environment.TickCount64;
+
+			if (!IsGameForegroundCore() && !KeyboardDiagMode.IsActive)
+				return;
+
+			if (IsKanaPhysicalKey(vk, scan)
+				|| IsHankakuZenkakuPhysicalKey(vk, scan)
+				|| TryMapJisIntlScanToToken(scan, out _)
+				|| IsPauseOrBreakVk(vk)
+				|| (scan == SC_NUMLOCK && vk != VK_NUMLOCK)
+				|| vk == VK_CAPITAL
+				|| vk == VK_NUMLOCK
+				|| vk == VK_SCROLL
+				|| scan == SC_CAPITAL
+				|| scan == SC_SCROLL)
+			{
+				// Pause/Break never use GetAsyncKeyState — keep make/break VK held for Snapshot.
+				if (IsPauseOrBreakVk(vk) && PhysicalKeyToken.IsValidVirtualKey(vk))
+					_fallbackVkHeld.Add(vk);
+				return;
+			}
+
+			PhysicalKeyResolver.ResolveResult resolved = PhysicalKeyResolver.ResolveForCapture(
+				vk,
+				scan,
+				extended,
+				Main.keyState);
+
+			if (!resolved.Success)
+			{
+				KeyboardDiagMode.NotifyPhysicalKeyEvent(
+					vk,
+					scan,
+					extended,
+					captureToken: null,
+					captureSuccess: false,
+					captureFailReason: resolved.FailReason,
+					source: source);
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+						"PhysicalCapture REJECT reason=" + resolved.FailReason
+						+ " src=" + source
+						+ " " + KeyboardLayoutHelper.FormatPhysicalKeyCaptureDiag(
+							vk,
+							adoptedToken: "-",
+							eventScan: scan,
+							eventExtended: extended));
+				}
+
+				if (JisOemInGameDiagnostic.IsSessionActive)
+				{
+					JisOemInGameDiagnostic.Observe(
+						vk, scan, extended, isDown: true, source, resolved,
+						beforeCandidates: null,
+						afterCandidates: null,
+						captureResolverInput: null,
+						chooseMeasuredToken: null,
+						finalOrReject: "resolver-reject");
+				}
+
+				return;
+			}
+
+			// Always track VK make/break so old Keys/VK bindings can match via PhysicalKeyIdentity.
+			long seq = ++_physicalKeyEventSequence;
+			MeasuredPhysicalKeyEvent measuredEv = MeasuredPhysicalKeyEvent.FromKeyDown(
+				vk, scan, extended, source, resolved.Token, seq);
+
+			bool isKeyRepeat = !scanRising;
+			if (AkDiag.Enabled)
+				_eventSequenceUnifier.DiagSink ??= static line => AkDiag.Log("EventSequence " + line);
+
+			EventSequenceUnifyResult unify = _eventSequenceUnifier.ObserveDown(measuredEv, isKeyRepeat);
+
+			if (PhysicalKeyToken.IsValidVirtualKey(vk))
+			{
+				_fallbackVkHeld.Add(vk);
+				if (measuredEv.HasMeasuredScan)
+				{
+					_vkMeasuredScan[vk] = id;
+					_vkLastMeasuredEvent[vk] = measuredEv;
+				}
+				else
+				{
+					_vkMeasuredScan.Remove(vk);
+					_vkLastMeasuredEvent.Remove(vk);
+				}
+			}
+
+			MeasuredPhysicalKeyEdgePolicy.Decision edge =
+				MeasuredPhysicalKeyEdgePolicy.DecideDown(
+					vk,
+					scan,
+					extended,
+					resolved.Token,
+					scanRising);
+
+			// Registration / edges: EventSequence-unified canonical (SC when measured).
+			string canonicalToken = !string.IsNullOrEmpty(unify.CanonicalToken)
+				? unify.CanonicalToken
+				: (!string.IsNullOrEmpty(measuredEv.CanonicalToken)
+					? measuredEv.CanonicalToken
+					: edge.CanonicalToken);
+
+			bool jisDiag = JisOemInGameDiagnostic.IsSessionActive;
+			string[] beforePreview = null;
+			string[] afterPreview = null;
+			if (jisDiag || AkDiag.Enabled)
+			{
+				beforePreview = BuildPreNormalizeCandidatePreview(vk, scan, extended, resolved.Token);
+				List<string> reg = SameEventAliasPolicy.BuildRegistrationNewcomers(measuredEv);
+				afterPreview = reg.Count == 0 ? Array.Empty<string>() : reg.ToArray();
+			}
+
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+					"EventSequence Down seq=" + seq
+					+ " vk=0x" + vk.ToString("X2")
+					+ " sc=0x" + (scan & 0xFF).ToString("X2")
+					+ " ext=" + (extended ? 1 : 0)
+					+ " keys=" + (resolved.Token ?? "-")
+					+ " canonical=" + (canonicalToken ?? "-")
+					+ " repeat=" + isKeyRepeat
+					+ " added=" + unify.AddedAsNewcomer
+					+ " suppressedAlias=" + (unify.ExcludedAlias ?? "-")
+					+ " replacedSc=" + unify.ReplacedFallbackWithScan
+					+ " ignoreRepeat=" + unify.IgnoredAsRepeat);
+			}
+
+			bool gameplay = !IsSlotCapturePassthrough && !KeyboardDiagMode.IsActive;
+
+			if (gameplay)
+			{
+				foreach (string edgeToken in edge.CollectGameplayEdgeTokens())
+					_gameplayPhysicalEdges.Add(edgeToken);
+
+				KeyboardDiagMode.NotifyPhysicalKeyEvent(
+					vk,
+					scan,
+					extended,
+					captureToken: canonicalToken,
+					captureSuccess: true,
+					captureFailReason: null,
+					source: source);
+				if (jisDiag)
+				{
+					JisOemInGameDiagnostic.Observe(
+						vk, scan, extended, isDown: true, source, resolved,
+						beforeCandidates: beforePreview,
+						afterCandidates: afterPreview,
+						captureResolverInput: null,
+						chooseMeasuredToken: canonicalToken,
+						finalOrReject: "gameplay-edges:[" + string.Join(",", edge.CollectGameplayEdgeTokens()) + "]",
+						eventSequence: seq,
+						unifyNote: FormatUnifyNote(unify));
+				}
+
+				return;
+			}
+
+			// Autorepeat / EventSequence unifier: do not re-latch capture for same physical hold.
+			bool latch = edge.LatchCapture && unify.AddedAsNewcomer && !unify.IgnoredAsRepeat;
+			if (latch)
+				QueuePhysicalCaptureEdge(canonicalToken, vk, scan, extended, source);
+
+			if (jisDiag)
+			{
+				JisOemInGameDiagnostic.Observe(
+					vk, scan, extended, isDown: true, source, resolved,
+					beforeCandidates: beforePreview,
+					afterCandidates: afterPreview,
+					captureResolverInput: afterPreview,
+					chooseMeasuredToken: canonicalToken,
+					finalOrReject: latch
+						? "capture-edge:" + canonicalToken
+						: (unify.IgnoredAsRepeat
+							? "capture-repeat-ignored:" + canonicalToken
+							: "capture-same-seq:" + canonicalToken),
+					eventSequence: seq,
+					unifyNote: FormatUnifyNote(unify));
+			}
+		}
+
+		private static string FormatUnifyNote(EventSequenceUnifyResult unify)
+		{
+			return "seq=" + unify.EventSequence
+				+ ";added=" + unify.AddedAsNewcomer
+				+ ";suppressed=" + (unify.ExcludedAlias ?? "-")
+				+ ";replacedSc=" + unify.ReplacedFallbackWithScan
+				+ ";repeat=" + unify.IgnoredAsRepeat;
+		}
+
+		private static string FormatHeldDiagSnapshot()
+		{
+			var parts = new List<string>();
+			foreach (var pair in _genericScanHeld)
+			{
+				if (pair.Value)
+					parts.Add(PhysicalKeyToken.FormatScan(pair.Key.Scan, pair.Key.Extended));
+			}
+
+			return "[" + string.Join(",", parts) + "]";
+		}
+
+		private static string[] BuildPreNormalizeCandidatePreview(uint vk, ushort scan, bool extended, string resolverToken)
+		{
+			var list = new List<string>(3);
+			if (!string.IsNullOrEmpty(resolverToken))
+				list.Add(resolverToken);
+			if (PhysicalKeyToken.IsValidVirtualKey(vk))
+				list.Add(PhysicalKeyToken.FormatVk(vk));
+			if (scan != 0)
+				list.Add(PhysicalKeyToken.FormatScan(scan, extended));
+			return list.ToArray();
+		}
+
+		/// <summary>Latch FNA-missing Keys token from WndProc/WM_INPUT KEYDOWN (legacy alias).</summary>
+		public static void QueueWin32KeysCaptureEdge(
+			string token,
+			uint vk,
+			ushort scan,
+			bool extended,
+			string source)
+			=> QueuePhysicalCaptureEdge(token, vk, scan, extended, source);
+
+		public static bool TryConsumeWin32KeysCapture(out string token)
+			=> TryConsumePhysicalCapture(out token);
+
+		/// <summary>One-frame gameplay edges for Kana (same NLS key as capture).</summary>
+		public static IReadOnlyCollection<string> DrainGameplayKanaEdges()
+		{
+			if (_gameplayKanaEdges.Count == 0)
+				return Array.Empty<string>();
+
+			string[] edges = new string[_gameplayKanaEdges.Count];
+			_gameplayKanaEdges.CopyTo(edges);
+			_gameplayKanaEdges.Clear();
+			return edges;
+		}
+
+		/// <summary>
+		/// Maps JIS/ISO make-codes to existing OEM/IME tokens.
+		/// <list type="bullet">
+		/// <item><c>0x7D</c> ¥| (left of BS) → OemPipe — JIS-unique (never on US ANSI)</item>
+		/// <item><c>0x73</c> ろ (left of R-Shift) → OemBackslash — JIS-unique</item>
+		/// <item><c>0x56</c> ISO 102 / ABNT2 extra (left of L-Shift) → <c>SC:0x56:Normal</c> (distinct from ろ)</item>
+		/// <item><c>0x79</c>/<c>0x7B</c> 変換／無変換 → ImeConvert / ImeNoConvert — JIS-unique</item>
+		/// <item><c>0x0C</c>/<c>0x0D</c> JIS <c>-</c>/<c>^</c> — only when physical JIS: DE/etc remaps VKs so FNA may report brackets; pin OemMinus/OemQuotes</item>
+		/// </list>
+		/// Pure US ANSI never emits 0x7D/0x73/0x79/0x7B; 0x0C/0x0D need the physical-JIS gate.
+		/// </summary>
+		internal static bool TryMapJisIntlScanToToken(uint scanCode, out string token)
+		{
+			uint scan = scanCode & 0xFF;
+			token = scan switch {
+				SC_INTL_YEN => "OemPipe",
+				SC_INTL_RO => "OemBackslash",
+				// Same VK_OEM_102 as ろ, but different scan — keep distinct for ISO/ABNT2 boards.
+				SC_ISO_102 => PhysicalKeyToken.FormatScan((ushort)SC_ISO_102, extended: false),
+				SC_CONVERT => "ImeConvert",
+				SC_NONCONVERT => "ImeNoConvert",
+				_ => null
+			};
+			if (token != null)
+				return true;
+
+			// JP keycaps - / ^ next to ¥: under German layout FNA often yields ß / brackets instead.
+			if (KeyboardLayoutHelper.IsJapanesePhysicalKeyboard())
+			{
+				token = scan switch {
+					SC_JIS_OEM_MINUS => "OemMinus",
+					SC_JIS_OEM_EQUAL => "OemQuotes",
+					_ => null
+				};
+				return token != null;
+			}
+
+			return false;
+		}
+
+		/// <summary>
+		/// Updates held state for JIS/ISO intl scans from hook / WndProc / Raw make+break.
+		/// KEYUP always clears; KEYDOWN requires game process foreground (same as kana).
+		/// Rising edges latch capture + one-frame gameplay tokens (US layout may never raise VKs).
+		/// </summary>
+		public static void ApplyJisIntlScan(uint scanCode, bool isDown, string source)
+		{
+			if (!Win32KeyboardAcquisitionPolicy.AllowAcquisitionFrom(source))
+				return;
+
+			if (!TryMapJisIntlScanToToken(scanCode, out string token))
+				return;
+
+			uint scan = scanCode & 0xFF;
+			if (!isDown)
+			{
+				SetJisIntlScanDown(scan, false);
+				return;
+			}
+
+			if (!IsGameForegroundCore())
+				return;
+
+			bool wasDown = IsJisIntlScanDown(scan);
+			SetJisIntlScanDown(scan, true);
+			if (wasDown)
+				return;
+
+			long now = Environment.TickCount64;
+			if (now - _lastJisIntlScanEdgeMs < JisIntlScanEdgeCoalesceMs)
+				return;
+
+			_lastJisIntlScanEdgeMs = now;
+			_pendingJisIntlCaptureToken = token;
+			_pendingJisIntlCaptureTick = now;
+			_gameplayJisIntlEdges.Add(token);
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"JisIntlScan KEYDOWN edge token=" + token
+				+ " scan=0x" + scan.ToString("X2")
+				+ " src=" + source);
+			}
+		}
+
+		public static bool TryConsumeJisIntlCapture(out string token)
+		{
+			token = _pendingJisIntlCaptureToken;
+			if (token == null)
+				return false;
+
+			if (Environment.TickCount64 - _pendingJisIntlCaptureTick > NlsCaptureLatchMaxAgeMs)
+			{
+				if (AkDiag.Enabled) AkDiag.Log("JisIntl capture latch expired token=" + token + " ageMs>" + NlsCaptureLatchMaxAgeMs);
+				_pendingJisIntlCaptureToken = null;
+				_pendingJisIntlCaptureTick = 0;
+				token = null;
+				return false;
+			}
+
+			_pendingJisIntlCaptureToken = null;
+			_pendingJisIntlCaptureTick = 0;
+			_gameplayJisIntlEdges.Remove(token);
+			if (AkDiag.Enabled) AkDiag.Log("JisIntl capture latch accepted token=" + token);
+			return true;
+		}
+
+		/// <summary>One-frame gameplay edges for JIS/ISO OEM/IME scans (same keys as capture).</summary>
+		public static IReadOnlyCollection<string> DrainGameplayJisIntlEdges()
+		{
+			if (_gameplayJisIntlEdges.Count == 0)
+				return Array.Empty<string>();
+
+			string[] edges = new string[_gameplayJisIntlEdges.Count];
+			_gameplayJisIntlEdges.CopyTo(edges);
+			_gameplayJisIntlEdges.Clear();
+			return edges;
+		}
+
+		public static bool IsJisIntlScanTokenDown(string token)
+		{
+			if (string.Equals(token, "OemPipe", StringComparison.OrdinalIgnoreCase))
+				return _jisIntlYenDown;
+			if (string.Equals(token, "OemBackslash", StringComparison.OrdinalIgnoreCase))
+			{
+				// New captures: ろ only. Legacy OemBackslash bindings also fire for ISO102.
+				return _jisIntlRoDown || _jisIntlIso102Down;
+			}
+			if (PhysicalKeyToken.TryParseScan(token, out ushort scan, out bool extended)
+				&& scan == SC_ISO_102
+				&& !extended)
+				return _jisIntlIso102Down;
+			if (string.Equals(token, "OemMinus", StringComparison.OrdinalIgnoreCase))
+				return _jisOemMinusDown;
+			if (string.Equals(token, "OemQuotes", StringComparison.OrdinalIgnoreCase))
+				return _jisOemEqualDown;
+			if (string.Equals(token, "ImeConvert", StringComparison.OrdinalIgnoreCase))
+				return _jisConvertDown;
+			if (string.Equals(token, "ImeNoConvert", StringComparison.OrdinalIgnoreCase))
+				return _jisNonConvertDown;
+			return false;
+		}
+
+		/// <summary>Adds scan-held JIS/ISO OEM/IME tokens missing from VK polling (US layout + physical JIS).</summary>
+		public static void SupplementJisIntlScanTokens(HashSet<string> pressed)
+		{
+			if (pressed == null)
+				return;
+			if (_jisIntlYenDown)
+				pressed.Add("OemPipe");
+			if (_jisIntlRoDown)
+				pressed.Add("OemBackslash");
+			if (_jisIntlIso102Down)
+			{
+				pressed.Add(PhysicalKeyToken.FormatScan((ushort)SC_ISO_102, extended: false));
+				// Legacy: keep OemBackslash active so old ISO102 bindings still fire.
+				pressed.Add("OemBackslash");
+			}
+			if (_jisOemMinusDown)
+			{
+				pressed.Add("OemMinus");
+				RemoveConflictingOemForJisNumberRow(pressed, keep: "OemMinus");
+			}
+			if (_jisOemEqualDown)
+			{
+				pressed.Add("OemQuotes");
+				RemoveConflictingOemForJisNumberRow(pressed, keep: "OemQuotes");
+			}
+			if (_jisConvertDown)
+				pressed.Add("ImeConvert");
+			if (_jisNonConvertDown)
+				pressed.Add("ImeNoConvert");
+		}
+
+		/// <summary>
+		/// Under DE/etc, FNA may report brackets/plus for the same physical JIS -/^ key as the scan pin.
+		/// Drop other OEM names so capture does not store OemCloseBrackets instead of OemQuotes.
+		/// Never strip sibling JIS scan pins (-/^/¥/ろ) so multi-key chords still work.
+		/// </summary>
+		private static void RemoveConflictingOemForJisNumberRow(HashSet<string> pressed, string keep)
+		{
+			List<string> remove = null;
+			foreach (string t in pressed)
+			{
+				if (string.Equals(t, keep, StringComparison.OrdinalIgnoreCase))
+					continue;
+				if (!StableKeyToken.IsOemToken(t))
+					continue;
+				if (IsJisIntlScanTokenDown(t))
+					continue;
+				remove ??= new List<string>();
+				remove.Add(t);
+			}
+
+			if (remove == null)
+				return;
+			foreach (string t in remove)
+				pressed.Remove(t);
+		}
+
+		private static bool IsJisIntlScanDown(uint scan)
+			=> (scan & 0xFF) switch {
+				SC_INTL_YEN => _jisIntlYenDown,
+				SC_INTL_RO => _jisIntlRoDown,
+				SC_ISO_102 => _jisIntlIso102Down,
+				SC_JIS_OEM_MINUS => _jisOemMinusDown,
+				SC_JIS_OEM_EQUAL => _jisOemEqualDown,
+				SC_CONVERT => _jisConvertDown,
+				SC_NONCONVERT => _jisNonConvertDown,
+				_ => false
+			};
+
+		private static void SetJisIntlScanDown(uint scan, bool down)
+		{
+			switch (scan & 0xFF)
+			{
+				case SC_INTL_YEN:
+					_jisIntlYenDown = down;
+					break;
+				case SC_INTL_RO:
+					_jisIntlRoDown = down;
+					break;
+				case SC_ISO_102:
+					_jisIntlIso102Down = down;
+					break;
+				case SC_JIS_OEM_MINUS:
+					_jisOemMinusDown = down;
+					break;
+				case SC_JIS_OEM_EQUAL:
+					_jisOemEqualDown = down;
+					break;
+				case SC_CONVERT:
+					_jisConvertDown = down;
+					break;
+				case SC_NONCONVERT:
+					_jisNonConvertDown = down;
+					break;
+			}
+		}
+
+		private static void ClearJisIntlPendingEdges()
+		{
+			_pendingJisIntlCaptureToken = null;
+			_pendingJisIntlCaptureTick = 0;
+			_gameplayJisIntlEdges.Clear();
+			_lastJisIntlScanEdgeMs = 0;
+		}
+
+		private static void ClearJisIntlScanState()
+		{
+			_jisIntlYenDown = false;
+			_jisIntlRoDown = false;
+			_jisIntlIso102Down = false;
+			_jisOemMinusDown = false;
+			_jisOemEqualDown = false;
+			_jisConvertDown = false;
+			_jisNonConvertDown = false;
+			ClearJisIntlPendingEdges();
+		}
+
+		/// <summary>
+		/// True when the full capture held set includes scan/latch-only ghosts absent from confirmed held.
+		/// Contradiction evidence for RecoveringFromInvalidState (not a timed clear).
+		/// </summary>
+		public static bool HasCaptureHeldApiMismatch(
+			IReadOnlyCollection<string> held,
+			IReadOnlyCollection<string> confirmedHeld)
+		{
+			if (held == null || held.Count == 0 || confirmedHeld == null)
+				return false;
+
+			foreach (string token in held)
+			{
+				if (string.IsNullOrEmpty(token))
+					continue;
+				if (ContainsIgnoreCase(confirmedHeld, token))
+					continue;
+				if (IsUnconfirmedCaptureGhostToken(token))
+					return true;
+			}
+
+			return false;
+		}
+
+		/// <summary>
+		/// Clears MOD-owned capture ghost held flags for tokens recovered by the state machine.
+		/// Does not touch Terraria Main.blockInput / other-mod state.
+		/// </summary>
+		public static void ClearCaptureGhostHeldTokens(IReadOnlyCollection<string> tokens)
+		{
+			if (tokens == null || tokens.Count == 0)
+				return;
+
+			foreach (string token in tokens)
+			{
+				if (string.IsNullOrEmpty(token))
+					continue;
+
+				if (string.Equals(token, "OemPipe", StringComparison.OrdinalIgnoreCase))
+					_jisIntlYenDown = false;
+				else if (string.Equals(token, "OemBackslash", StringComparison.OrdinalIgnoreCase))
+				{
+					_jisIntlRoDown = false;
+					_jisIntlIso102Down = false;
+				}
+				else if (string.Equals(token, "OemMinus", StringComparison.OrdinalIgnoreCase))
+					_jisOemMinusDown = false;
+				else if (string.Equals(token, "OemQuotes", StringComparison.OrdinalIgnoreCase))
+					_jisOemEqualDown = false;
+				else if (string.Equals(token, "ImeConvert", StringComparison.OrdinalIgnoreCase))
+					_jisConvertDown = false;
+				else if (string.Equals(token, "ImeNoConvert", StringComparison.OrdinalIgnoreCase))
+					_jisNonConvertDown = false;
+				else if (string.Equals(token, BindingRestrictions.HankakuZenkakuToken, StringComparison.OrdinalIgnoreCase))
+				{
+					_hankakuZenkakuPhysicallyDown = false;
+					_hankakuPhysicalDownSinceMs = 0;
+				}
+				else if (string.Equals(token, "Kana", StringComparison.OrdinalIgnoreCase)
+					|| string.Equals(token, "OemCopy", StringComparison.OrdinalIgnoreCase))
+				{
+					_kanaPhysicallyDown = false;
+					_kanaPhysicalDownSinceMs = 0;
+				}
+				else if (PhysicalKeyToken.TryParseVk(token, out uint ghostVk))
+					_fallbackVkHeld.Remove(ghostVk);
+				else if (PhysicalKeyToken.TryParseScan(token, out ushort ghostScan, out bool ghostExtended))
+					_genericScanHeld.Remove(new GenericScanId(ghostScan, ghostExtended));
+			}
+
+			ClearJisIntlPendingEdges();
+			ClearHankakuBindEdges();
+			_pendingKanaCaptureToken = null;
+			_pendingKanaCaptureTick = 0;
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+				"SlotCapture ghost-held CLEAR tokens=[" + string.Join(",", tokens) + "]"
+				+ " capture=" + IsSlotCapturePassthrough
+				+ " (contradiction recovery)");
+			}
+		}
+
+		/// <summary>Clears all unconfirmed scan / hankaku / kana physical flags (exception residue / hard recover).</summary>
+		public static void ClearUnconfirmedScanHeldFlags(string reason)
+		{
+			_jisIntlYenDown = false;
+			_jisIntlRoDown = false;
+			_jisIntlIso102Down = false;
+			_jisOemMinusDown = false;
+			_jisOemEqualDown = false;
+			_jisConvertDown = false;
+			_jisNonConvertDown = false;
+			_hankakuZenkakuPhysicallyDown = false;
+			_hankakuPhysicalDownSinceMs = 0;
+			_kanaPhysicallyDown = false;
+			_kanaPhysicalDownSinceMs = 0;
+			_genericScanHeld.Clear();
+			_genericScanDownSinceMs.Clear();
+			_fallbackVkHeld.Clear();
+			_vkMeasuredScan.Clear();
+			_vkLastMeasuredEvent.Clear();
+			_eventSequenceUnifier.Clear();
+			_eventSequenceUnifier.DiagSink = null;
+			_gameplayPhysicalEdges.Clear();
+			ClearJisIntlPendingEdges();
+			ClearHankakuBindEdges();
+			_pendingKanaCaptureToken = null;
+			_pendingKanaCaptureTick = 0;
+			_gameplayKanaEdges.Clear();
+			if (AkDiag.Enabled) AkDiag.Log("Unconfirmed scan/hankaku/kana held cleared reason=" + reason);
+		}
+
+		private static bool IsUnconfirmedCaptureGhostToken(string token)
+		{
+			if (string.Equals(token, "ImeConvert", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "ImeNoConvert", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "OemPipe", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "OemBackslash", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, BindingRestrictions.HankakuZenkakuToken, StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "Kana", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "Kanji", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "OemCopy", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			return IsJisIntlScanTokenDown(token);
+		}
+
+		private static bool ContainsIgnoreCase(IReadOnlyCollection<string> set, string value)
+		{
+			foreach (string item in set)
+			{
+				if (string.Equals(item, value, StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+
+			return false;
+		}
+
 		private static void QueueWinKeyCapture(uint vkCode)
 		{
 			_pendingWinCaptureToken = vkCode == VK_LWIN ? "LeftWindows" : "RightWindows";
 			_pendingWinCaptureTick = Environment.TickCount64;
-			AkDiag.Log("WinKey KEYDOWN queued for capture: " + _pendingWinCaptureToken);
+			if (AkDiag.Enabled) AkDiag.Log("WinKey KEYDOWN queued for capture: " + _pendingWinCaptureToken);
 		}
 
 		public static void SetSlotCapturePassthrough(bool enabled)
@@ -1041,11 +2613,23 @@ namespace AdvancedKeybinds.Patches
 			IsSlotCapturePassthrough = enabled;
 			if (enabled)
 			{
-				_captureWarmupUntilMs = Environment.TickCount64 + CaptureWarmupMs;
+				// Acceptance uses RegisterCaptureSession WaitingForRelease (all start-held up),
+				// not a timed warmup — keep warmup unset so fresh toggle edges are not delayed.
+				_captureWarmupUntilMs = 0;
+				// Drop any pre-open edges; do not leave a fresh pending NumLock from Pause bleed.
+				_pendingToggleLockCaptureToken = null;
+				_pendingToggleLockCaptureTick = 0;
+				_pendingKanaCaptureToken = null;
+				_pendingKanaCaptureTick = 0;
+				_gameplayKanaEdges.Clear();
+				// Keep scan-held flags (may still be physically down); only drop pending edges.
+				ClearHankakuBindEdges();
+				ClearJisIntlPendingEdges();
+				GameWindowInputHook.ClearPendingEdges();
 				SyncWindowsKeyStateFromOs();
 				SyncSlotCapturePhysicalState();
 				JpCapsLockDetector.Reset();
-				AkDiag.Log("Slot capture physical baseline capsDown=" + _prevCapsHighBit + " hook=" + IsInstalled);
+				if (AkDiag.Enabled) AkDiag.Log("Slot capture physical baseline capsDown=" + _prevCapsHighBit + " hook=" + IsInstalled);
 			}
 			else
 			{
@@ -1165,7 +2749,7 @@ namespace AdvancedKeybinds.Patches
 			{
 				case "CapsLock":
 					if (IsCapsLockPhysicallyDown)
-						AkDiag.Log("Toggle-lock releasing CapsLock physical state.");
+						if (AkDiag.Enabled) AkDiag.Log("Toggle-lock releasing CapsLock physical state.");
 					IsCapsLockPhysicallyDown = false;
 					_gpPrevCapsPhysicallyDown = false;
 					_prevCapsPhysicallyDown = false;
@@ -1405,7 +2989,7 @@ namespace AdvancedKeybinds.Patches
 			_lastToggleGameplayEdgeMs[token] = now;
 			_toggleRepeatArmed[token] = false;
 			LatchToggleTokenForCombo(token);
-			AkDiag.Log("Toggle-lock gameplay edge: " + token);
+			if (AkDiag.Enabled) AkDiag.Log("Toggle-lock gameplay edge: " + token);
 		}
 
 		private static void QueueGameplayWinEdge(uint vkCode)
@@ -1428,7 +3012,7 @@ namespace AdvancedKeybinds.Patches
 				_leftWinRepeatArmed = false;
 			else
 				_rightWinRepeatArmed = false;
-			AkDiag.Log("WinKey gameplay edge: " + token);
+			if (AkDiag.Enabled) AkDiag.Log("WinKey gameplay edge: " + token);
 		}
 
 		internal static bool TryApplyCtrlEscCaptureOrBlock(uint vk, bool isDown, out bool blocked)
@@ -1438,7 +3022,7 @@ namespace AdvancedKeybinds.Patches
 		{
 			_pendingEscChordCaptureToken = "Escape";
 			_pendingEscChordCaptureTick = Environment.TickCount64;
-			AkDiag.Log("Ctrl+Esc KEYDOWN queued for slot capture.");
+			if (AkDiag.Enabled) AkDiag.Log("Ctrl+Esc KEYDOWN queued for slot capture.");
 		}
 
 		private static bool TryHandleCtrlEscChord(uint vk, bool isDown, out bool blocked)
@@ -1496,6 +3080,31 @@ namespace AdvancedKeybinds.Patches
 			_pendingToggleLockCaptureTick = 0;
 		}
 
+		/// <summary>
+		/// Clears every pending capture latch and alternate-source edge so opening a combo slot
+		/// cannot bind a stale Pause/Break→fake-NumLock or leftover Caps/Scroll edge.
+		/// Also re-baselines physical prev so the open-frame high-bit is not treated as a press.
+		/// </summary>
+		public static void DiscardAllPendingCaptureEdges()
+		{
+			_pendingToggleLockCaptureToken = null;
+			_pendingToggleLockCaptureTick = 0;
+			_pendingWinCaptureToken = null;
+			_pendingWinCaptureTick = 0;
+			_pendingEscChordCaptureToken = null;
+			_pendingEscChordCaptureTick = 0;
+			_pendingKanaCaptureToken = null;
+			_pendingKanaCaptureTick = 0;
+			_gameplayKanaEdges.Clear();
+			_imeConversionToggleForRecovery = false;
+			ClearHankakuBindEdges();
+			ClearJisIntlPendingEdges();
+			GameWindowInputHook.ClearPendingEdges();
+			JpCapsLockDetector.Reset();
+			SyncSlotCapturePhysicalState();
+			if (AkDiag.Enabled) AkDiag.Log("Discarded all pending capture edges (toggle/win/esc/kana/hankaku/jisIntl/window/JP)");
+		}
+
 		/// <summary>Consumes a toggle-lock KEYDOWN edge raised by the hook (used by slot capture).</summary>
 		public static bool TryConsumeToggleLockPress(out string token)
 		{
@@ -1515,8 +3124,20 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		public static bool TryPollToggleLockEdge(out string token)
 		{
+			// Real Caps (VK_CAPITAL / LL-hook queue) must never be discarded for hankaku suppress.
+			// Only IME→Caps fakes from alternate drains are filtered (see TryDrainAlternateToggleEdges).
 			if (TryConsumeToggleLockPress(out token))
+			{
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+					"Toggle-lock queued edge for capture: " + token
+					+ (string.Equals(token, "CapsLock", StringComparison.OrdinalIgnoreCase)
+					? " src=realHookOrPhysical"
+					: ""));
+				}
 				return true;
+			}
 
 			if (IsSlotCapturePassthrough && Environment.TickCount64 >= _captureWarmupUntilMs
 				&& TryDrainAlternateToggleEdges(out token))
@@ -1530,37 +3151,37 @@ namespace AdvancedKeybinds.Patches
 
 			if (TryPhysicalKeyEdge(VK_CAPITAL, "CapsLock", ref _prevCapsHighBit, out token))
 			{
-				AkDiag.Log("Toggle-lock physical edge for capture: " + token);
+				if (AkDiag.Enabled) AkDiag.Log("Toggle-lock physical edge for capture: " + token + " src=VK_CAPITAL");
 				return true;
 			}
 
 			if (TryPhysicalKeyEdge(VK_NUMLOCK, "NumLock", ref _prevNumHighBit, out token))
 			{
-				AkDiag.Log("Toggle-lock physical edge for capture: " + token);
+				if (AkDiag.Enabled) AkDiag.Log("Toggle-lock physical edge for capture: " + token);
 				return true;
 			}
 
 			if (TryPhysicalKeyEdge(VK_SCROLL, BindingRestrictions.ScrollLockToken, ref _prevScrollHighBit, out token))
 			{
-				AkDiag.Log("Toggle-lock physical edge for capture: " + token);
+				if (AkDiag.Enabled) AkDiag.Log("Toggle-lock physical edge for capture: " + token);
 				return true;
 			}
 
 			if (TryBoolEdge(IsCapsLockPhysicallyDown, ref _prevCapsPhysicallyDown, "CapsLock", out token))
 			{
-				AkDiag.Log("Toggle-lock hook edge for capture: " + token);
+				if (AkDiag.Enabled) AkDiag.Log("Toggle-lock hook edge for capture: " + token + " src=hookPhysicalDown");
 				return true;
 			}
 
 			if (TryBoolEdge(IsNumLockPhysicallyDown, ref _prevNumPhysicallyDown, "NumLock", out token))
 			{
-				AkDiag.Log("Toggle-lock hook edge for capture: " + token);
+				if (AkDiag.Enabled) AkDiag.Log("Toggle-lock hook edge for capture: " + token);
 				return true;
 			}
 
 			if (TryBoolEdge(IsScrollLockPhysicallyDown, ref _prevScrollPhysicallyDown, BindingRestrictions.ScrollLockToken, out token))
 			{
-				AkDiag.Log("Toggle-lock hook edge for capture: " + token);
+				if (AkDiag.Enabled) AkDiag.Log("Toggle-lock hook edge for capture: " + token);
 				return true;
 			}
 
@@ -1574,18 +3195,53 @@ namespace AdvancedKeybinds.Patches
 
 			foreach (string edge in GameWindowInputHook.DrainEdges())
 			{
+				// Imm conversion after 「半角／全角」 can enqueue fake CapsLock — not real VK_CAPITAL.
+				if (string.Equals(edge, "CapsLock", StringComparison.OrdinalIgnoreCase)
+					&& ShouldSuppressImeFalseCapsLock())
+				{
+					if (AkDiag.Enabled) AkDiag.Log("IME→Caps fake discarded (hankaku window) src=windowEdge");
+					continue;
+				}
+
 				token = edge;
-				AkDiag.Log("Toggle-lock window edge: " + token);
+				if (AkDiag.Enabled)
+				{
+					AkDiag.Log(
+					"Toggle-lock window edge: " + token
+					+ (string.Equals(token, "CapsLock", StringComparison.OrdinalIgnoreCase)
+					? " src=window(possibleRealScanCaps)"
+					: ""));
+				}
 				return true;
 			}
 
-			JpCapsLockDetector.Poll(allowImeEdges);
+			JpCapsLockDetector.Reset();
 
-			foreach (string edge in JpCapsLockDetector.DrainEdges())
+			// Discarded: GetKeyboardState / IME Caps synthesis is not a Microsoft keystroke path.
+			if (!Win32KeyboardAcquisitionPolicy.KeystrokeMessagesOnly)
 			{
-				token = edge;
-				AkDiag.Log("Toggle-lock JP edge: " + token);
-				return true;
+				JpCapsLockDetector.Poll(allowImeEdges);
+
+				foreach (string edge in JpCapsLockDetector.DrainEdges())
+				{
+					if (string.Equals(edge, "CapsLock", StringComparison.OrdinalIgnoreCase)
+						&& ShouldSuppressImeFalseCapsLock())
+					{
+						if (AkDiag.Enabled) AkDiag.Log("IME→Caps fake discarded (hankaku window) src=JpCaps");
+						continue;
+					}
+
+					token = edge;
+					if (AkDiag.Enabled)
+					{
+						AkDiag.Log(
+						"Toggle-lock JP edge: " + token
+						+ (string.Equals(token, "CapsLock", StringComparison.OrdinalIgnoreCase)
+						? " src=JpCaps(imeOrScan)"
+						: ""));
+					}
+					return true;
+				}
 			}
 
 			token = null;
@@ -1641,9 +3297,13 @@ namespace AdvancedKeybinds.Patches
 			if (_pendingToggleLockCaptureToken != null)
 			{
 				_pendingToggleLockCaptureTick = Environment.TickCount64;
-				AkDiag.Log("Toggle-lock KEYDOWN queued for capture: " + _pendingToggleLockCaptureToken);
+				if (AkDiag.Enabled) AkDiag.Log("Toggle-lock KEYDOWN queued for capture: " + _pendingToggleLockCaptureToken);
 			}
 		}
+
+		/// <summary>VK_PAUSE / VK_CANCEL share make-code 0x45 with NumLock — never treat them as NumLock.</summary>
+		internal static bool IsPauseOrBreakVk(uint vkCode)
+			=> vkCode == VK_PAUSE || vkCode == VK_CANCEL;
 
 		private static bool TryResolveToggleLockEvent(KBDLLHOOKSTRUCT data, out uint vkCode)
 		{
@@ -1655,7 +3315,16 @@ namespace AdvancedKeybinds.Patches
 				return true;
 			}
 
-			if (data.vkCode == VK_NUMLOCK || scan == SC_NUMLOCK)
+			// Pause/Break share make-code 0x45 with NumLock. Never treat them (or bare 0x45) as NumLock.
+			if (IsPauseOrBreakVk(data.vkCode))
+			{
+				if (AkDiag.Enabled) AkDiag.Log($"Pause/Break ignored as toggle-lock vk=0x{data.vkCode:X2} scan=0x{scan:X2}");
+				vkCode = 0;
+				return false;
+			}
+
+			// NumLock only when VK is NumLock (0x90). Scan 0x45 alone never decides NumLock.
+			if (data.vkCode == VK_NUMLOCK)
 			{
 				vkCode = VK_NUMLOCK;
 				return true;
@@ -1679,22 +3348,45 @@ namespace AdvancedKeybinds.Patches
 				long lp = lParam.ToInt64();
 				bool isUp = (lp & 0x80000000) != 0;
 				bool isDown = !isUp;
+				uint threadScan = (uint)((lp >> 16) & 0xFF);
+
+				// 「半角／全角」 must always reach OS/IME — never swallow on the thread hook.
+				// Acquisition is Microsoft keystroke messages only.
+				if (IsHankakuZenkakuPhysicalKey(vk, threadScan))
+					return CallNextHookEx(_threadHookId, nCode, wParam, lParam);
 
 				HandleShellBlockedEscapeKeyUp(vk, isUp);
 
 				if (IsGameForegroundCore())
 					_lastGameForegroundMs = Environment.TickCount64;
 
+				if (!Win32KeyboardAcquisitionPolicy.KeystrokeMessagesOnly)
+				{
+					if (IsKanaPhysicalKey(vk, threadScan))
+					{
+						ApplyKanaPhysical(
+							vk,
+							threadScan,
+							isDown,
+							"thread vk=0x" + vk.ToString("X2") + " scan=0x" + threadScan.ToString("X2"));
+					}
+
+					ApplyJisIntlScan(threadScan, isDown, "thread vk=0x" + vk.ToString("X2"));
+				}
+#if AK_DIAGNOSTICS
 				if (isDown && vk == VK_ESCAPE && IsControlDown())
 				{
 					bool suppress = ShouldBlockCtrlEscForShell()
 						|| (IsSlotCapturePassthrough && IsGameForegroundCore());
 					StartMenuDiag.LogThread(vk, isDown, suppress, suppress ? "ctrl+esc" : "ctrl+esc reason=" + DescribeWhyNotBlocking());
 				}
+#endif
 
 				if (TryHandleCtrlEscChord(vk, isDown, out bool blockCtrlEsc) && blockCtrlEsc)
 				{
+#if AK_DIAGNOSTICS
 					StartMenuDiag.LogThread(vk, isDown, blocked: true, IsSlotCapturePassthrough ? "ctrl+esc-capture" : "ctrl+esc-chord");
+#endif
 					return (IntPtr)1;
 				}
 
@@ -1711,11 +3403,15 @@ namespace AdvancedKeybinds.Patches
 						}
 
 						ApplyWindowsKeyState(vk, isDown, isUp);
+#if AK_DIAGNOSTICS
 						StartMenuDiag.LogThread(vk, isDown, blocked: true, "win");
+#endif
 						return (IntPtr)1;
 					}
 
+#if AK_DIAGNOSTICS
 					StartMenuDiag.LogThread(vk, isDown, blocked: false, "win reason=" + DescribeWhyNotBlocking());
+#endif
 				}
 				else if (TryHandleWinChordPassthrough(vk, isDown, "thread", out bool swallowChord) && swallowChord)
 					return (IntPtr)1;
@@ -1732,25 +3428,78 @@ namespace AdvancedKeybinds.Patches
 			{
 				int msg = wParam.ToInt32();
 				KBDLLHOOKSTRUCT data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+				bool isDown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+				bool isUp = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+				bool hookInjected = (data.flags & LLKHF_INJECTED) != 0
+					|| data.dwExtraInfo == InjectedMarker;
+				bool gameForegroundForDiagnostic = IsGameForegroundCore();
+				if (gameForegroundForDiagnostic
+					&& (isDown || isUp)
+					&& AdvancedKeybindsDiagnosticEvents.HasKeyMessageSubscribers)
+				{
+					DiagnosticEventPublisher.PublishHook(
+						data.vkCode,
+						(ushort)(data.scanCode & 0xFF),
+						(data.flags & LLKHF_EXTENDED) != 0,
+						isDown,
+						isRepeat: false,
+						hookInjected);
+				}
 
 				// Let our own injected events straight through, untouched.
 				if (data.dwExtraInfo == InjectedMarker)
 					return CallNextHookEx(_hookId, nCode, wParam, lParam);
 
-				if (IsGameForegroundCore())
+				if (gameForegroundForDiagnostic)
 					_lastGameForegroundMs = Environment.TickCount64;
 
-				bool isDown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
-				bool isUp = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+				// 「半角／全角」 must always reach OS/IME — never swallow in the LL hook.
+				// Acquisition is Microsoft keystroke messages only — do not Apply* from the hook.
+				if (IsHankakuZenkakuPhysicalKey(data.vkCode, data.scanCode))
+					return CallNextHookEx(_hookId, nCode, wParam, lParam);
 
 				HandleShellBlockedEscapeKeyUp(data.vkCode, isUp);
 
 				if (IsSlotCapturePassthrough && isDown)
 				{
 					uint scan = data.scanCode & 0xFF;
-					AkDiag.Log($"Slot capture hook keydown vk=0x{data.vkCode:X2} scan=0x{scan:X2}");
+					string hint = IsPauseOrBreakVk(data.vkCode)
+						? " Pause/Break(not NumLock)"
+						: data.vkCode == VK_NUMLOCK
+							? " NumLock"
+							: scan == SC_NUMLOCK
+								? " scan45(not NumLock)"
+								: IsKanaPhysicalKey(data.vkCode, scan)
+									? " Kana"
+									: TryMapJisIntlScanToToken(scan, out string jisToken)
+										? " " + jisToken
+										: "";
+					if (AkDiag.Enabled) AkDiag.Log($"Slot capture hook keydown vk=0x{data.vkCode:X2} scan=0x{scan:X2}{hint}");
 				}
 
+				if (!Win32KeyboardAcquisitionPolicy.KeystrokeMessagesOnly)
+				{
+					if (IsKanaPhysicalKey(data.vkCode, data.scanCode))
+					{
+						ApplyKanaPhysical(
+							data.vkCode,
+							data.scanCode,
+							isDown,
+							"hook vk=0x" + data.vkCode.ToString("X2")
+								+ " scan=0x" + (data.scanCode & 0xFF).ToString("X2"));
+					}
+
+					ApplyJisIntlScan(data.scanCode, isDown, "hook vk=0x" + data.vkCode.ToString("X2"));
+
+					bool hookExtended = (data.flags & LLKHF_EXTENDED) != 0;
+					ApplyPhysicalKeyEvent(
+						data.vkCode,
+						(ushort)(data.scanCode & 0xFF),
+						hookExtended,
+						isDown,
+						"hook vk=0x" + data.vkCode.ToString("X2"));
+				}
+#if AK_DIAGNOSTICS
 				if (isDown && data.vkCode == VK_ESCAPE && IsControlDown())
 				{
 					bool suppress = ShouldBlockCtrlEscForShell()
@@ -1758,10 +3507,13 @@ namespace AdvancedKeybinds.Patches
 					string reason = suppress ? "ctrl+esc" : "ctrl+esc reason=" + DescribeWhyNotBlocking();
 					StartMenuDiag.LogHook(VK_ESCAPE, true, suppress, reason);
 				}
+#endif
 
 				if (TryHandleCtrlEscChord(data.vkCode, isDown, out bool blockCtrlEsc) && blockCtrlEsc)
 				{
+#if AK_DIAGNOSTICS
 					StartMenuDiag.LogHook(data.vkCode, isDown, blocked: true, IsSlotCapturePassthrough ? "ctrl+esc-capture" : "ctrl+esc-chord");
+#endif
 					return (IntPtr)1;
 				}
 
@@ -1778,11 +3530,15 @@ namespace AdvancedKeybinds.Patches
 						}
 
 						ApplyWindowsKeyState(winVk, isDown, isUp);
+#if AK_DIAGNOSTICS
 						StartMenuDiag.LogHook(winVk, isDown, blocked: true, "win");
+#endif
 						return (IntPtr)1;
 					}
 
+#if AK_DIAGNOSTICS
 					StartMenuDiag.LogHook(winVk, isDown, blocked: false, "win reason=" + DescribeWhyNotBlocking());
+#endif
 					if (winVk == VK_LWIN)
 						IsLeftWindowsDown = false;
 					else
@@ -1838,6 +3594,7 @@ namespace AdvancedKeybinds.Patches
 			_pendingArrowChordWinVk = winVk;
 			_pendingArrowChordWithShift = monitorMove;
 			_pendingArrowChordVirtualDesktop = virtualDesktop;
+#if AK_DIAGNOSTICS
 			WinChordDiag.Log(
 				"request",
 				arrowVk,
@@ -1845,6 +3602,7 @@ namespace AdvancedKeybinds.Patches
 				"win=0x" + winVk.ToString("X")
 					+ " monitor=" + monitorMove
 					+ " vd=" + virtualDesktop);
+#endif
 		}
 
 		private static void FlushPendingArrowChords()
@@ -1865,11 +3623,13 @@ namespace AdvancedKeybinds.Patches
 			{
 				bool toRight = arrowVk == VK_RIGHT;
 				bool moved = TryMoveGameWindowToAdjacentMonitor(toRight);
+#if AK_DIAGNOSTICS
 				WinChordDiag.Log(
 					"flush",
 					arrowVk,
 					moved ? "monitor-move-ok" : "monitor-move-fail",
 					"dir=" + (toRight ? "right" : "left"));
+#endif
 				return;
 			}
 
@@ -1880,11 +3640,13 @@ namespace AdvancedKeybinds.Patches
 				GameWindowInputHook.RunWithOsWinHotkeysEnabled(() => {
 					sent = EmitWinCtrlArrowChord(arrowVk, winVk);
 				});
+#if AK_DIAGNOSTICS
 				WinChordDiag.Log(
 					"flush",
 					arrowVk,
 					sent > 0 ? "vd-inject-ok" : "vd-inject-fail",
 					"win=0x" + winVk.ToString("X") + " sent=" + sent);
+#endif
 			}
 		}
 
@@ -1901,14 +3663,14 @@ namespace AdvancedKeybinds.Patches
 
 			if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
 			{
-				AkDiag.Log("MonitorMove aborted: no game HWND.");
+				if (AkDiag.Enabled) AkDiag.Log("MonitorMove aborted: no game HWND.");
 				return false;
 			}
 
 			List<MonitorEntry> monitors = EnumerateMonitors();
 			if (monitors.Count < 2)
 			{
-				AkDiag.Log("MonitorMove aborted: monitorCount=" + monitors.Count);
+				if (AkDiag.Enabled) AkDiag.Log("MonitorMove aborted: monitorCount=" + monitors.Count);
 				return false;
 			}
 
@@ -1916,7 +3678,7 @@ namespace AdvancedKeybinds.Patches
 			int currentIndex = monitors.FindIndex(m => m.Handle == currentHandle);
 			if (currentIndex < 0)
 			{
-				AkDiag.Log("MonitorMove aborted: current monitor not in enum list.");
+				if (AkDiag.Enabled) AkDiag.Log("MonitorMove aborted: current monitor not in enum list.");
 				return false;
 			}
 
@@ -1924,7 +3686,7 @@ namespace AdvancedKeybinds.Patches
 			MonitorEntry? target = FindAdjacentMonitor(monitors, current, toRight);
 			if (target == null || target.Value.Handle == current.Handle)
 			{
-				AkDiag.Log("MonitorMove aborted: no adjacent monitor dir=" + (toRight ? "right" : "left"));
+				if (AkDiag.Enabled) AkDiag.Log("MonitorMove aborted: no adjacent monitor dir=" + (toRight ? "right" : "left"));
 				return false;
 			}
 
@@ -1965,7 +3727,7 @@ namespace AdvancedKeybinds.Patches
 			int destH = dest.Monitor.Height;
 			if (destW < 640 || destH < 480)
 			{
-				AkDiag.Log("MonitorMove borderless-fit aborted: dest too small " + destW + "x" + destH);
+				if (AkDiag.Enabled) AkDiag.Log("MonitorMove borderless-fit aborted: dest too small " + destW + "x" + destH);
 				return false;
 			}
 
@@ -1979,7 +3741,7 @@ namespace AdvancedKeybinds.Patches
 			}
 			catch (Exception ex)
 			{
-				AkDiag.Log("MonitorMove SetResolution failed: " + ex.Message);
+				if (AkDiag.Enabled) AkDiag.Log("MonitorMove SetResolution failed: " + ex.Message);
 				return false;
 			}
 
@@ -1994,11 +3756,17 @@ namespace AdvancedKeybinds.Patches
 				destH,
 				SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
 
-			AkDiag.Log(
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
 				"MonitorMove borderless-fit " + (ok ? "ok" : "SetWindowPos-fail")
 				+ " to=(" + dest.Monitor.Left + "," + dest.Monitor.Top + ")"
 				+ " size=" + destW + "x" + destH
 				+ " monitors=" + EnumerateMonitors().Count);
+			}
+
+			if (ok)
+				HoldTierHudSystem.NotifyClientSurfaceChanged("MonitorMove-borderless-fit");
 
 			return ok;
 		}
@@ -2007,7 +3775,7 @@ namespace AdvancedKeybinds.Patches
 		{
 			if (!GetWindowRect(hwnd, out RECT windowRect))
 			{
-				AkDiag.Log("MonitorMove aborted: GetWindowRect failed.");
+				if (AkDiag.Enabled) AkDiag.Log("MonitorMove aborted: GetWindowRect failed.");
 				return false;
 			}
 
@@ -2028,11 +3796,17 @@ namespace AdvancedKeybinds.Patches
 
 			bool ok = SetWindowPos(hwnd, IntPtr.Zero, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 
-			AkDiag.Log(
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
 				"MonitorMove keep-size " + (ok ? "ok" : "SetWindowPos-fail")
 				+ " from=(" + current.Monitor.Left + "," + current.Monitor.Top + ")"
 				+ " to=(" + dest.Monitor.Left + "," + dest.Monitor.Top + ")"
 				+ " monitors=" + EnumerateMonitors().Count);
+			}
+
+			if (ok)
+				HoldTierHudSystem.NotifyClientSurfaceChanged("MonitorMove-keep-size");
 
 			return ok;
 		}
@@ -2047,7 +3821,7 @@ namespace AdvancedKeybinds.Patches
 			}
 			catch (Exception ex)
 			{
-				AkDiag.Log("MonitorMove borderless style skipped: " + ex.Message);
+				if (AkDiag.Enabled) AkDiag.Log("MonitorMove borderless style skipped: " + ex.Message);
 			}
 		}
 
@@ -2130,8 +3904,10 @@ namespace AdvancedKeybinds.Patches
 			try
 			{
 				Process.Start(new ProcessStartInfo("ms-screenclip:") { UseShellExecute = true });
+#if AK_DIAGNOSTICS
 				WinChordDiag.Log("flush", VK_S, "snip-launched", "ok");
-				AkDiag.Log("Launched ms-screenclip: for Win+Shift+S.");
+#endif
+				if (AkDiag.Enabled) AkDiag.Log("Launched ms-screenclip: for Win+Shift+S.");
 			}
 			catch (Exception ex)
 			{
@@ -2159,9 +3935,9 @@ namespace AdvancedKeybinds.Patches
 			{
 				uint sent = SendInput((uint)batch.Length, batch, Marshal.SizeOf<INPUT>());
 				if (sent != batch.Length)
-					AkDiag.Log($"Win+Ctrl+Arrow SendInput sent {sent}/{batch.Length} events (error {Marshal.GetLastWin32Error()}).");
+					if (AkDiag.Enabled) AkDiag.Log($"Win+Ctrl+Arrow SendInput sent {sent}/{batch.Length} events (error {Marshal.GetLastWin32Error()}).");
 				else
-					AkDiag.Log($"Win+Ctrl+Arrow injected {sent} events arrow=0x{arrowVk:X2} ctrl=0x{ctrlVk:X2}.");
+					if (AkDiag.Enabled) AkDiag.Log($"Win+Ctrl+Arrow injected {sent} events arrow=0x{arrowVk:X2} ctrl=0x{ctrlVk:X2}.");
 
 				return sent;
 			}

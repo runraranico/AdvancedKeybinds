@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Diagnostics;
 using AdvancedKeybinds.UI;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -48,7 +49,11 @@ namespace AdvancedKeybinds.Patches
 				orig(self, spriteBatch);
 
 				if (self != null && self.GetType().Name.Contains("UIManageControls"))
+				{
+					KeybindUiWorldInputGuard.NotifyManageControlsUiPresent();
+					KeybindingUiPatches.DrawControlsHeaderTip(self, spriteBatch);
 					ComboPanel.DrawAndHandle(spriteBatch);
+				}
 			});
 		}
 
@@ -122,6 +127,8 @@ namespace AdvancedKeybinds.Patches
 					return;
 				}
 
+				KeybindUiWorldInputGuard.NotifyManageControlsUiPresent();
+				KeybindingUiPatches.EnsureControlsUndoButton(self);
 				ComboPanel.PrepareParentMenuForEscape();
 				orig(self, gameTime);
 				ComboPanel.PrepareParentMenuForEscape();
@@ -146,13 +153,19 @@ namespace AdvancedKeybinds.Patches
 			ModDetours.Apply(close, (orig_FancyClose orig) => {
 				if (!ComboPanel.ShouldBlockFancyUiClose())
 				{
+#if AK_DIAGNOSTICS
+					ComboPanelEscPathDiag.NoteStack("IngameFancyUI.Close.ALLOWED");
+#endif
 					orig();
 					// Vanilla Close sets playerInventory=true; undo before the next draw when we opened via shortcut.
 					KeybindShortcutSystem.SuppressVanillaInventoryOpenAfterShortcutUiClose();
 					return;
 				}
 
-				AkDiag.Log("Blocked IngameFancyUI.Close while combo panel is open.");
+#if AK_DIAGNOSTICS
+				ComboPanelEscPathDiag.NoteStack("IngameFancyUI.Close.BLOCKED");
+#endif
+				if (AkDiag.Enabled) AkDiag.Log("Blocked IngameFancyUI.Close while combo panel is open.");
 			});
 		}
 

@@ -2,9 +2,262 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: 設定を開く
 	OpenKeybindMenu.DisplayName: コントロールを開く
 	OpenModConfigMenu.DisplayName: MOD設定を開く
+	CycleHoldTierHudAnchor.DisplayName: Holdゲージを切替
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: 設定
+
+		HoldTierHudCustomPositionX: {
+			Label: Holdゲージ カスタム位置 X
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Holdゲージ カスタム位置 Y
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: 足元
+			Tooltip: ""
+		}
+		Mouse: {
+			Label: マウス
+			Tooltip: ""
+		}
+		Custom: {
+			Label: カスタム
+			Tooltip: 「ドラッグ許可」をオンにして、ゲージをミドルクリック（マウスホイール押し込み）で移動
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: 特殊キー・UI制御
+		Suppress: {
+			Label: Windowsキーを抑制する
+			Tooltip: Winキーをバインドに使う場合はオン推奨
+		}
+		SuppressDebugUi: {
+			Label: TerrariaのデバッグUIキーを抑制する
+			Tooltip: F7・F8・F10・F11で開くTerrariaの特殊UIを抑制します。キー登録やMODアクションには引き続き使用できます
+		}
+	}
+	Guide: {
+		NotesHeader: ウィンドウへのカーソル固定
+		CursorConfineToggle: {
+			Label: ウィンドウ内に固定
+			Tooltip: ゲームウィンドウ画面から外にマウスカーソルが移動できなくなります。隠しショートカット [c/FF9B00:Ctrl+Shift+Alt+M] でも切り替えできます
+		}
+		CursorConfineOnLoad: {
+			Label: 次回MODロード時に自動で開始
+			Tooltip: オンなら次回MODロード時にウィンドウ内固定をオンで開始し、オフならオフで開始します
+		}
+	}
+
+	HoldTierHud: {
+		Header: 離した時Holdゲージ
+
+		Enabled: {
+			Label: Holdゲージを表示
+			Tooltip: 同じキーに「離した時」Holdが2つ以上あるとき、押し続け中にチャージゲージを出します
+		}
+
+		AllowDrag: {
+			Label: ドラッグ許可
+			Tooltip: ゲージ位置がカスタムの場合はミドルクリックでバーを掴んで移動できます。
+		}
+
+		CustomGaugeHoverTip: 「ドラッグ許可」をオンにして、ゲージをミドルクリック（マウスホイール押し込み）で移動
+
+		Anchor: {
+			Label: ゲージ位置
+			Tooltip: 足元 / マウス追従 / カスタム（ドラッグ許可をオンにして設定）。切替キーは足元→マウス→カスタム→足元…と循環します
+		}
+
+		BarWidth: {
+			Label: ゲージの長さ
+			Tooltip: 横バーの幅（150〜500ピクセル）。既定200。
+		}
+
+		Color: {
+			Label: ゲージの色
+			Tooltip: 赤・緑・青のスライダーで色を決めます
+		}
+
+		CustomPositionX: {
+			Label: カスタム位置 X
+			Tooltip: カスタムアンカーの横座標。ゲージをドラッグすると自動で更新されます。-1 は未設定。
+		}
+
+		CustomPositionY: {
+			Label: カスタム位置 Y
+			Tooltip: カスタムアンカーの縦座標。ゲージをドラッグすると自動で更新されます。-1 は未設定。
+		}
+	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	ColorChannel: {
+		Red.Label: 赤
+		Green.Label: 緑
+		Blue.Label: 青
+		Alpha.Label: 透明度
+	}
+}
+
+Hints: {
+	WinKeySuppress: Advanced Keybindsの設定を開いて、winキー抑制を確認して下さい
+}
+
+CursorConfine: {
+	Enabled: ウィンドウ内に固定 ON
+	Disabled: ウィンドウ内に固定 OFF
+	WindowsOnly: ウィンドウへのカーソル固定は Windows のみ対応です
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: カーソルが操作名を選択している時、右クリックで未設定（要確認）、中クリックでデフォルトに戻せます
+		ConfirmUnsetHover: もう一度右クリックで未設定にします
+	}
+
 	Combo: {
 		Press: キーを押す...
 		Empty: (なし)
@@ -12,18 +265,40 @@ UI: {
 		Clear: クリア
 		Undo: 取消
 		Save: 保存
-		HintLine1: 枠を左クリックしてキー/マウスを押してください
-		HintLine2: カーソルを枠に合わせて右クリックで解除
-		HintLine3: Hold設定は1キーの時のみ有効化できる
-		HintLine4: 押し時間はスライダー/数値で調整
+		HintLine1: 枠を左クリックして キー/マウス を登録
+		HintLine2: Holdは 1キー の時のみ可
+		HintLine3: カーソルを枠に合わせ右クリックで設定解除
 		HoldDefaultLabel: 初期値
 		HoldWhileHeldTitle: Hold
-		HoldWhileHeldHint: 押し続けで有効
+		HoldWhileHeldHint: 押し続けて有効
 		HoldOnReleaseTitle: Hold
 		HoldOnReleaseHint: 離した時に有効
 		HoldPreviewWhileHeld: Hold 
-		HoldPreviewOnRelease: Hold↑ 
-		RejectLeftClickOnly: 左クリック単独でよろしいですか？もう一度保存で確定
+		HoldPreviewOnRelease: Hold↑
+		HoldMsInputTooltip: 10～10000迄を入力可能
 		ConfirmLeftClickOnly: 左クリック単独でよろしいですか？もう一度保存で確定
+		KeyInfoSelectHint: キーを選択してください
+		KeyInfoSelectGuide: キーを選ぶ
+		KeyInfoCurrent: 元のキー
+		KeyInfoDisplay: 表示名
+		KeyInfoDefault: 初期名
+		KeyInfoScan: ScanCode
+		KeyInfoNone: なし
+		KeyInfoPresent: あり
+		KeyInfoNamePlaceholder: キーの表示名変更
+		KeyInfoPressHint: キーを押してください
+		KeyInfoAwaitHeader: 変更したいキー
+		KeyInfoNameGuideLine1: 変更後表示する
+		KeyInfoNameGuideLine2: 文字を入力して
+		KeyInfoNameGuideLine3: Enterで決定
+		KeyInfoResetDisplays: 登録表示を初期に戻す
+		KeyInfoResetDisplaysLine1: 全ての登録表示を
+		KeyInfoResetDisplaysLine2: 初期値に戻す
+		KeyInfoResetDisplaysConfirm: 変更したキー表示名を、すべて初期値に戻しますか？
+		KeyInfoDisplayRestored: 表示名{0}を{1}に戻しました
+		SlotOriginalKey: 元のキー : {0}
+		SlotDisplayNameHover: "{0} : {1}"
+		MouseWheelUp: Toward you
+		MouseWheelDown: Away from you
 	}
 }

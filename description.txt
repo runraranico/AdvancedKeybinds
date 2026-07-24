@@ -1,17 +1,27 @@
-Adds advanced key and mouse bindings to vanilla and mod controls.
+Features
 
-How to use:
-Open the normal Controls / keybind settings screen, then click a control row to open the combo panel.
+## Key Binding Screen
 
-- Chord bindings (up to 3 keys / mouse buttons)
-- Single-key Hold: while held or on release (duration adjustable)
-- Undo / Clear / Save in the combo panel
-- While the cursor is over a keybind box: right-click to unset, middle-click to restore default
-- Suppresses the Windows key while the game is focused (so Win can be bound).
-  When the game is inactive / unfocused, Windows key behavior returns to normal.
+Additional features for Terraria's standard Key Mapping screen.
+ - Adds an Undo button to the Key Mapping screen
+ - Right-click to clear the current binding
+ - Middle-click to restore the default binding
+ 
+## Combo Panel
 
-Notes:
-- Hold works for single-key inputs only
-- Binding Left-click alone asks for confirmation (save again to confirm)
-- CapsLock Hold is for ANSI layouts; on Japanese/JIS keyboards, CapsLock tap works but Hold does not
-- Some mod-specific special inputs are not supported
+Click a key binding to open the combo panel.
+ - Assign up to 3 keyboard keys or mouse buttons
+ - Supports Mouse Wheel Up and Mouse Wheel Down
+ - Supports Mouse 4 and Mouse 5
+ - Single-key hold actions (while pressed or on release, adjustable duration)
+ - Custom display names for individual keys
+ - Undo / Clear / Save functions inside the combo panel
+
+## Notes
+ - Hold actions are available only for single-key bindings.
+ - Assigning Left Click by itself requires confirmation (save again to confirm).
+ - Some MOD-specific special inputs cannot be captured.
+ - Long-press Caps Lock is intended for ANSI keyboards.
+ - On Japanese (JIS) keyboards, tapping Caps Lock works normally, but long-press is not supported.
+ - Dead keys / accent keys (for example, the German accent key) may display different names depending on the active Windows keyboard layout.
+ - Some special keys may still have hardware or OS limitations

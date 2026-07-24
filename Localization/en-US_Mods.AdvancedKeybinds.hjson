@@ -2,9 +2,136 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: Open Settings
 	OpenKeybindMenu.DisplayName: Open Controls
 	OpenModConfigMenu.DisplayName: Open Mod Configuration
+	CycleHoldTierHudAnchor.DisplayName: Cycle Hold HUD
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: Settings
+
+		HoldTierHudCustomPositionX: {
+			Label: Hold Tier Hud Custom Position X
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Hold Tier Hud Custom Position Y
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: Feet
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: Mouse
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: Custom
+			Tooltip: Enable "Allow drag" and middle-click (mouse-wheel press) the gauge to move
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: Special keys / UI control
+
+		Suppress: {
+			Label: Suppress Windows key
+			Tooltip: Keep on if you bind the Windows key
+		}
+
+		SuppressDebugUi: {
+			Label: Suppress Terraria Debug UI Hotkeys
+			Tooltip: Prevents Terraria's special UI from opening with F7, F8, F10, and F11. The keys can still be used for keybinds and mod actions.
+		}
+	}
+
+	Guide: {
+		NotesHeader: Lock Cursor to Window
+
+		CursorConfineToggle: {
+			Label: Confine cursor to window
+			Tooltip: The mouse cursor cannot move outside the game window. You can also toggle this with the hidden shortcut [c/FF9B00:Ctrl+Shift+Alt+M]
+		}
+
+		CursorConfineOnLoad: {
+			Label: Auto-enable on next mod load
+			Tooltip: On: start confined on next mod load. Off: start unconfined on next mod load
+		}
+	}
+
+	HoldTierHud: {
+		Header: On-release Hold gauge
+
+		Enabled: {
+			Label: Show Hold gauge
+			Tooltip: While holding a key that has 2+ on-release Holds, show a charge gauge
+		}
+
+		AllowDrag: {
+			Label: Allow drag
+			Tooltip: When the gauge position is Custom, you can middle-click the bar to grab and move it.
+		}
+
+		CustomGaugeHoverTip: Enable "Allow drag" and middle-click (mouse-wheel press) the gauge to move
+
+		Anchor: {
+			Label: Gauge position
+			Tooltip: Feet, mouse, or custom (enable Allow drag to set). The hotkey cycles Feet → Mouse → Custom → Feet
+		}
+
+		BarWidth: {
+			Label: Gauge length
+			Tooltip: Horizontal bar width in pixels (150–500). Default 200.
+		}
+
+		Color: {
+			Label: Gauge color
+			Tooltip: Red / Green / Blue sliders
+		}
+
+		CustomPositionX: {
+			Label: Custom position X
+			Tooltip: Horizontal screen coordinate for the Custom anchor. Set automatically when dragging the gauge. -1 = not yet set.
+		}
+
+		CustomPositionY: {
+			Label: Custom position Y
+			Tooltip: Vertical screen coordinate for the Custom anchor. Set automatically when dragging the gauge. -1 = not yet set.
+		}
+	}
+
+	ColorChannel: {
+		Red.Label: Red
+		Green.Label: Green
+		Blue.Label: Blue
+		Alpha.Label: Alpha
+	}
+}
+
+Hints.WinKeySuppress: Open Advanced Keybinds settings and check Windows key suppression
+
+CursorConfine: {
+	Enabled: Cursor lock ON
+	Disabled: Cursor lock OFF
+	WindowsOnly: Lock cursor to window is Windows-only
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: When the cursor is selecting an action name, right-click to unset (confirm required), middle-click to restore the default
+		ConfirmUnsetHover: Right-click again to unset
+	}
+
 	Combo: {
 		Press: press a key...
 		Empty: (empty)
@@ -13,9 +140,8 @@ UI: {
 		Undo: Undo
 		Save: Save
 		HintLine1: Left-click a slot, then press a key or mouse button.
-		HintLine2: Hover over a slot and right-click to clear it.
-		HintLine3: Hold can only be enabled for single-key inputs.
-		HintLine4: Set hold time with the slider or number box.
+		HintLine2: Hold only with 1 key.
+		HintLine3: Hover a slot and right-click to clear the binding.
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: while held
@@ -23,7 +149,30 @@ UI: {
 		HoldOnReleaseHint: on release
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
-		RejectLeftClickOnly: Bind Left-click alone? Save again to confirm.
+		HoldMsInputTooltip: Enter a value from 10～10000
 		ConfirmLeftClickOnly: Bind Left-click alone? Save again to confirm.
+		KeyInfoSelectHint: Select a key
+		KeyInfoSelectGuide: Select a key
+		KeyInfoCurrent: Original key
+		KeyInfoDisplay: Display
+		KeyInfoDefault: Default
+		KeyInfoScan: ScanCode
+		KeyInfoNone: none
+		KeyInfoPresent: present
+		KeyInfoNamePlaceholder: Change key display name
+		KeyInfoPressHint: Press a key
+		KeyInfoAwaitHeader: Key to change
+		KeyInfoNameGuideLine1: New display name
+		KeyInfoNameGuideLine2: Type text here
+		KeyInfoNameGuideLine3: Enter to confirm
+		KeyInfoResetDisplays: Reset display names
+		KeyInfoResetDisplaysLine1: Reset all
+		KeyInfoResetDisplaysLine2: display names
+		KeyInfoResetDisplaysConfirm: Reset all custom key display names to defaults?
+		KeyInfoDisplayRestored: Restored display name {0} to {1}
+		SlotOriginalKey: Original: {0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: Toward you
+		MouseWheelDown: Away from you
 	}
 }

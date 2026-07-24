@@ -2,9 +2,136 @@ Keybinds: {
 	OpenSettingsMenu.DisplayName: Otworz ustawienia
 	OpenKeybindMenu.DisplayName: Otworz sterowanie
 	OpenModConfigMenu.DisplayName: Otworz konfiguracje modow
+	CycleHoldTierHudAnchor.DisplayName: Przelacz HUD Hold
+}
+
+Configs: {
+	AdvancedKeybindsConfig: {
+		DisplayName: Ustawienia
+
+		HoldTierHudCustomPositionX: {
+			Label: Własna pozycja X paska Hold
+			Tooltip: ""
+		}
+
+		HoldTierHudCustomPositionY: {
+			Label: Własna pozycja Y paska Hold
+			Tooltip: ""
+		}
+	}
+
+	HoldTierHudAnchor: {
+		Tooltip: ""
+
+		Feet: {
+			Label: Stopy
+			Tooltip: ""
+		}
+
+		Mouse: {
+			Label: Mysz
+			Tooltip: ""
+		}
+
+		Custom: {
+			Label: Własna
+			Tooltip: Włącz « Zezwól na przeciąganie » i kliknij pasek środkowym przyciskiem (naciśnięcie kółka), aby przesunąć
+		}
+	}
+}
+
+Config: {
+	WindowsKey: {
+		Header: Specjalne klawisze / sterowanie UI
+
+		Suppress: {
+			Label: Blokuj klawisz Windows
+			Tooltip: Pozostaw włączone, jeśli przypisujesz klawisz Windows
+		}
+
+		SuppressDebugUi: {
+			Label: Blokuj skróty UI debugowania Terrarii
+			Tooltip: Zapobiega otwieraniu specjalnego UI Terrarii klawiszami F7, F8, F10 i F11. Klawisze nadal można używać do przypisań i akcji moda.
+		}
+	}
+
+	Guide: {
+		NotesHeader: Blokada kursora w oknie
+
+		CursorConfineToggle: {
+			Label: Ogranicz kursor do okna
+			Tooltip: Kursor myszy nie może wyjść poza okno gry. Możesz też przełączyć ukrytym skrótem [c/FF9B00:Ctrl+Shift+Alt+M]
+		}
+
+		CursorConfineOnLoad: {
+			Label: Automatycznie wlacz przy nastepnym ladowaniu moda
+			Tooltip: Włączone: start z blokadą przy następnym ładowaniu. Wyłączone: start bez blokady przy następnym ładowaniu
+		}
+	}
+
+	HoldTierHud: {
+		Header: Pasek Hold po puszczeniu
+
+		Enabled: {
+			Label: Pokaż pasek Hold
+			Tooltip: Przy trzymaniu klawisza z 2+ Holdami po puszczeniu pokazuje pasek ładowania
+		}
+
+		AllowDrag: {
+			Label: Zezwól na przeciąganie
+			Tooltip: Gdy pozycja paska to Własna, możesz chwycić i przesunąć pasek środkowym przyciskiem.
+		}
+
+		CustomGaugeHoverTip: Włącz « Zezwól na przeciąganie » i kliknij pasek środkowym przyciskiem (naciśnięcie kółka), aby przesunąć
+
+		Anchor: {
+			Label: Pozycja paska
+			Tooltip: Stopy, mysz lub własna (włącz Zezwól na przeciąganie). Skrót cykluje Stopy → Mysz → Własna → Stopy
+		}
+
+		BarWidth: {
+			Label: Długość paska
+			Tooltip: Szerokość poziomego paska w pikselach (150–500). Domyślnie 200.
+		}
+
+		Color: {
+			Label: Kolor paska
+			Tooltip: Suwaki Czerwony / Zielony / Niebieski
+		}
+
+		CustomPositionX: {
+			Label: Własna pozycja X
+			Tooltip: Pozioma współrzędna ekranu własnej kotwicy. Ustawiana automatycznie przy przeciąganiu paska. -1 = jeszcze nie ustawiona.
+		}
+
+		CustomPositionY: {
+			Label: Własna pozycja Y
+			Tooltip: Pionowa współrzędna ekranu własnej kotwicy. Ustawiana automatycznie przy przeciąganiu paska. -1 = jeszcze nie ustawiona.
+		}
+	}
+
+	ColorChannel: {
+		Red.Label: Czerwony
+		Green.Label: Zielony
+		Blue.Label: Niebieski
+		Alpha.Label: Alfa
+	}
+}
+
+Hints.WinKeySuppress: Otworz ustawienia Advanced Keybinds i sprawdz tlumienie klawisza Windows
+
+CursorConfine: {
+	Enabled: Blokada kursora WLACZONA
+	Disabled: Blokada kursora WYLACZONA
+	WindowsOnly: Blokada kursora w oknie jest dostepna tylko w systemie Windows
 }
 
 UI: {
+	KeybindRow: {
+		OutsideSlotTip: Gdy kursor wybiera nazwę akcji, prawy przycisk — wyczyść (wymaga potwierdzenia), środkowy — przywróć domyślne
+		ConfirmUnsetHover: Kliknij ponownie prawym, aby wyczyścić
+	}
+
 	Combo: {
 		Press: nacisnij klawisz...
 		Empty: (puste)
@@ -13,9 +140,8 @@ UI: {
 		Undo: Cofnij
 		Save: Zapisz
 		HintLine1: Kliknij lewym przyciskiem pole, a nastepnie nacisnij klawisz lub przycisk myszy.
-		HintLine2: Najedz kursorem na pole i kliknij prawym przyciskiem, aby wyczyscic.
-		HintLine3: Hold mozna wlaczyc tylko dla wejsc z pojedynczym klawiszem.
-		HintLine4: Ustaw czas przytrzymania suwakiem lub polem liczbowym.
+		HintLine2: Hold tylko przy 1 klawiszu.
+		HintLine3: Najedz kursorem na pole i PPM, aby usunac przypisanie.
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: podczas trzymania
@@ -23,7 +149,30 @@ UI: {
 		HoldOnReleaseHint: po puszczeniu
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
-		RejectLeftClickOnly: Przypisać sam lewy przycisk? Zapisz ponownie, aby potwierdzić.
+		HoldMsInputTooltip: Wpisz wartosc od 10～10000
 		ConfirmLeftClickOnly: Przypisać sam lewy przycisk? Zapisz ponownie, aby potwierdzić.
+		KeyInfoSelectHint: Wybierz klawisz
+		KeyInfoSelectGuide: Wybierz klawisz
+		KeyInfoCurrent: Oryginalny klawisz
+		KeyInfoDisplay: Nazwa wyświetlana
+		KeyInfoDefault: Nazwa domyślna
+		KeyInfoScan: ScanCode
+		KeyInfoNone: brak
+		KeyInfoPresent: obecny
+		KeyInfoNamePlaceholder: Zmień nazwę wyświetlaną klawisza
+		KeyInfoPressHint: Naciśnij klawisz
+		KeyInfoAwaitHeader: Klawisz do zmiany
+		KeyInfoNameGuideLine1: Nowa nazwa wyświetlana
+		KeyInfoNameGuideLine2: Wpisz tekst tutaj
+		KeyInfoNameGuideLine3: Enter, aby potwierdzić
+		KeyInfoResetDisplays: Resetuj nazwy wyświetlane
+		KeyInfoResetDisplaysLine1: Resetuj wszystkie
+		KeyInfoResetDisplaysLine2: nazwy wyświetlane
+		KeyInfoResetDisplaysConfirm: Zresetować wszystkie własne nazwy wyświetlane klawiszy do domyślnych?
+		KeyInfoDisplayRestored: Przywrócono nazwę wyświetlaną {0} do {1}
+		SlotOriginalKey: Oryginał: {0}
+		SlotDisplayNameHover: "{0}: {1}"
+		MouseWheelUp: Do siebie
+		MouseWheelDown: Od siebie
 	}
 }

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AdvancedKeybinds.Core;
 using Newtonsoft.Json;
 
 namespace AdvancedKeybinds.Binding
@@ -7,8 +8,8 @@ namespace AdvancedKeybinds.Binding
 	/// A single action's advanced binding, expressed as up to three ordered slots plus a hold flag.
 	/// Slot1 = left, Slot2 = middle, Slot3 = right. Any slot may be empty. When all filled slots are
 	/// pressed together the action fires. A one-slot combo may additionally be a hold.
-	/// Note: a plain single-key TAP (any slot, no hold) is NOT stored here — it lives in
-	/// vanilla's key configuration so the controls list shows the normal centered key label.
+	/// Keys-name plain single-key taps are also stored for slot placement; gameplay for those stays
+	/// with vanilla. Measured SC:/VK: singles use Advanced storage and BindingInputEngine.
 	/// </summary>
 	public sealed class ComboBinding
 	{
@@ -24,6 +25,14 @@ namespace AdvancedKeybinds.Binding
 		public string Slot1;
 		public string Slot2;
 		public string Slot3;
+
+		/// <summary>Optional display override for <see cref="Slot1"/> (empty = use FormatToken).</summary>
+		public string Slot1Display;
+		/// <summary>Optional display override for <see cref="Slot2"/> (empty = use FormatToken).</summary>
+		public string Slot2Display;
+		/// <summary>Optional display override for <see cref="Slot3"/> (empty = use FormatToken).</summary>
+		public string Slot3Display;
+
 		public bool Hold;
 
 		/// <summary>
@@ -69,35 +78,19 @@ namespace AdvancedKeybinds.Binding
 		public int FilledSlotCount => Keys.Count;
 
 		/// <summary>
-		/// True when this is a plain single-key tap (no hold / mouse / hook-managed key).
-		/// Input and the controls-list label stay with vanilla; we may still remember slot layout.
+		/// True when this is a vanilla-ownable plain single-key tap (Keys name, no hold / mouse /
+		/// hook-managed / non-vanilla measured token). See <see cref="PlainSingleTapPolicy"/>.
 		/// </summary>
 		[JsonIgnore]
 		public bool IsPlainSingleTap
-		{
-			get
-			{
-				if (FilledSlotCount != 1 || Hold)
-					return false;
-				string key = Keys[0];
-				if (KeyToken.IsMouseToken(key))
-					return false;
-				if (BindingRestrictions.IsHookManagedTapToken(key))
-					return false;
-				return true;
-			}
-		}
+			=> PlainSingleTapPolicy.IsPlainSingleTap(Hold, Keys);
 
 		/// <summary>
-		/// True when this combo must drive input through our engine (multi-key, hold, mouse, hook-managed).
-		/// Plain single-key taps stay in vanilla so the list row keeps the normal centered label.
+		/// True when this combo must drive input through our engine (multi-key, hold, mouse,
+		/// hook-managed, or SC/VK/measured tokens). Keys-name single taps stay in vanilla.
 		/// </summary>
 		public bool RequiresAdvancedStorage()
-		{
-			if (IsEmpty)
-				return false;
-			return !IsPlainSingleTap;
-		}
+			=> PlainSingleTapPolicy.RequiresAdvancedStorage(Hold, Keys, IsEmpty);
 
 		public string GetSlot(int index) => index switch {
 			1 => Slot1,
@@ -117,10 +110,58 @@ namespace AdvancedKeybinds.Binding
 			}
 		}
 
+		public string GetSlotDisplay(int index) => index switch {
+			1 => Slot1Display,
+			2 => Slot2Display,
+			3 => Slot3Display,
+			_ => null
+		};
+
+		public void SetSlotDisplay(int index, string value)
+		{
+			value = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+			switch (index)
+			{
+				case 1: Slot1Display = value; break;
+				case 2: Slot2Display = value; break;
+				case 3: Slot3Display = value; break;
+			}
+		}
+
+		/// <summary>Display label for a filled slot: global key alias, per-slot override, else <see cref="KeyToken.FormatToken"/>.</summary>
+		public string FormatSlotLabel(int index)
+		{
+			string token = GetSlot(index);
+			if (string.IsNullOrEmpty(token))
+				return null;
+
+			return KeyToken.FormatDisplayForToken(token, GetSlotDisplay(index));
+		}
+
+		/// <summary>Joined combo label using per-slot display overrides where set.</summary>
+		public string FormatJoinedLabel(bool compact)
+		{
+			List<string> parts = new(3);
+			for (int i = 1; i <= 3; i++)
+			{
+				string label = FormatSlotLabel(i);
+				if (!string.IsNullOrEmpty(label))
+					parts.Add(label);
+			}
+
+			if (parts.Count == 0)
+				return string.Empty;
+
+			return string.Join(compact ? "+" : " + ", parts);
+		}
+
 		public ComboBinding Clone() => new() {
 			Slot1 = Slot1,
 			Slot2 = Slot2,
 			Slot3 = Slot3,
+			Slot1Display = Slot1Display,
+			Slot2Display = Slot2Display,
+			Slot3Display = Slot3Display,
 			Hold = Hold,
 			HoldOnRelease = HoldOnRelease,
 			HoldMs = HoldMs

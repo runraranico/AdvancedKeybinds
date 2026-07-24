@@ -1,11 +1,10 @@
 using System;
-using System.Diagnostics;
 using AdvancedKeybinds.Binding;
 
 namespace AdvancedKeybinds.Patches
 {
 	/// <summary>
-	/// Start-menu / Win / Esc diagnostics. Call sites are stripped unless AKDIAG is defined.
+	/// Start-menu / Win / Esc diagnostics. Gated by <see cref="AkDiag.Enabled"/>.
 	/// </summary>
 	internal static class StartMenuDiag
 	{
@@ -18,30 +17,26 @@ namespace AdvancedKeybinds.Patches
 		private const uint VK_RWIN = 0x5C;
 		private const uint VK_ESCAPE = 0x1B;
 
-#if AKDIAG
 		private static long _lastDedupeMs;
 		private static string _lastDedupeKey;
 		private const int DedupeMs = 40;
-#endif
 
 		private static int _winPressSeq;
 		private static int _activeWinPressSeq;
 
-		[Conditional("AKDIAG")]
 		public static void LogHook(uint vk, bool isDown, bool blocked, string note)
 			=> LogPath("hook", vk, isDown, blocked, note);
 
-		[Conditional("AKDIAG")]
 		public static void LogLl(uint vk, bool isDown, bool blocked, string note)
 			=> LogPath("ll", vk, isDown, blocked, note);
 
-		[Conditional("AKDIAG")]
 		public static void LogThread(uint vk, bool isDown, bool blocked, string note)
 			=> LogPath("thread", vk, isDown, blocked, note);
 
-		[Conditional("AKDIAG")]
 		public static void LogRaw(uint vk, bool isDown, bool blocked, string note)
 		{
+			if (!AkDiag.Enabled)
+				return;
 			if (vk != VK_LWIN && vk != VK_RWIN)
 				return;
 
@@ -51,9 +46,10 @@ namespace AdvancedKeybinds.Patches
 				$"raw:{vk}:{isDown}:{blocked}:{note}");
 		}
 
-		[Conditional("AKDIAG")]
 		public static void LogWndProc(uint msg, uint vk, bool blocked, string note)
 		{
+			if (!AkDiag.Enabled)
+				return;
 			if (!IsRelevantWndProc(msg, vk))
 				return;
 
@@ -63,9 +59,10 @@ namespace AdvancedKeybinds.Patches
 				$"wnd:{msg}:{vk}:{blocked}:{note}");
 		}
 
-		[Conditional("AKDIAG")]
 		public static void LogSyscmd(int cmd, bool blocked, string note)
 		{
+			if (!AkDiag.Enabled)
+				return;
 			cmd &= 0xFFF0;
 			if (cmd != SC_KEYMENU && cmd != SC_TASKLIST)
 				return;
@@ -75,10 +72,11 @@ namespace AdvancedKeybinds.Patches
 				$"sys:{cmd}:{blocked}:{note}");
 		}
 
-		/// <summary>Event reached DefWindowProc — suppression did not swallow it here.</summary>
-		[Conditional("AKDIAG")]
+		/// <summary>Event reached DefWindowProc 窶・suppression did not swallow it here.</summary>
 		public static void LogForwarded(uint msg, IntPtr wParam)
 		{
+			if (!AkDiag.Enabled)
+				return;
 			if (msg == WM_SYSCOMMAND)
 			{
 				int cmd = wParam.ToInt32() & 0xFFF0;
@@ -107,9 +105,12 @@ namespace AdvancedKeybinds.Patches
 				$"leak:{msg}:{vk}:{ctrl}");
 		}
 
-		[Conditional("AKDIAG")]
 		public static void LogInstall(string note)
-			=> Write($"{note}{CommonSuffix()}", "install:" + note);
+		{
+			if (!AkDiag.Enabled)
+				return;
+			Write($"{note}{CommonSuffix()}", "install:" + note);
+		}
 
 		private static void LogPath(string path, uint vk, bool isDown, bool blocked, string note)
 		{
@@ -171,18 +172,16 @@ namespace AdvancedKeybinds.Patches
 
 		private static void Write(string message, string dedupeKey)
 		{
-#if !AKDIAG
-			_ = message;
-			_ = dedupeKey;
-#else
+			if (!AkDiag.Enabled)
+				return;
+
 			long now = Environment.TickCount64;
 			if (dedupeKey == _lastDedupeKey && now - _lastDedupeMs < DedupeMs)
 				return;
 
 			_lastDedupeMs = now;
 			_lastDedupeKey = dedupeKey;
-			AkDiag.Log("StartMenuDiag " + message);
-#endif
+			if (AkDiag.Enabled) AkDiag.Log("StartMenuDiag " + message);
 		}
 	}
 }
