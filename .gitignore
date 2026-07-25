@@ -434,3 +434,9 @@ workshop-descriptions/
 # Cursor IDE local rules (not for public repo)
 .cursor/
 
+
+# Local-only developer work (never publish)
+_developer/
+
+# Empty / local test tree (not part of release source)
+Core/

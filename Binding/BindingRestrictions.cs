@@ -107,8 +107,9 @@ namespace AdvancedKeybinds.Binding
 
 		/// <summary>
 		/// Keys that register as taps but must not use HOLD (NLS KEYUP miss / IME instability).
-		/// Covers JP 半角／かな and KO Hangul/Hanja (same internal tokens <c>Kana</c> / <c>Kanji</c>,
-		/// and equivalent <c>VK:0x15</c> / <c>VK:0x19</c> fallback ids).
+		/// Covers JP 半角／かな／変換／無変換 and KO Hangul/Hanja (same internal tokens
+		/// <c>Kana</c> / <c>Kanji</c>, and equivalent <c>VK:0x15</c> / <c>VK:0x19</c> /
+		/// <c>VK:0x1C</c> / <c>VK:0x1D</c> fallback ids).
 		/// </summary>
 		public static bool IsUnreliableHoldToken(string token)
 		{
@@ -118,14 +119,24 @@ namespace AdvancedKeybinds.Binding
 			if (IsHankakuZenkakuToken(token))
 				return true;
 
+			if (string.Equals(token, "ImeConvert", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "ImeNoConvert", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "Kana", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "Kanji", StringComparison.OrdinalIgnoreCase))
+				return true;
+
 			if (PhysicalKeyToken.TryParseVk(token, out uint vk)
-				&& (vk == 0x15 /* VK_KANA / Hangul */ || vk == 0x19 /* VK_KANJI / Hanja */))
+				&& (vk == 0x15 /* VK_KANA / Hangul */
+					|| vk == 0x19 /* VK_KANJI / Hanja */
+					|| vk == 0x1C /* VK_CONVERT */
+					|| vk == 0x1D /* VK_NONCONVERT */))
 				return true;
 
 			if (!KeyToken.TryParse(token, out Keys key, out bool isMouse, out _))
 				return false;
 
-			return !isMouse && (key == Keys.Kana || key == Keys.Kanji);
+			return !isMouse && (key == Keys.Kana || key == Keys.Kanji
+				|| key == Keys.ImeConvert || key == Keys.ImeNoConvert);
 		}
 
 		/// <summary>ANSI hardware can hold Caps Lock physically; JIS 英数 cannot.</summary>

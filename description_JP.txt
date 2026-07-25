@@ -15,3 +15,4 @@
 - 左クリック単独の割り当ては確認あり（もう一度保存で確定）
 - CapsLock の Hold は ANSI 向け。日本語／JIS 配列では CapsLock のタップは可、Hold は不可
 - 一部の MOD 固有の特殊入力には非対応
+- Terraria／tModLoader 標準のキー設定では使えない一部のキーを、AK に登録しても発動しなかった問題を修正

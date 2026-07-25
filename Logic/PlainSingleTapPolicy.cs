@@ -40,7 +40,9 @@ namespace AdvancedKeybinds.Core
 		}
 
 		/// <summary>
-		/// Single-key taps that Advanced must own (hook-swallowed / NLS / locks).
+		/// Single-key taps that Advanced must own (hook-swallowed / NLS / locks /
+		/// IME Keys names that Terraria/tML KeyboardState cannot fire).
+		/// Hangul/Hanja share the same saved Keys names as <c>Kana</c>/<c>Kanji</c> (VK 0x15/0x19).
 		/// </summary>
 		public static bool IsHookManagedTapToken(string token)
 		{
@@ -52,7 +54,11 @@ namespace AdvancedKeybinds.Core
 				|| string.Equals(token, "CapsLock", StringComparison.OrdinalIgnoreCase)
 				|| string.Equals(token, "NumLock", StringComparison.OrdinalIgnoreCase)
 				|| string.Equals(token, "LeftWindows", StringComparison.OrdinalIgnoreCase)
-				|| string.Equals(token, "RightWindows", StringComparison.OrdinalIgnoreCase))
+				|| string.Equals(token, "RightWindows", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "ImeNoConvert", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "ImeConvert", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "Kana", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "Kanji", StringComparison.OrdinalIgnoreCase))
 				return true;
 
 			return false;

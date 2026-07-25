@@ -164,6 +164,13 @@ namespace AdvancedKeybinds.Core
 			if (StableKeyToken.IsHankakuZenkakuToken(token))
 				return false;
 
+			// IME Keys names: FNA KeyboardState cannot fire these (same reason they are Advanced-owned).
+			if (string.Equals(token, "ImeNoConvert", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "ImeConvert", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "Kana", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, "Kanji", StringComparison.OrdinalIgnoreCase))
+				return false;
+
 			if (PhysicalKeyToken.TryParseScan(token, out ushort scan, out bool extended))
 			{
 				string key = FormatScanLookupKey(scan, extended);
