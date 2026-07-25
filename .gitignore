@@ -430,3 +430,7 @@ FodyWeavers.xsd
 
 # Local-only Steam Workshop description drafts (do not publish)
 workshop-descriptions/
+
+# Cursor IDE local rules (not for public repo)
+.cursor/
+
