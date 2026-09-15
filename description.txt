@@ -26,3 +26,9 @@ Click a key binding to open the combo panel.
  - Dead keys / accent keys (for example, the German accent key) may display different names depending on the active Windows keyboard layout.
  - Fixed an issue where some keys unsupported by Terraria/tModLoader's default key binding settings could be registered in Advanced Keybinds (AK), but would not function.
  - Some special keys may still have hardware or OS limitations
+
+## Permissions
+ - Feel free to modify this mod and create compatibility patches.
+
+ - Please do not report issues caused by modified versions.
+ - Modified versions are the responsibility of their creators.

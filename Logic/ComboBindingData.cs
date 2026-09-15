@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 
@@ -19,9 +20,22 @@ namespace AdvancedKeybinds.Core
 		public string Slot1Display;
 		public string Slot2Display;
 		public string Slot3Display;
+		/// <summary>Controller-only OR alternate (<c>Pad:*</c>). Not an AND combo slot.</summary>
+		public string AlternateGamePadToken;
 		public bool Hold;
 		public bool HoldOnRelease;
 		public int HoldMs;
+
+		/// <summary>
+		/// Explicit empty two-key Terraria-OR record (Slot1/Slot2 both unset) must remain in JSON.
+		/// Distinct from missing key (= never saved).
+		/// </summary>
+		public bool PersistAsEmptyRecord;
+
+		/// <summary>
+		/// Slot1/Slot2 sync to Terraria KeyStatus OR; BindingInputEngine must skip.
+		/// </summary>
+		public bool UseTerrariaKeyStatusOr;
 
 		[JsonIgnore]
 		public bool IsEmpty => string.IsNullOrEmpty(Slot1)
@@ -57,7 +71,20 @@ namespace AdvancedKeybinds.Core
 
 		[JsonIgnore]
 		public bool RequiresAdvancedStorage
-			=> PlainSingleTapPolicy.RequiresAdvancedStorage(Hold, Keys, IsEmpty);
+		{
+			get
+			{
+				if (UseTerrariaKeyStatusOr || PersistAsEmptyRecord)
+					return false;
+				return PlainSingleTapPolicy.RequiresAdvancedStorage(Hold, Keys, IsEmpty)
+					|| AlternateGamePadBindingPolicy.RequiresAdvancedOwnershipForAlternate(
+						Hold, AlternateGamePadToken, FilledSlotCount);
+			}
+		}
+
+		[JsonIgnore]
+		public bool HasAlternateGamePad
+			=> AlternateGamePadBindingPolicy.HasAlternate(AlternateGamePadToken);
 
 		public string GetSlot(int index) => index switch {
 			1 => Slot1,
@@ -102,9 +129,38 @@ namespace AdvancedKeybinds.Core
 			Slot1Display = Slot1Display,
 			Slot2Display = Slot2Display,
 			Slot3Display = Slot3Display,
+			AlternateGamePadToken = AlternateGamePadToken,
 			Hold = Hold,
 			HoldOnRelease = HoldOnRelease,
-			HoldMs = HoldMs
+			HoldMs = HoldMs,
+			PersistAsEmptyRecord = PersistAsEmptyRecord,
+			UseTerrariaKeyStatusOr = UseTerrariaKeyStatusOr
 		};
+
+		/// <summary>Value equality for edit-session snapshot / cancel checks (slots, displays, hold).</summary>
+		public static bool ContentEquals(ComboBindingData a, ComboBindingData b)
+		{
+			if (ReferenceEquals(a, b))
+				return true;
+			if (a == null || b == null)
+				return false;
+
+			return string.Equals(a.Slot1, b.Slot1, StringComparison.Ordinal)
+				&& string.Equals(a.Slot2, b.Slot2, StringComparison.Ordinal)
+				&& string.Equals(a.Slot3, b.Slot3, StringComparison.Ordinal)
+				&& string.Equals(a.Slot1Display, b.Slot1Display, StringComparison.Ordinal)
+				&& string.Equals(a.Slot2Display, b.Slot2Display, StringComparison.Ordinal)
+				&& string.Equals(a.Slot3Display, b.Slot3Display, StringComparison.Ordinal)
+				&& string.Equals(a.AlternateGamePadToken, b.AlternateGamePadToken, StringComparison.Ordinal)
+				&& a.Hold == b.Hold
+				&& a.HoldOnRelease == b.HoldOnRelease
+				&& a.HoldMs == b.HoldMs
+				&& a.PersistAsEmptyRecord == b.PersistAsEmptyRecord
+				&& a.UseTerrariaKeyStatusOr == b.UseTerrariaKeyStatusOr;
+		}
+
+		/// <summary>Compact slot join for asserts / diagnostics (empty → "-").</summary>
+		public string FormatSlotsDiag()
+			=> (Slot1 ?? "-") + "/" + (Slot2 ?? "-") + "/" + (Slot3 ?? "-");
 	}
 }

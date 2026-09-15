@@ -12,6 +12,14 @@ namespace AdvancedKeybinds.Patches
 	internal static class ModDetours
 	{
 		private static readonly List<Hook> Hooks = new();
+		private static int _registerCount;
+		private static int _disposeCount;
+		private static int _disposeAllCalls;
+
+		public static int RegisterCount => _registerCount;
+		public static int DisposeCount => _disposeCount;
+		public static int DisposeAllCalls => _disposeAllCalls;
+		public static int LiveHookCount => Hooks.Count;
 
 		public static void Apply(MethodBase method, Delegate detour)
 		{
@@ -23,6 +31,7 @@ namespace AdvancedKeybinds.Patches
 				Hook hook = new(method, detour);
 				hook.Apply();
 				Hooks.Add(hook);
+				_registerCount++;
 			}
 			catch (Exception ex)
 			{
@@ -35,11 +44,13 @@ namespace AdvancedKeybinds.Patches
 
 		public static void DisposeAll()
 		{
+			_disposeAllCalls++;
 			for (int i = Hooks.Count - 1; i >= 0; i--)
 			{
 				try
 				{
 					Hooks[i].Dispose();
+					_disposeCount++;
 				}
 				catch
 				{
@@ -49,5 +60,12 @@ namespace AdvancedKeybinds.Patches
 
 			Hooks.Clear();
 		}
+
+		/// <summary>TEMP diag snapshot for Build+Reload identity checks.</summary>
+		public static string FormatCountsForDiag()
+			=> "hookReg=" + _registerCount
+				+ " hookDisp=" + _disposeCount
+				+ " disposeAllCalls=" + _disposeAllCalls
+				+ " liveHooks=" + Hooks.Count;
 	}
 }

@@ -57,6 +57,17 @@ namespace AdvancedKeybinds.Core
 				};
 			}
 
+			// Steam Input / OS may inject Mouse or Keyboard alongside a real GamePad press.
+			// Prefer the single Pad:* digital token so slot capture can complete.
+			if (TryPreferSingleGamePadToken(canonical, out string preferredPad))
+			{
+				return new ResolveResult {
+					Kind = ResolveKind.Resolved,
+					Token = preferredPad,
+					Reason = "prefer-gamepad-over-kb-mouse"
+				};
+			}
+
 			// AltGr: LeftControl + RightAlt (+ nothing else) → store RightAlt (one key).
 			if (IsExactAltGrPair(canonical))
 			{
@@ -184,6 +195,37 @@ namespace AdvancedKeybinds.Core
 			=> tokens.Count == 2
 				&& ContainsOrdinalIgnoreCase(tokens, "LeftControl")
 				&& ContainsOrdinalIgnoreCase(tokens, "RightAlt");
+
+		/// <summary>
+		/// When exactly one distinct <c>Pad:</c> token appears with Keyboard/Mouse noise, keep the Pad token.
+		/// Multiple distinct Pad tokens stay ambiguous.
+		/// </summary>
+		private static bool TryPreferSingleGamePadToken(List<string> tokens, out string preferred)
+		{
+			preferred = null;
+			if (tokens == null || tokens.Count < 2)
+				return false;
+
+			string pad = null;
+			int padDistinct = 0;
+			foreach (string token in tokens)
+			{
+				if (!GamePadToken.IsPadToken(token))
+					continue;
+				if (pad != null && string.Equals(pad, token, StringComparison.OrdinalIgnoreCase))
+					continue;
+				if (pad != null)
+					return false;
+				pad = token;
+				padDistinct++;
+			}
+
+			if (padDistinct != 1 || pad == null)
+				return false;
+
+			preferred = pad;
+			return true;
+		}
 
 		private static bool TryStripAltGrPair(List<string> tokens, out List<string> rest)
 		{

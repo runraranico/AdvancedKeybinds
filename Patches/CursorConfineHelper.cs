@@ -102,6 +102,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static void ApplyToGameWindow(bool force)
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			IntPtr hwnd = GameWindowHandle.TryGet(preferForeground: true);
 			if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
 			{

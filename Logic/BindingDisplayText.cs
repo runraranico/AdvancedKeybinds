@@ -9,6 +9,22 @@ namespace AdvancedKeybinds.Core
 	/// </summary>
 	public static class BindingDisplayText
 	{
+		/// <summary>
+		/// Returns a local display copy without reserved ownership prefixes.
+		/// Callers must never persist the returned value back to KeyStatus or ownership state.
+		/// </summary>
+		public static string UnwrapOwnershipMarkerForDisplay(string token)
+		{
+			if (string.IsNullOrWhiteSpace(token))
+				return string.Empty;
+
+			string displayToken = token.Trim();
+			while (AdvancedVanillaOwnershipMarker.IsMarker(displayToken))
+				displayToken = displayToken.Substring(AdvancedVanillaOwnershipMarker.Prefix.Length);
+
+			return displayToken;
+		}
+
 		/// <summary>True when any assigned KeyStatus entry is an AKAdv ownership marker.</summary>
 		public static bool NeedsOverrideFromAssignedKeys(IReadOnlyList<string> assignedKeys)
 		{

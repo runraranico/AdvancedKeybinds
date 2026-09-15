@@ -12,7 +12,9 @@ namespace AdvancedKeybinds.Core
 			RejectedInvalidToken,
 			RejectedDuplicate,
 			RejectedF11,
-			RejectedDisplayAlias
+			RejectedDisplayAlias,
+			/// <summary>Same-stick opposite directions (Up+Down / Left+Right) across slots.</summary>
+			RejectedOppositeStickDirection
 		}
 
 		/// <summary>
@@ -35,6 +37,10 @@ namespace AdvancedKeybinds.Core
 
 			if (string.Equals(canonical, "F11", StringComparison.OrdinalIgnoreCase))
 				return SetSlotResult.RejectedF11;
+
+			if (GamePadStickOppositeDirectionRules.ConflictsWithOtherSlots(
+				binding.Slot1, binding.Slot2, binding.Slot3, index, canonical))
+				return SetSlotResult.RejectedOppositeStickDirection;
 
 #if AK_DIAGNOSTICS
 			bool comparedAny = false;

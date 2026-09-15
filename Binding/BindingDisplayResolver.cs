@@ -12,6 +12,21 @@ namespace AdvancedKeybinds.Binding
 	public static class BindingDisplayResolver
 	{
 		/// <summary>
+		/// Resolves one token for user-facing display only.
+		/// Ownership markers remain unchanged in KeyStatus; only this local display value is unwrapped.
+		/// Priority: global custom alias → AK Controls-equivalent label → unwrapped raw token.
+		/// </summary>
+		public static string ResolveDisplayName(string token)
+		{
+			string displayToken = BindingDisplayText.UnwrapOwnershipMarkerForDisplay(token);
+			if (string.IsNullOrEmpty(displayToken))
+				return string.Empty;
+
+			string display = KeyToken.FormatDisplayForToken(displayToken);
+			return string.IsNullOrEmpty(display) ? displayToken : display;
+		}
+
+		/// <summary>
 		/// Resolves the AK Controls-equivalent display for <paramref name="actionId"/> from BindingStorage.
 		/// </summary>
 		public static bool TryGetBindingDisplayText(string actionId, out string displayText)
@@ -53,7 +68,18 @@ namespace AdvancedKeybinds.Binding
 			if (combo == null || combo.IsEmpty)
 				return string.Empty;
 
-			string joined = combo.FormatJoinedLabel(compact: true);
+			string joined;
+			if (combo.HasAlternateGamePad && combo.FilledSlotCount == 1)
+			{
+				string primaryDisplay = KeyToken.FormatDisplayForToken(combo.Keys[0]);
+				string alternateDisplay = KeyToken.FormatDisplayForToken(combo.AlternateGamePadToken);
+				joined = AlternateGamePadBindingPolicy.FormatAlternateOverPrimaryDisplay(
+					alternateDisplay,
+					primaryDisplay);
+			}
+			else
+				joined = combo.FormatJoinedLabel(compact: true);
+
 			string whileHeld = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewWhileHeld");
 			string onRelease = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewOnRelease");
 			return BindingDisplayText.ApplyHoldPrefix(

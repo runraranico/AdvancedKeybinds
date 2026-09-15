@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Core;
 using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.UI;
@@ -11,6 +12,8 @@ namespace AdvancedKeybinds.Patches
 	/// Blocks world-side right-click without clearing <see cref="Main.mouseRight"/>.
 	/// Covers Use-Tile (<see cref="Player.controlUseTile"/>) and NPC chat
 	/// (<see cref="Main.HoverOverNPCs"/> reads mouseRight + npcChatRelease; Smart Cursor uses this path).
+	/// Also skips HoverOverNPCs while an NPC buy-shop is open and Pad L1 is held, so L1→MouseRight
+	/// cannot switch talkNPC / close the shop — without clearing mouseRight or talkNPC.
 	/// </summary>
 	internal static class KeybindUiWorldInputGuard
 	{
@@ -75,8 +78,30 @@ namespace AdvancedKeybinds.Patches
 				}
 
 				_loggedNpcHoverSkip = false;
+
+				// Buy-shop + Pad L1: L1 is MouseRight on XBoxGamepadUI and would SetTalkNPC on a
+				// nearby NPC (also SetNPCShopIndex(0)). Skip the hover-talk path only — do not clear
+				// mouseRight (shop RMB buy) and do not clear talkNPC (keep current shop open).
+				if (ShouldSkipHoverOverNpcsForOpenNpcShopPadShoulder())
+					return;
+
 				orig(self, mouseRectangle);
 			});
+		}
+
+		/// <summary>
+		/// True while the NPC item shop is open and FNA LeftShoulder is held.
+		/// Physical mouse RMB alone never triggers this.
+		/// </summary>
+		internal static bool ShouldSkipHoverOverNpcsForOpenNpcShopPadShoulder()
+		{
+			Player player = Main.LocalPlayer;
+			int talk = player?.talkNPC ?? -1;
+			return NpcShopPadShoulderTalkPolicy.ShouldSkipHoverOverNpcs(
+				npcShopOpen: NpcShopPadShoulderTalkPolicy.IsNpcBuyShopOpen(Main.npcShop),
+				talkNpcActive: NpcShopPadShoulderTalkPolicy.IsTalkNpcActive(talk),
+				leftShoulderDown: FnaGamePadProvider.IsDown(GamePadToken.LeftShoulder),
+				physicalMouseRightDown: MouseInputHelper.IsPhysicalRightDown());
 		}
 
 		/// <summary>Call from UIManageControls Update/Draw (any cursor position).</summary>

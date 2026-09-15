@@ -7,12 +7,29 @@
     <LangVersion>latest</LangVersion>
     <!--
       Diagnostics (AK_DIAGNOSTICS):
-      - Default FALSE for public / Workshop safety (no diag implementations in the DLL).
-      - Dev diagnostics: tools/Build-Diagnostics.ps1 or -p:EnableAkDiagnostics=true
-      - Public/Workshop: tools/Build-Public.ps1 -p:EnableAkDiagnostics=false
-        → removes diagnostic implementations and links stubs from AdvancedKeybinds.Dev
-        (stubs must stay OUTSIDE this project folder — tML globs **/*.cs here).
+      - Default FALSE for public / Workshop / tModLoader Build+Reload safety.
+      - First-group FULL bodies live OUTSIDE this folder:
+        ../AdvancedKeybinds.Dev/diagnostics/first-group/
+      - Second-group-A FULL bodies live OUTSIDE this folder:
+        ../AdvancedKeybinds.Dev/diagnostics/second-group-a/
+      - Second-group-B1 (ESC/Inventory diag) FULL bodies live OUTSIDE this folder:
+        ../AdvancedKeybinds.Dev/diagnostics/second-group-b1/
+      - ComboPanel idle-ESC path FULL body lives OUTSIDE this folder:
+        ../AdvancedKeybinds.Dev/diagnostics/combo-panel-idle-esc/
+      - Product tree has NO first-group / second-group-a / second-group-b1 / idle-esc bodies, Policies, or no-op stubs.
+        Call sites are #if AK_DIAGNOSTICS only (compile out on public / Build+Reload).
+      - Dev diagnostics MSBuild: tools/Build-Diagnostics.ps1 -p:EnableAkDiagnostics=true
+        → links first-group + second-group-a + second-group-b1 + combo-panel-idle-esc from Dev + defines AK_DIAGNOSTICS.
+      - Public MSBuild: tools/Build-Public.ps1 -p:EnableAkDiagnostics=false
+        → other diag Compile Remove + PublicDiagnosticStubs (non-moved groups).
+      - Local investigation ONLY: if file `.ak-enable-diagnostics` exists in this project folder
+        and EnableAkDiagnostics is not set on the command line, in-game Build+Reload also
+        enables AK_DIAGNOSTICS (so call sites + Dev-linked ModSystems stay alive after B+R).
+        Build-Public.ps1 always forces EnableAkDiagnostics=false (marker ignored).
+        Do NOT ship / Workshop with that marker file present.
     -->
+    <!-- Prefer explicit -p:EnableAkDiagnostics=...; else local marker; else false (public-safe). -->
+    <EnableAkDiagnostics Condition="'$(EnableAkDiagnostics)' == '' and Exists('$(MSBuildProjectDirectory)\.ak-enable-diagnostics')">true</EnableAkDiagnostics>
     <EnableAkDiagnostics Condition="'$(EnableAkDiagnostics)' == ''">false</EnableAkDiagnostics>
     <!-- AKDIAG_DEFINE_MARKER -->
     <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**;**/tools/**;**/_developer/**;**/*.Tests/**;**/AdvancedKeybinds.Core.Tests/**;**/AdvancedKeybinds.Dev/**;**/build/**</DefaultItemExcludes>
@@ -22,11 +39,59 @@
     <DefineConstants>$(DefineConstants);AK_DIAGNOSTICS</DefineConstants>
   </PropertyGroup>
 
+  <!-- Explicit diagnostics build: link Dev first-group + second-group-a + second-group-b1 bodies (product tree has none). -->
+  <ItemGroup Condition="'$(EnableAkDiagnostics)' == 'true'">
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Diagnostics\ControlsGameUiSeparationTrace.cs"
+            Link="Diagnostics\ControlsGameUiSeparationTrace.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Diagnostics\GamePadTwoKeyLiveFireDiagSystem.cs"
+            Link="Diagnostics\GamePadTwoKeyLiveFireDiagSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Diagnostics\Ps5ControllerReconnectDiagSystem.cs"
+            Link="Diagnostics\Ps5ControllerReconnectDiagSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Diagnostics\GamePadDefaultUnboundBindingDiagSystem.cs"
+            Link="Diagnostics\GamePadDefaultUnboundBindingDiagSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Logic\ControlsGameUiSeparationTraceWritePolicy.cs"
+            Link="Logic\ControlsGameUiSeparationTraceWritePolicy.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Logic\Ps5ControllerReconnectDiagPolicy.cs"
+            Link="Logic\Ps5ControllerReconnectDiagPolicy.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Logic\GamePadDefaultUnboundBindingDiagPolicy.cs"
+            Link="Logic\GamePadDefaultUnboundBindingDiagPolicy.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Diagnostics\TriangleInputAutoDiagnosticSystem.cs"
+            Link="Diagnostics\TriangleInputAutoDiagnosticSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Diagnostics\PadFaceMappingAutoDiagnosticSystem.cs"
+            Link="Diagnostics\PadFaceMappingAutoDiagnosticSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Diagnostics\AkAssemblyIdentityDiagSystem.cs"
+            Link="Diagnostics\AkAssemblyIdentityDiagSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Logic\TriangleInputDiagnosticPolicy.cs"
+            Link="Logic\TriangleInputDiagnosticPolicy.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Logic\PadFaceMappingDiagnosticPolicy.cs"
+            Link="Logic\PadFaceMappingDiagnosticPolicy.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Diagnostics\KeybindEscapeDiagSystem.cs"
+            Link="Diagnostics\KeybindEscapeDiagSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Diagnostics\AkEscStartSaveSessionDiagSystem.cs"
+            Link="Diagnostics\AkEscStartSaveSessionDiagSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Diagnostics\InventoryOpenFocusAutoDiagnosticSystem.cs"
+            Link="Diagnostics\InventoryOpenFocusAutoDiagnosticSystem.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Diagnostics\ComboPanelEscPathDiag.cs"
+            Link="Diagnostics\ComboPanelEscPathDiag.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Logic\KeybindEscapeDiagPolicy.cs"
+            Link="Logic\KeybindEscapeDiagPolicy.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Logic\InventoryOpenFocusDiagnosticPolicy.cs"
+            Link="Logic\InventoryOpenFocusDiagnosticPolicy.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Logic\EscStartInventoryMutationOrderPolicy.cs"
+            Link="Logic\EscStartInventoryMutationOrderPolicy.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\combo-panel-idle-esc\Diagnostics\ComboPanelIdleEscPathDiag.cs"
+            Link="Diagnostics\ComboPanelIdleEscPathDiag.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Remove="**/bin/**" />
     <Compile Remove="**/obj/**" />
     <Compile Remove="**/tools/**" />
     <Compile Remove="**/_developer/**" />
+    <Compile Remove="_developer/**" />
+    <Compile Remove="**/_tmp_tmod_decompile/**" />
+    <Compile Remove="_tmp_tmod_decompile/**" />
+    <Compile Remove="**/archive/**" />
     <Compile Remove="**/build/**" />
     <Compile Remove="**/*.Tests/**" />
     <Compile Remove="**/AdvancedKeybinds.Core.Tests/**" />
@@ -40,6 +105,11 @@
     <None Remove="**/tools/**" />
     <None Remove="**/_developer/**" />
   </ItemGroup>
+
+  <!--
+    tModLoader in-game build globs **/*.cs under the mod folder and may ignore Compile Remove.
+    Keep quarantine sources as *.cs.archived (not *.cs) under _developer/archive/.
+  -->
 
   <!-- Public build only: strip diagnostic implementations; link empty stubs from Dev tree. -->
   <ItemGroup Condition="'$(EnableAkDiagnostics)' != 'true'">
@@ -67,15 +137,28 @@
     <Compile Remove="Diagnostics\ZoomKeyLiveVerifySystem.cs" />
     <Compile Remove="Diagnostics\AkCpuMeasureSystem.cs" />
     <Compile Remove="Diagnostics\HoldHudProbe.cs" />
-    <Compile Remove="Diagnostics\ComboPanelEscPathDiag.cs" />
+    <Compile Remove="Diagnostics\GamePadProbeSystem.cs" />
+    <Compile Remove="Logic\GamePadProbeLogEmitGate.cs" />
+    <Compile Remove="Logic\GamePadProbeLogRotationPolicy.cs" />
     <Compile Remove="Logic\PhysicalKeyDupDiag.cs" />
     <Compile Remove="Logic\AllKeyDiagnosticCore.cs" />
     <Compile Remove="Logic\JisOemRegistrationDiagnostic.cs" />
     <Compile Remove="Logic\FreezeCandidateAutoDiagnosticCore.cs" />
     <Compile Remove="Logic\FreezeCandidateCatalog.cs" />
     <Compile Remove="Logic\FreezeCandidateWin32.cs" />
+    <!-- PublicDiag7: TEMP diags → diagnostics build only; product call sites use #if AK_DIAGNOSTICS. -->
+    <Compile Remove="Diagnostics\PadConfirmAfterComboSaveDiagSystem.cs" />
+    <Compile Remove="Diagnostics\JumpApplyStageDiag.cs" />
+    <Compile Remove="Diagnostics\GamePadCaptureAR2Diag.cs" />
+    <Compile Remove="Diagnostics\InGameTriggerNavDiag.cs" />
+    <Compile Remove="Diagnostics\FixedGamepadUiConfirmDiagSystem.cs" />
+    <Compile Remove="Diagnostics\ComboPanelRegistrationWaitDiag.cs" />
+    <Compile Remove="Patches\AlchemistNpcLiteShopListTempDiag.cs" />
+    <!-- First-group / second-group-a / second-group-b1: bodies outside product tree; call sites are #if AK_DIAGNOSTICS only. -->
     <Compile Include="..\AdvancedKeybinds.Dev\public-stubs\PublicDiagnosticStubs.cs"
             Link="PublicDiagnosticStubs.cs" />
+    <Compile Include="..\AdvancedKeybinds.Dev\public-stubs\GamePadProbeSystem.PublicStub.cs"
+            Link="GamePadProbeSystem.PublicStub.cs" />
   </ItemGroup>
 
   <Target Name="RemoveStaleRootPrecompiledDll" BeforeTargets="Build">

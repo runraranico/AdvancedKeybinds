@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Automático
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: Activado
+			Tooltip: Si no puedes registrar teclas, prueba esta opción
+		}
+
+		Disabled: {
+			Label: Desactivado
+			Tooltip: Recomendado si no usas mando
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: Teclas especiales / control de UI
+		Header: Control de UI / Teclas especiales
 
 		Suppress: {
 			Label: Suprimir tecla Windows
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: Activar automáticamente en la próxima carga del mod
 			Tooltip: Activado: iniciar con bloqueo en la próxima carga. Desactivado: iniciar sin bloqueo en la próxima carga
+		}
+	}
+
+	GamePad: {
+		Header: Mando
+
+		Mode: {
+			Label: Entrada del mando
+			Tooltip: Cómo lee Advanced Keybinds tu mando. Consulta cada opción de abajo para más detalles
 		}
 	}
 
@@ -142,7 +170,7 @@ UI: {
 		HintLine1: Haz clic izquierdo en una casilla y luego pulsa una tecla o boton del raton.
 		HintLine2: Hold solo con 1 tecla.
 		HintLine3: Coloca el cursor sobre una casilla y clic derecho para quitar el ajuste.
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: Predeterminado
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: mantenido
 		HoldOnReleaseTitle: Hold
@@ -151,6 +179,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Introduce un valor de 10～10000
 		ConfirmLeftClickOnly: ¿Asignar solo clic izquierdo? Guarda otra vez para confirmar.
+		ClearConfirmPad: ¿Borrar?
+		RejectOppositeStickDirection: No se pueden combinar direcciones opuestas del stick (p. ej. Arriba+Abajo).
 		KeyInfoSelectHint: Selecciona una tecla
 		KeyInfoSelectGuide: Elegir una tecla
 		KeyInfoCurrent: Tecla original
@@ -170,9 +200,29 @@ UI: {
 		KeyInfoResetDisplaysLine2: nombres mostrados
 		KeyInfoResetDisplaysConfirm: ¿Restablecer todos los nombres mostrados personalizados a los valores por defecto?
 		KeyInfoDisplayRestored: Nombre mostrado {0} restaurado a {1}
-		SlotOriginalKey: Original: {0}
+		SlotOriginalKey: Tecla original: {0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: Hacia ti
-		MouseWheelDown: Lejos de ti
+
+		DisplayNameUnavailable: {
+			Line1: Los cambios de nombre
+			Line2: están desactivados
+			Line3: con un mando
+		}
+
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: Config. 2 teclas
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: Solo mando
+		HintLine2: Cualquiera activa
+		HintLine3: ""
+		HoldUnavailableHint: No disponible
 	}
 }

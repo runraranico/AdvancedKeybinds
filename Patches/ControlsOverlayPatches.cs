@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Diagnostics;
 using AdvancedKeybinds.UI;
 using Microsoft.Xna.Framework;
@@ -77,7 +78,12 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			ModDetours.Apply(update, (orig_UIUpdate orig, UserInterface self, GameTime gameTime) => {
-				ComboPanel.PrepareParentMenuForEscape();
+#if AK_DIAGNOSTICS
+				ComboPanelIdleEscPathDiag.Note("UserInterface.Update.enter");
+#endif
+				// Only while ComboPanel owns Escape — never clear Inventory on every UI tick game-wide.
+				if (ComboPanel.IsOpen || ComboPanel.ShouldSwallowMenuEscape())
+					ComboPanel.PrepareParentMenuForEscape();
 
 				if (ComboPanel.ShouldBlockBackgroundInput())
 				{
@@ -96,12 +102,20 @@ namespace AdvancedKeybinds.Patches
 						Main.mouseY = savedY;
 					}
 
-					ComboPanel.PrepareParentMenuForEscape();
+					if (ComboPanel.IsOpen || ComboPanel.ShouldSwallowMenuEscape())
+						ComboPanel.PrepareParentMenuForEscape();
+#if AK_DIAGNOSTICS
+					ComboPanelIdleEscPathDiag.Note("UserInterface.Update.exit", "blockedBg=1");
+#endif
 					return;
 				}
 
 				orig(self, gameTime);
-				ComboPanel.PrepareParentMenuForEscape();
+				if (ComboPanel.IsOpen || ComboPanel.ShouldSwallowMenuEscape())
+					ComboPanel.PrepareParentMenuForEscape();
+#if AK_DIAGNOSTICS
+				ComboPanelIdleEscPathDiag.Note("UserInterface.Update.exit", "blockedBg=0");
+#endif
 			});
 		}
 
@@ -127,11 +141,25 @@ namespace AdvancedKeybinds.Patches
 					return;
 				}
 
+#if AK_DIAGNOSTICS
+				ComboPanelIdleEscPathDiag.Note("UIManageControls.Update.enter");
+#endif
 				KeybindUiWorldInputGuard.NotifyManageControlsUiPresent();
 				KeybindingUiPatches.EnsureControlsUndoButton(self);
+				ControlsPadBHoldCancelFocus.BeforeManageControlsUpdate();
+				ComboPanelCloseInputConsumeGate.PollAndSuppress();
 				ComboPanel.PrepareParentMenuForEscape();
+				ComboPanel.PollPadBackCloseGateAndSuppressParent();
+				ComboPanel.GuardModalInput();
 				orig(self, gameTime);
 				ComboPanel.PrepareParentMenuForEscape();
+				ComboPanel.PollPadBackCloseGateAndSuppressParent();
+				ComboPanel.GuardModalInput();
+				ComboPanelCloseInputConsumeGate.PollAndSuppress();
+				ControlsPadBHoldCancelFocus.BeforeManageControlsUpdate();
+#if AK_DIAGNOSTICS
+				ComboPanelIdleEscPathDiag.Note("UIManageControls.Update.exit");
+#endif
 			});
 		}
 
@@ -151,19 +179,33 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			ModDetours.Apply(close, (orig_FancyClose orig) => {
-				if (!ComboPanel.ShouldBlockFancyUiClose())
+				if (!ComboPanel.ShouldBlockFancyUiClose()
+					&& !ComboPanelCloseInputConsumeGate.ShouldBlockParentBack())
 				{
 #if AK_DIAGNOSTICS
 					ComboPanelEscPathDiag.NoteStack("IngameFancyUI.Close.ALLOWED");
+					ComboPanelIdleEscPathDiag.Note("FancyUI.Close.ALLOWED");
 #endif
+					// Pad:B held after panel close without gate ⇒ parent Controls would close (leak).
+					if (!ComboPanel.IsOpen
+						&& FnaGamePadProvider.IsDown(GamePadToken.B))
+						GamePadProbeSystem.LogControlsCloseLeak("FancyUI.Close.PadBHeld");
 					orig();
 					// Vanilla Close sets playerInventory=true; undo before the next draw when we opened via shortcut.
 					KeybindShortcutSystem.SuppressVanillaInventoryOpenAfterShortcutUiClose();
 					return;
 				}
 
+				if (ComboPanelCloseInputConsumeGate.ShouldBlockParentBack())
+				{
+					ComboPanelCloseInputConsumeGate.LogDuplicateBackBlocked(
+						"CloseComboPanel",
+						"CloseParentControls");
+				}
+
 #if AK_DIAGNOSTICS
 				ComboPanelEscPathDiag.NoteStack("IngameFancyUI.Close.BLOCKED");
+				ComboPanelIdleEscPathDiag.Note("FancyUI.Close.BLOCKED");
 #endif
 				if (AkDiag.Enabled) AkDiag.Log("Blocked IngameFancyUI.Close while combo panel is open.");
 			});

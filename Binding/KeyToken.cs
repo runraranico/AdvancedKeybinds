@@ -168,6 +168,12 @@ namespace AdvancedKeybinds.Binding
 
 		public static bool IsDown(string token)
 		{
+			if (string.IsNullOrEmpty(token))
+				return false;
+
+			if (GamePadToken.IsPadToken(token))
+				return FnaGamePadProvider.IsDown(token);
+
 			if (PhysicalKeyToken.TryParseVk(token, out uint vk))
 			{
 				if (!CanPollWin32KeySupplement())
@@ -198,6 +204,17 @@ namespace AdvancedKeybinds.Binding
 			if (isMouse)
 				return IsMouseDown(mouseButton);
 
+			// Non-Windows: FNA keyboard via FnaKeyboardProvider (general Linux keyboard).
+			// Same Keyboard.GetState cache as capture; not Main.keyState.
+			if (!OperatingSystem.IsWindows())
+			{
+				if (key == Keys.Escape)
+					return FnaKeyboardProvider.IsKeyDown(key)
+						|| WindowsKeySuppressor.IsShellBlockedEscapeDown;
+
+				return FnaKeyboardProvider.IsKeyDown(key);
+			}
+
 			if (key == Keys.LeftWindows)
 				return WindowsKeySuppressor.IsLeftWindowsDown;
 
@@ -210,7 +227,7 @@ namespace AdvancedKeybinds.Binding
 			if (key == Keys.NumLock)
 				return WindowsKeySuppressor.IsNumLockPhysicallyDown;
 
-			// Pause/Break share make-code 0x45 with NumLock; VK_PAUSE / VK_CANCEL (Break) 窶・never NumLock.
+			// Pause/Break share make-code 0x45 with NumLock; VK_PAUSE / VK_CANCEL (Break) — never NumLock.
 			if (key == Keys.Pause)
 				return Main.keyState.IsKeyDown(Keys.Pause) || WindowsKeySuppressor.IsPausePhysicallyDown;
 
@@ -269,14 +286,20 @@ namespace AdvancedKeybinds.Binding
 			if (string.IsNullOrWhiteSpace(token))
 				return string.Empty;
 
-			string global = KeyDisplayAliasStorage.GetDisplay(token);
+			// Display-only unwrap. The original AKAdv token remains untouched in KeyStatus/ownership.
+			string displayToken = BindingDisplayText.UnwrapOwnershipMarkerForDisplay(token);
+			if (string.IsNullOrEmpty(displayToken))
+				return string.Empty;
+
+			string global = KeyDisplayAliasStorage.GetDisplay(displayToken);
 			if (!string.IsNullOrEmpty(global))
 				return global;
 
 			if (!string.IsNullOrWhiteSpace(slotDisplayOverride))
 				return slotDisplayOverride.Trim();
 
-			return FormatToken(token);
+			string formatted = FormatToken(displayToken);
+			return string.IsNullOrEmpty(formatted) ? displayToken : formatted;
 		}
 
 		/// <summary>
@@ -297,9 +320,16 @@ namespace AdvancedKeybinds.Binding
 
 			if (StableKeyToken.IsMouseWheelToken(token))
 			{
-				string locKey = StableKeyToken.IsMouseWheelUpToken(token)
-					? "Mods.AdvancedKeybinds.UI.Combo.MouseWheelUp"
-					: "Mods.AdvancedKeybinds.UI.Combo.MouseWheelDown";
+				string locKey;
+				if (StableKeyToken.IsMouseWheelUpToken(token))
+					locKey = "Mods.AdvancedKeybinds.UI.Combo.MouseWheelUp";
+				else if (StableKeyToken.IsMouseWheelDownToken(token))
+					locKey = "Mods.AdvancedKeybinds.UI.Combo.MouseWheelDown";
+				else if (StableKeyToken.IsMouseWheelLeftToken(token))
+					locKey = "Mods.AdvancedKeybinds.UI.Combo.MouseWheelLeft";
+				else
+					locKey = "Mods.AdvancedKeybinds.UI.Combo.MouseWheelRight";
+
 				string loc = Language.GetTextValue(locKey);
 				if (!string.IsNullOrEmpty(loc)
 					&& !string.Equals(loc, locKey, StringComparison.Ordinal))
@@ -307,6 +337,9 @@ namespace AdvancedKeybinds.Binding
 
 				return StableKeyToken.FormatForDisplay(token);
 			}
+
+			if (GamePadToken.IsPadToken(token))
+				return GamePadToken.FormatForDisplay(token);
 
 			if (JapaneseJisKeyDisplayMap.TryGetDisplay(token, out string jisDisplay))
 				return jisDisplay;
@@ -474,6 +507,10 @@ namespace AdvancedKeybinds.Binding
 				// or when a VK is held without a corresponding measured scan alias in pressed.
 				WindowsKeySuppressor.SupplementSpecialOrOrphanFallbackTokens(pressed);
 			}
+			else if (!OperatingSystem.IsWindows())
+			{
+				FnaKeyboardProvider.SupplementHeld(pressed);
+			}
 
 			if (WindowsKeySuppressor.IsSlotCapturePassthrough)
 			{
@@ -504,6 +541,9 @@ namespace AdvancedKeybinds.Binding
 			if (IsMouseDown(3)) pressed.Add("Mouse3");
 			if (IsMouseDown(4)) pressed.Add("Mouse4");
 			if (IsMouseDown(5)) pressed.Add("Mouse5");
+
+			// Pad:* via FNA GamePad (Steam Input API path quarantined / paused).
+			FnaGamePadProvider.SupplementHeld(pressed);
 		}
 
 		public static bool IsMouseToken(string token)

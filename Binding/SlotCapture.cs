@@ -43,16 +43,27 @@ namespace AdvancedKeybinds.Binding
 		/// <summary>Previous accepted token 窶・next Begin logs whether blocked cleared after that accept.</summary>
 		private static string _lastAcceptedToken;
 		private static int _beginSeq;
-		private static int _waitingReleaseSameRemainingFrames;
+		private static int _waitingReleasePollCount;
+		private static int _waitingReleaseUniqueInputTicks;
+		private static int _waitingReleaseLastInputTick = int.MinValue;
+		private static long _waitingReleaseRemainingSinceMs;
 		private static string _waitingReleaseRemainingKey = "";
 		private static bool _stuckReleaseWarned;
 		private static int _rejectStreak;
 		private static bool _rejectStreakWarned;
-		private const int StuckWaitingForReleaseWarnFrames = 120;
 		private const int RejectStreakWarnCount = 45;
 
-		/// <summary>AKDIAG / tests: latest capture latency markers (T0窶典8).</summary>
+		/// <summary>AKDIAG / tests: latest capture latency markers (T0–T8).</summary>
 		internal static CaptureLatencyClock LatencyClock => _latency;
+
+		/// <summary>Diag-only: current session phase name (no side effects).</summary>
+		internal static string DiagCapturePhase => _session.CurrentPhase.ToString();
+
+		/// <summary>Diag-only: blocked-at-begin remaining tokens.</summary>
+		internal static string DiagBlockedAtBegin => string.Join(",", _session.BlockedAtBegin);
+
+		/// <summary>Diag-only: last accepted token (may be null after Cancel).</summary>
+		internal static string DiagAcceptedToken => _session.AcceptedToken;
 
 		/// <param name="forceBlockMouse1">
 		/// When true (slot opened with left-click), always treat Mouse1 as start-held even if the
@@ -66,6 +77,10 @@ namespace AdvancedKeybinds.Binding
 			WindowsKeySuppressor.SetSlotCapturePassthrough(true);
 
 			_prevHankakuMasqueradeDown = IsJpHankakuMasqueradeDown();
+			var snapBegin = FnaGamePadProvider.Current;
+			GamePadStickCaptureArming.BeginSession(
+				snapBegin.LeftStickX, snapBegin.LeftStickY,
+				snapBegin.RightStickX, snapBegin.RightStickY);
 			HashSet<string> heldAtBegin = SnapshotHeldForCapture();
 			// Slot open is always a left-click: never let a missed Mouse1 snapshot skip WaitingForRelease.
 			if (forceBlockMouse1 || MouseInputHelper.IsPhysicalLeftDown())
@@ -86,7 +101,10 @@ namespace AdvancedKeybinds.Binding
 			}
 
 			_wasInactiveDuringCapture = !Main.hasFocus;
-			_waitingReleaseSameRemainingFrames = 0;
+			_waitingReleasePollCount = 0;
+			_waitingReleaseUniqueInputTicks = 0;
+			_waitingReleaseLastInputTick = int.MinValue;
+			_waitingReleaseRemainingSinceMs = 0;
 			_waitingReleaseRemainingKey = "";
 			_stuckReleaseWarned = false;
 			_rejectStreak = 0;
@@ -109,12 +127,16 @@ namespace AdvancedKeybinds.Binding
 			if (JisOemInGameDiagnostic.IsSessionActive)
 				JisOemInGameDiagnostic.EndCaptureSessionAndFlush("SlotCapture.Cancel");
 			_session.Cancel();
+			GamePadStickCaptureArming.EndSession();
 			_wasInactiveDuringCapture = false;
 			_prevHankakuMasqueradeDown = false;
 			_prevPhaseForLatency = RegisterCaptureSession.Phase.Inactive;
 			_captureLayoutAtBegin = IntPtr.Zero;
 			_prevImeComposingDuringCapture = false;
-			_waitingReleaseSameRemainingFrames = 0;
+			_waitingReleasePollCount = 0;
+			_waitingReleaseUniqueInputTicks = 0;
+			_waitingReleaseLastInputTick = int.MinValue;
+			_waitingReleaseRemainingSinceMs = 0;
 			_stuckReleaseWarned = false;
 			_rejectStreak = 0;
 			WindowsKeySuppressor.SetSlotCapturePassthrough(false);
@@ -281,11 +303,53 @@ namespace AdvancedKeybinds.Binding
 
 			NoteAnomalyWarns(held, edges, accepted);
 
+			bool padInEdges = ContainsPadToken(edges);
+			bool padInHeld = ContainsPadToken(held);
+
 			if (!accepted || string.IsNullOrEmpty(token))
+			{
+				if (padInEdges || padInHeld)
+				{
+					GamePadProbeSystem.LogCapture(
+						slotNumber: -1,
+						gamePadToken: FirstPadToken(edges) ?? FirstPadToken(held),
+						accepted: false,
+						purpleCleared: false,
+						reason: _session.LastDiagReason);
+				}
+
 				return PollResult.Waiting;
+			}
 
 			token = KeyToken.NormalizeCapturedToken(token);
+			// CAPTURE Accepted=True is logged from ComboPanel after purple clear (avoid duplicate lines).
 			return FinishCapture(token, _session.LastDiagReason);
+		}
+
+		private static bool ContainsPadToken(IEnumerable<string> tokens)
+		{
+			if (tokens == null)
+				return false;
+			foreach (string t in tokens)
+			{
+				if (GamePadToken.IsPadToken(t))
+					return true;
+			}
+
+			return false;
+		}
+
+		private static string FirstPadToken(IEnumerable<string> tokens)
+		{
+			if (tokens == null)
+				return null;
+			foreach (string t in tokens)
+			{
+				if (GamePadToken.TryCanonicalize(t, out string c))
+					return c;
+			}
+
+			return null;
 		}
 
 		private static void RecoverAfterException()
@@ -431,6 +495,11 @@ namespace AdvancedKeybinds.Binding
 				}
 			}
 
+			// Pad:* must appear in Held so RegisterCaptureSession.TryAcceptPreferredGamePadNewcomer
+			// can accept a face/DPad/trigger while Mouse1 is still blocked from the slot-open click.
+			// Stick directions are still ignored from Held (CaptureArming edges only).
+			FnaGamePadProvider.SupplementHeld(held);
+
 			return held;
 		}
 
@@ -494,6 +563,18 @@ namespace AdvancedKeybinds.Binding
 			MouseInputHelper.AppendFrameWheelEdges(edges);
 			DigWheelLatchEdges(edges);
 
+			// Pad:* edges via FNA GamePad (Steam Input API path quarantined / paused).
+			// Stick-direction Runtime edges are excluded; CaptureArming supplies CapturePress edges.
+			FnaGamePadProvider.AppendFrameEdges(edges);
+			if (IsCapturing)
+			{
+				var snap = FnaGamePadProvider.Current;
+				GamePadStickCaptureArming.AppendCaptureEdges(
+					snap.LeftStickX, snap.LeftStickY,
+					snap.RightStickX, snap.RightStickY,
+					edges);
+			}
+
 			// Toggle-lock: prefer pending hook edge; also allow physical edge without time warmup gate.
 			if (WindowsKeySuppressor.TryConsumeToggleLockPress(out string toggle))
 				Take(true, toggle);
@@ -509,6 +590,7 @@ namespace AdvancedKeybinds.Binding
 			string prev = _lastAcceptedToken;
 			_lastAcceptedToken = token;
 			_session.Cancel();
+			GamePadStickCaptureArming.EndSession();
 			WindowsKeySuppressor.SetSlotCapturePassthrough(false);
 			if (string.Equals(token, "LeftWindows", StringComparison.OrdinalIgnoreCase)
 				|| string.Equals(token, "RightWindows", StringComparison.OrdinalIgnoreCase))
@@ -538,8 +620,9 @@ namespace AdvancedKeybinds.Binding
 		}
 
 		/// <summary>
-		/// AKDIAG-off safe: one Warn when WaitingForRelease stays on the same remaining set too long,
-		/// or when reject edges keep failing without accept.
+		/// AKDIAG-off safe: one Warn when WaitingForRelease stays on the same remaining set across
+		/// enough *unique input ticks* (not per-Poll increments inside one tick), or when reject
+		/// edges keep failing without accept. Does not force-release inputs.
 		/// </summary>
 		private static void NoteAnomalyWarns(HashSet<string> held, List<string> edges, bool accepted)
 		{
@@ -558,21 +641,38 @@ namespace AdvancedKeybinds.Binding
 
 			if (phase == RegisterCaptureSession.Phase.WaitingForRelease)
 			{
-				if (!string.Equals(remaining, _waitingReleaseRemainingKey, StringComparison.Ordinal))
+				_waitingReleasePollCount++;
+				int epoch = FnaGamePadProvider.InputTickEpoch;
+				_waitingReleaseUniqueInputTicks =
+					ComboPanelRegistrationWaitDiagPolicy.NextUniqueInputTicksForStuckWarn(
+						remaining,
+						_waitingReleaseRemainingKey,
+						_waitingReleaseUniqueInputTicks,
+						epoch,
+						_waitingReleaseLastInputTick,
+						out _waitingReleaseRemainingKey,
+						out _waitingReleaseLastInputTick);
+
+				if (_waitingReleaseUniqueInputTicks == 0)
 				{
-					_waitingReleaseRemainingKey = remaining;
-					_waitingReleaseSameRemainingFrames = 0;
+					_waitingReleaseRemainingSinceMs = Environment.TickCount64;
 					_stuckReleaseWarned = false;
+					_waitingReleasePollCount = 1;
 				}
-				else
-					_waitingReleaseSameRemainingFrames++;
 
 				if (!_stuckReleaseWarned
-					&& _waitingReleaseSameRemainingFrames >= StuckWaitingForReleaseWarnFrames)
+					&& ComboPanelRegistrationWaitDiagPolicy.ShouldWarnStuckWaitingForRelease(
+						_waitingReleaseUniqueInputTicks))
 				{
 					_stuckReleaseWarned = true;
+					long elapsedMs = Environment.TickCount64 - _waitingReleaseRemainingSinceMs;
+					if (elapsedMs < 0)
+						elapsedMs = 0;
 					AkDiag.WarnRare(
-						"SlotCapture stuck WaitingForRelease frames>=" + StuckWaitingForReleaseWarnFrames
+						"SlotCapture stuck WaitingForRelease"
+						+ " pollCount=" + _waitingReleasePollCount
+						+ " inputTicks=" + _waitingReleaseUniqueInputTicks
+						+ " elapsedMs=" + elapsedMs
 						+ " remaining=[" + remaining + "]"
 						+ " held=[" + string.Join(",", held) + "]"
 						+ " " + WindowsKeySuppressor.FormatNlsCaptureDiag()
@@ -581,7 +681,9 @@ namespace AdvancedKeybinds.Binding
 			}
 			else
 			{
-				_waitingReleaseSameRemainingFrames = 0;
+				_waitingReleasePollCount = 0;
+				_waitingReleaseUniqueInputTicks = 0;
+				_waitingReleaseLastInputTick = int.MinValue;
 				_waitingReleaseRemainingKey = "";
 			}
 

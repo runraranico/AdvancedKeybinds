@@ -26,6 +26,8 @@ namespace AdvancedKeybinds.Binding
 		private static readonly Dictionary<string, bool> CurrentActions = new();
 		private static readonly HashSet<string> SuppressedComboTokens = new(StringComparer.OrdinalIgnoreCase);
 		private static readonly Dictionary<string, HoldTracker> HoldTrackers = new();
+		/// <summary>Previous-frame logical OR held for AlternateGamePad bindings (HOLD/OR edges).</summary>
+		private static readonly Dictionary<string, bool> AlternateOrHeldPrevious = new(StringComparer.Ordinal);
 
 		private static HashSet<string> _previousPressed = new(StringComparer.OrdinalIgnoreCase);
 		private static readonly HashSet<string> _pressedScratch = new(StringComparer.OrdinalIgnoreCase);
@@ -48,6 +50,7 @@ namespace AdvancedKeybinds.Binding
 		public static void InvalidateBindings()
 		{
 			HoldTrackers.Clear();
+			AlternateOrHeldPrevious.Clear();
 			JustPressedActions.Clear();
 			CurrentActions.Clear();
 			MarkCompiledDirty();
@@ -189,6 +192,29 @@ namespace AdvancedKeybinds.Binding
 				if (combo == null)
 					continue;
 
+				if (GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(cb.ActionId)
+					|| combo.UseTerrariaKeyStatusOr)
+					continue;
+
+				// Vanilla Jump/MouseLeft etc.: KeyStatus Buttons name owns fire (avoid dual-fire).
+				// MOD GP singles (e.g. Pad:Back / Select) must still Evaluate — Keyboard Advanced
+				// ownership otherwise wipes the shared trigger and ModKeybind never sees JustPressed.
+				if (ControlsEditTargetPolicy.IsGamePadStorageKey(cb.ActionId)
+					&& ControlsEditTargetPolicy.IsVanillaOwnedGamePadOrPair(
+						combo.Hold, combo.Keys, combo.AlternateGamePadToken))
+				{
+					string skipTrigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(cb.ActionId);
+					if (!ControlsGameUiSeparationPolicy.IsModKeybindActionId(skipTrigger))
+						continue;
+				}
+
+				// Stale legacy GP:{action} must not fire when GP:G: / GP:U: has effective inputs,
+				// or when ClearBindings marked the trigger for evaluate-only suppress (data kept).
+				if (ControlsGameUiSeparationPolicy.ShouldSuppressLegacyGamePadEvaluate(
+					    cb.ActionId,
+					    BindingStorage.HasLegacyEvaluateSuppressingSibling))
+					continue;
+
 				eval++;
 				EvaluateCombo(cb.ActionId, combo, pressed, toggleEdges, winEdges);
 			}
@@ -205,9 +231,9 @@ namespace AdvancedKeybinds.Binding
 				CompiledBinding cb = _compiled[idx];
 				string key = cb.Keys[0];
 				if (BindingRestrictions.IsToggleLockToken(key) && toggleEdges.Contains(key))
-					JustPressedActions[cb.ActionId] = true;
+					JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(cb.ActionId)] = true;
 				else if (BindingRestrictions.IsWindowsKeyToken(key) && winEdges.Contains(key))
-					JustPressedActions[cb.ActionId] = true;
+					JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(cb.ActionId)] = true;
 			}
 		}
 
@@ -319,7 +345,7 @@ namespace AdvancedKeybinds.Binding
 			if (winnerId == null)
 				return;
 
-			JustPressedActions[winnerId] = true;
+			JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(winnerId)] = true;
 			if (HoldTrackers.TryGetValue(winnerId, out HoldTracker winnerTracker)
 				&& LiveInputDiagnosticSession.IsActive)
 			{
@@ -413,13 +439,41 @@ namespace AdvancedKeybinds.Binding
 				return;
 			}
 
-			bool allDown = true;
-			for (int i = 0; i < keys.Count; i++)
+			bool useAlternateOr = combo.HasAlternateGamePad
+				&& keys.Count == 1
+				&& AlternateGamePadBindingPolicy.ShouldEvaluateRuntime(
+					FnaGamePadProvider.IsSubsystemActive, combo.AlternateGamePadToken);
+
+			bool allDown;
+			bool orJustPressed = false;
+			bool orJustReleased = false;
+			if (useAlternateOr)
 			{
-				if (!IsBindingKeyDown(keys[i], pressed, combo))
+				bool primaryDown = IsBindingKeyDown(keys[0], pressed, combo);
+				bool altDown = IsBindingKeyDown(combo.AlternateGamePadToken, pressed, combo);
+				AlternateOrHeldPrevious.TryGetValue(actionId, out bool prevOr);
+				var edges = AlternateGamePadBindingPolicy.EvaluateOrEdges(primaryDown, altDown, prevOr);
+				allDown = edges.Held;
+				orJustPressed = edges.JustPressed;
+				orJustReleased = edges.JustReleased;
+				AlternateOrHeldPrevious[actionId] = edges.Held;
+				if (!allDown && orJustReleased)
 				{
-					allDown = false;
-					break;
+					HoldTrackers.Remove(actionId);
+					return;
+				}
+			}
+			else
+			{
+				allDown = ComboAndGatePolicy.AllRequiredDown(
+					keys,
+					key => IsBindingKeyDown(key, pressed, combo));
+
+				if (!allDown)
+				{
+					HoldTrackers.Remove(actionId);
+					AlternateOrHeldPrevious.Remove(actionId);
+					return;
 				}
 			}
 
@@ -443,6 +497,8 @@ namespace AdvancedKeybinds.Binding
 					SuppressedComboTokens.Add(((Keys)vk).ToString());
 				}
 			}
+			if (useAlternateOr)
+				SuppressedComboTokens.Add(combo.AlternateGamePadToken);
 
 			bool isHold = combo.Hold && keys.Count == 1;
 
@@ -463,7 +519,11 @@ namespace AdvancedKeybinds.Binding
 			}
 
 			bool justPressed;
-			if (keys.Count == 1)
+			if (useAlternateOr)
+			{
+				justPressed = orJustPressed;
+			}
+			else if (keys.Count == 1)
 			{
 				justPressed = IsBindingJustPressed(keys[0], pressed, toggleEdges, winEdges);
 			}
@@ -482,7 +542,7 @@ namespace AdvancedKeybinds.Binding
 
 			if (justPressed)
 			{
-				JustPressedActions[actionId] = true;
+				JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
 				if (keys.Count == 1 && JisOemInGameDiagnostic.IsSessionActive)
 					JisOemInGameDiagnostic.NoteActivation(keys[0], pressed, wouldFire: true);
 
@@ -497,7 +557,7 @@ namespace AdvancedKeybinds.Binding
 				}
 			}
 
-			CurrentActions[actionId] = true;
+			CurrentActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
 		}
 
 		/// <summary>
@@ -554,6 +614,21 @@ namespace AdvancedKeybinds.Binding
 
 		private static bool IsBindingKeyDown(string token, HashSet<string> pressed, ComboBinding combo)
 		{
+			// Pad:* — SupplementHeld usually adds tokens, but also query FnaGamePadProvider directly
+			// so two-key Alternate (e.g. Pad:X → MouseLeft) cannot miss when the set is stale.
+			if (GamePadToken.IsPadToken(token))
+			{
+				if (FnaGamePadProvider.IsDown(token)
+					|| BindingPhysicalHeldMatch.IsHeld(token, pressed))
+				{
+					if (!pressed.Contains(token))
+						pressed.Add(token);
+					return true;
+				}
+
+				return false;
+			}
+
 			// 1) exact  2) AreSamePhysical — old Keys/VK saves vs new SC: pressed set.
 			if (BindingPhysicalHeldMatch.IsHeld(token, pressed))
 			{
@@ -648,7 +723,7 @@ namespace AdvancedKeybinds.Binding
 			if (!tracker.Fired && tracker.HeldMs >= combo.EffectiveHoldMs)
 			{
 				tracker.Fired = true;
-				JustPressedActions[actionId] = true;
+				JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
 				if (LiveInputDiagnosticSession.IsActive)
 				{
 					LiveInputDiagnosticSession.ObserveHold(
@@ -665,7 +740,7 @@ namespace AdvancedKeybinds.Binding
 			}
 
 			if (tracker.Fired)
-				CurrentActions[actionId] = true;
+				CurrentActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
 		}
 
 		/// <summary>Accumulates hold time only; firing happens in <see cref="FireReleaseHoldWinner"/>.</summary>
@@ -712,12 +787,21 @@ namespace AdvancedKeybinds.Binding
 
 				bool anyUp = false;
 				List<string> keys = combo.Keys;
-				for (int i = 0; i < keys.Count; i++)
+				if (combo.HasAlternateGamePad && keys.Count == 1)
 				{
-					if (!IsBindingKeyDown(keys[i], pressed, combo))
+					bool primaryDown = IsBindingKeyDown(keys[0], pressed, combo);
+					bool altDown = IsBindingKeyDown(combo.AlternateGamePadToken, pressed, combo);
+					anyUp = !(primaryDown || altDown);
+				}
+				else
+				{
+					for (int i = 0; i < keys.Count; i++)
 					{
-						anyUp = true;
-						break;
+						if (!IsBindingKeyDown(keys[i], pressed, combo))
+						{
+							anyUp = true;
+							break;
+						}
 					}
 				}
 
@@ -790,7 +874,18 @@ namespace AdvancedKeybinds.Binding
 				return false;
 
 			ComboBinding combo = BindingStorage.Get(actionId);
-			return combo != null && combo.RequiresAdvancedStorage();
+			if (combo != null && combo.RequiresAdvancedStorage())
+				return true;
+
+			string gpKey = ControlsEditTargetPolicy.ToStorageKey(
+				ControlsEditTargetPolicy.DeviceKind.GamePad, actionId);
+			ComboBinding gp = BindingStorage.Get(gpKey);
+			if (gp == null)
+				return false;
+			if (ControlsEditTargetPolicy.IsVanillaOwnedGamePadOrPair(
+				    gp.Hold, gp.Keys, gp.AlternateGamePadToken))
+				return false;
+			return gp.RequiresAdvancedStorage();
 		}
 
 		/// <summary>
@@ -811,6 +906,8 @@ namespace AdvancedKeybinds.Binding
 		public static void ApplyOwnershipToTriggers(TriggersSet justPressed, TriggersSet current, TriggersSet justReleased)
 		{
 			EnsureCompiled();
+			bool currentInputIsGamePad = PlayerInput.CurrentInputMode == InputMode.XBoxGamepad
+				|| PlayerInput.CurrentInputMode == InputMode.XBoxGamepadUI;
 			CompiledBinding[] compiled = _compiled;
 			for (int i = 0; i < compiled.Length; i++)
 			{
@@ -819,18 +916,32 @@ namespace AdvancedKeybinds.Binding
 					continue;
 
 				string actionId = cb.ActionId;
-				bool akPressed = WasJustPressed(actionId);
-				bool akCurrent = IsCurrent(actionId);
-				bool akReleased = WasJustReleased(actionId);
+				ComboBinding combo = BindingStorage.Get(actionId);
+				bool hold = combo != null && combo.Hold;
+				IReadOnlyList<string> keys = combo != null ? combo.Keys : cb.Keys;
+				string alternate = combo != null ? combo.AlternateGamePadToken : null;
+				if (!BindingOwnershipTriggerPolicy.ShouldApplyOwnershipReplace(
+					    actionId,
+					    requiresAdvancedStorage: true,
+					    hold,
+					    keys,
+					    alternate,
+					    currentInputIsGamePad))
+					continue;
 
-				if (justPressed != null && justPressed.KeyStatus.ContainsKey(actionId))
-					justPressed.KeyStatus[actionId] = akPressed;
+				string triggerId = ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId);
+				bool akPressed = WasJustPressed(triggerId) || WasJustPressed(actionId);
+				bool akCurrent = IsCurrent(triggerId) || IsCurrent(actionId);
+				bool akReleased = WasJustReleased(triggerId) || WasJustReleased(actionId);
 
-				if (current != null && current.KeyStatus.ContainsKey(actionId))
-					current.KeyStatus[actionId] = akCurrent;
+				if (justPressed != null && justPressed.KeyStatus.ContainsKey(triggerId))
+					justPressed.KeyStatus[triggerId] = akPressed;
 
-				if (justReleased != null && justReleased.KeyStatus.ContainsKey(actionId))
-					justReleased.KeyStatus[actionId] = akReleased;
+				if (current != null && current.KeyStatus.ContainsKey(triggerId))
+					current.KeyStatus[triggerId] = akCurrent;
+
+				if (justReleased != null && justReleased.KeyStatus.ContainsKey(triggerId))
+					justReleased.KeyStatus[triggerId] = akReleased;
 			}
 		}
 

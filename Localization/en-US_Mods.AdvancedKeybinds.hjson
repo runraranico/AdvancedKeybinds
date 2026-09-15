@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Auto
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: Enabled
+			Tooltip: If you cannot register keys, try this option
+		}
+
+		Disabled: {
+			Label: Disabled
+			Tooltip: Recommended if you do not use a controller
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: Special keys / UI control
+		Header: UI Controls / Special Keys
 
 		Suppress: {
 			Label: Suppress Windows key
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: Auto-enable on next mod load
 			Tooltip: On: start confined on next mod load. Off: start unconfined on next mod load
+		}
+	}
+
+	GamePad: {
+		Header: Controller
+
+		Mode: {
+			Label: Controller input
+			Tooltip: How Advanced Keybinds reads your controller. See each choice below for details
 		}
 	}
 
@@ -151,6 +179,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Enter a value from 10～10000
 		ConfirmLeftClickOnly: Bind Left-click alone? Save again to confirm.
+		ClearConfirmPad: Clear?
+		RejectOppositeStickDirection: Opposite stick directions cannot be combined (e.g. Up+Down).
 		KeyInfoSelectHint: Select a key
 		KeyInfoSelectGuide: Select a key
 		KeyInfoCurrent: Original key
@@ -172,7 +202,27 @@ UI: {
 		KeyInfoDisplayRestored: Restored display name {0} to {1}
 		SlotOriginalKey: Original: {0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: Toward you
-		MouseWheelDown: Away from you
+
+		DisplayNameUnavailable: {
+			Line1: Display name changes are
+			Line2: disabled when using
+			Line3: a controller
+		}
+
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: 2 Key Setup
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: Controller only
+		HintLine2: Either key activates
+		HintLine3: ""
+		HoldUnavailableHint: Unavailable
 	}
 }

@@ -26,6 +26,10 @@ namespace AdvancedKeybinds.Core
 			if (PhysicalKeyToken.IsFallbackToken(token))
 				return true;
 
+			// Gamepad logical tokens — never written as sole vanilla KeyConfiguration strings.
+			if (GamePadToken.IsPadToken(token))
+				return true;
+
 			// Identity / diagnostic prefixes (not Keys.ToString names).
 			if (token.StartsWith(PhysicalKeyIdentity.Prefix, StringComparison.OrdinalIgnoreCase)
 				|| token.StartsWith(PhysicalPrefix, StringComparison.OrdinalIgnoreCase)
@@ -73,6 +77,29 @@ namespace AdvancedKeybinds.Core
 				return false;
 
 			return IsPlainSingleTapSole(hold: false, keys[0]);
+		}
+
+		/// <summary>
+		/// Identifies Escape-equivalent capture tokens for diagnostics / policy helpers.
+		/// Does NOT force plain ownership — Escape-plain caused normal ESC death after B+R.
+		/// Do NOT treat SC:0x1B (JIS OemOpenBrackets) as Escape.
+		/// </summary>
+		public static bool IsEscapeEquivalentToken(string key)
+		{
+			if (string.IsNullOrEmpty(key))
+				return false;
+
+			if (string.Equals(key, "Escape", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (string.Equals(key, "VK:0x1B", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (key.Length >= 10
+				&& key.StartsWith("SC:0x01:", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			return false;
 		}
 
 		/// <summary>Zero-alloc sole-key form (same rules as <see cref="IsPlainSingleTap"/> for one key).</summary>

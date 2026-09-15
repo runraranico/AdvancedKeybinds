@@ -12,7 +12,11 @@ namespace AdvancedKeybinds.Binding
 		private static bool _prevX1;
 		private static bool _prevX2;
 		private static int _prevScrollWheel;
-		private static int _scrollAdvanceGameFrame = -1;
+		/// <summary>
+		/// Last <see cref="FnaKeyboardProvider.InputTickEpoch"/> for which FNA wheel was sampled.
+		/// Not <see cref="Main.GameUpdateCount"/> — menus/Controls leave that at 0 (same class of bug as keyboard).
+		/// </summary>
+		private static int _scrollAdvanceInputEpoch = int.MinValue;
 		private static readonly List<string> _frameWheelEdges = new(2);
 		private static readonly List<string> _pendingWin32WheelEdges = new(4);
 
@@ -60,10 +64,32 @@ namespace AdvancedKeybinds.Binding
 		/// Win32 <c>WM_MOUSEWHEEL</c> / <c>GET_WHEEL_DELTA_WPARAM</c>: positive = away from user (奥回し).
 		/// </summary>
 		internal static string WheelDeltaToToken(int wheelDelta)
-			=> wheelDelta > 0 ? StableKeyToken.MouseWheelDownToken : StableKeyToken.MouseWheelUpToken;
+			=> WheelDirectionPolicy.VerticalDeltaToToken(wheelDelta);
 
-		/// <summary>Called from the game window WndProc (before Terraria UI consumes the message).</summary>
+		/// <summary>
+		/// Win32 <c>WM_MOUSEHWHEEL</c>: positive = right, negative = left
+		/// (Microsoft Learn; produces MouseWheelRight / MouseWheelLeft only).
+		/// </summary>
 		public static void OnWin32WheelDelta(short wheelDelta)
+		{
+			if (wheelDelta == 0)
+				return;
+
+			string token = WheelDirectionPolicy.HorizontalDeltaToToken(wheelDelta);
+			_pendingWin32WheelEdges.Add(token);
+			if (AkDiag.Enabled)
+			{
+				AkDiag.Log(
+					"Wheel Win32 horizontal edge " + token
+					+ " delta=" + wheelDelta
+					+ " capturePassthrough=" + WindowsKeySuppressor.IsSlotCapturePassthrough
+					+ " wndHook=" + GameWindowInputHook.IsInstalledForDiag
+					+ " " + FormatWheelDiag());
+			}
+		}
+
+		/// <summary>Called for WM_MOUSEWHEEL before Terraria UI consumes the message.</summary>
+		public static void OnWin32VerticalWheelDelta(short wheelDelta)
 		{
 			if (wheelDelta == 0)
 				return;
@@ -140,7 +166,8 @@ namespace AdvancedKeybinds.Binding
 		public static string FormatWheelDiag()
 			=> "wheelFrame=[" + string.Join(",", _frameWheelEdges) + "]"
 				+ " wheelPending=" + _pendingWin32WheelEdges.Count
-				+ " advFrame=" + _scrollAdvanceGameFrame
+				+ " advEpoch=" + _scrollAdvanceInputEpoch
+				+ " inputTickEpoch=" + FnaKeyboardProvider.InputTickEpoch
 				+ " gameFrame=" + Main.GameUpdateCount
 				+ " fnaScroll=" + _prevScrollWheel;
 
@@ -182,15 +209,16 @@ namespace AdvancedKeybinds.Binding
 		}
 
 		/// <summary>
-		/// Merges Win32 wheel edges and FNA fallback once per game frame.
-		/// Edges persist for the whole frame so multiple SlotCapture polls can see the same notch.
+		/// Merges Win32 wheel edges and FNA fallback once per PlayerInput update tick
+		/// (<see cref="FnaKeyboardProvider.InputTickEpoch"/>). Edges persist for the whole tick so
+		/// multiple SlotCapture polls can see the same notch. Win32 pending is merged every call.
 		/// </summary>
 		public static void AdvanceScrollWheel()
 		{
-			int frame = (int)Main.GameUpdateCount;
-			if (frame != _scrollAdvanceGameFrame)
+			int epoch = FnaKeyboardProvider.InputTickEpoch;
+			if (epoch != _scrollAdvanceInputEpoch)
 			{
-				_scrollAdvanceGameFrame = frame;
+				_scrollAdvanceInputEpoch = epoch;
 				_frameWheelEdges.Clear();
 				TrySampleFnaWheelDelta();
 			}
@@ -233,7 +261,8 @@ namespace AdvancedKeybinds.Binding
 			_prevScrollWheel = GetMouseStateFresh().ScrollWheelValue;
 			_frameWheelEdges.Clear();
 			_pendingWin32WheelEdges.Clear();
-			_scrollAdvanceGameFrame = (int)Main.GameUpdateCount;
+			// Force next AdvanceScrollWheel to re-sample on this input tick (baseline just moved).
+			_scrollAdvanceInputEpoch = int.MinValue;
 			if (AkDiag.Enabled && (clearedPending > 0 || WindowsKeySuppressor.IsSlotCapturePassthrough))
 			{
 				if (AkDiag.Enabled)

@@ -14,6 +14,8 @@ namespace AdvancedKeybinds.Core
 		/// <summary>
 		/// Only keys Terraria UI reuses for navigate/confirm. IME/toggle keys (e.g. Kana) must
 		/// not arm release-wait suppress — KeyToken.IsDown can stick true and freeze all clicks.
+		/// GamePad digital tokens (<c>Pad:A</c>, …) also arm: vanilla/SI often maps them to UI confirm
+		/// (e.g. MouseLeft) and would re-open the slot under the cursor while still held.
 		/// </summary>
 		private static readonly string[] UiReuseSuppressNamedTokens = {
 			"Space",
@@ -26,6 +28,10 @@ namespace AdvancedKeybinds.Core
 		{
 			if (string.IsNullOrEmpty(token))
 				return false;
+
+			// Independent of Keyboard named list — Pad:* must suppress until RELEASE.
+			if (GamePadToken.IsPadToken(token))
+				return GamePadToken.TryCanonicalize(token, out _);
 
 			for (int i = 0; i < UiReuseSuppressNamedTokens.Length; i++)
 			{
@@ -145,6 +151,30 @@ namespace AdvancedKeybinds.Core
 			hoverUiY = lockedUiY;
 			return true;
 		}
+
+		/// <summary>
+		/// Open-click Mouse1 contract:
+		/// arm on mouse Open only; clear after HandleClicks when phys+Main.mouseLeft both UP;
+		/// block mouse StartSlotCapture while active; Pad path never blocked.
+		/// Product keeps open-click block separate from purple Mouse1 swallow so FinishKeyCapture
+		/// cannot re-enable the opening click as StartSlotCapture.
+		/// </summary>
+		public static bool ShouldArmOpenClickMouse1Swallow(bool openedByGamePad)
+			=> !openedByGamePad;
+
+		public static bool ShouldClearOpenClickMouse1Swallow(
+			bool swallowActive,
+			bool physicalMouse1Down,
+			bool mainMouseLeftDown)
+			=> swallowActive && !physicalMouse1Down && !mainMouseLeftDown;
+
+		/// <summary>
+		/// Gate for StartSlotCaptureFromUi. mouseUiPath=false (Pad) is never blocked.
+		/// </summary>
+		public static bool ShouldBlockMouseStartSlotCapture(
+			bool mouseUiPath,
+			bool openClickSwallowActive)
+			=> mouseUiPath && openClickSwallowActive;
 
 		/// <summary>
 		/// Purple-wait mouse priority: dismiss buttons → bind on capturing slot → outside cancel.

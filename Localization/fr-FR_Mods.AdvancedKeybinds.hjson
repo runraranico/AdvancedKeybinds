@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Automatique
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: Activé
+			Tooltip: Si les touches ne s'enregistrent pas, essayez ceci
+		}
+
+		Disabled: {
+			Label: Désactivé
+			Tooltip: Recommandé si vous n'utilisez pas de manette
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: Touches spéciales / contrôle de l'UI
+		Header: Contrôle de l'UI / Touches spéciales
 
 		Suppress: {
 			Label: Supprimer la touche Windows
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: Activer automatiquement au prochain chargement du mod
 			Tooltip: Activé : démarrer avec verrouillage au prochain chargement. Désactivé : démarrer sans verrouillage au prochain chargement
+		}
+	}
+
+	GamePad: {
+		Header: Manette
+
+		Mode: {
+			Label: Entrée manette
+			Tooltip: Comment Advanced Keybinds lit votre manette. Voir chaque choix ci-dessous pour les détails
 		}
 	}
 
@@ -142,7 +170,7 @@ UI: {
 		HintLine1: Clic gauche sur une case, puis appuyez sur une touche ou un bouton de souris.
 		HintLine2: Hold uniquement avec 1 touche.
 		HintLine3: Placez le curseur sur une case et clic droit pour effacer la liaison.
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: Par défaut
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: maintenu
 		HoldOnReleaseTitle: Hold
@@ -151,6 +179,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Entrez une valeur de 10～10000
 		ConfirmLeftClickOnly: Lier uniquement le clic gauche ? Enregistrez à nouveau pour confirmer.
+		ClearConfirmPad: Effacer ?
+		RejectOppositeStickDirection: Directions opposées du stick incompatibles (ex. Haut+Bas).
 		KeyInfoSelectHint: Sélectionnez une touche
 		KeyInfoSelectGuide: Choisir une touche
 		KeyInfoCurrent: Touche d'origine
@@ -172,7 +202,27 @@ UI: {
 		KeyInfoDisplayRestored: Nom affiché {0} restauré en {1}
 		SlotOriginalKey: Original : {0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: Vers soi
-		MouseWheelDown: Loin de soi
+
+		DisplayNameUnavailable: {
+			Line1: Le changement de nom
+			Line2: est désactivé
+			Line3: avec une manette
+		}
+
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: Config. 2 touches
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: Manette seule
+		HintLine2: Une des deux active
+		HintLine3: ""
+		HoldUnavailableHint: Indisponible
 	}
 }

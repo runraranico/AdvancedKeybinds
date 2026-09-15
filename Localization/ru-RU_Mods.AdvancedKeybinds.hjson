@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Автоматически
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: Включено
+			Tooltip: Если клавиши не назначаются, попробуйте этот режим
+		}
+
+		Disabled: {
+			Label: Отключено
+			Tooltip: Рекомендуется, если вы не используете контроллер
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: Особые клавиши / управление UI
+		Header: Управление UI / Особые клавиши
 
 		Suppress: {
 			Label: Блокировать клавишу Windows
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: Автоматически включать при следующей загрузке мода
 			Tooltip: Вкл.: старт с блокировкой при следующей загрузке. Выкл.: старт без блокировки при следующей загрузке
+		}
+	}
+
+	GamePad: {
+		Header: Контроллер
+
+		Mode: {
+			Label: Ввод с контроллера
+			Tooltip: Как Advanced Keybinds считывает контроллер. Подробности в описании каждого варианта ниже
 		}
 	}
 
@@ -142,7 +170,7 @@ UI: {
 		HintLine1: Щелкните по слоту ЛКМ, затем нажмите клавишу или кнопку мыши.
 		HintLine2: Hold только при 1 клавише.
 		HintLine3: Наведите курсор на слот и ПКМ, чтобы снять назначение.
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: По умолчанию
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: при удержании
 		HoldOnReleaseTitle: Hold
@@ -151,6 +179,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Введите значение от 10～10000
 		ConfirmLeftClickOnly: Назначить только левый клик? Сохраните ещё раз для подтверждения.
+		ClearConfirmPad: Очистить?
+		RejectOppositeStickDirection: Противоположные направления стика нельзя комбинировать (напр. Вверх+Вниз).
 		KeyInfoSelectHint: Выберите клавишу
 		KeyInfoSelectGuide: Выбрать клавишу
 		KeyInfoCurrent: Исходная клавиша
@@ -172,7 +202,27 @@ UI: {
 		KeyInfoDisplayRestored: Отображаемое имя {0} восстановлено в {1}
 		SlotOriginalKey: Исходная: {0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: К себе
-		MouseWheelDown: От себя
+
+		DisplayNameUnavailable: {
+			Line1: Смена отображаемого имени
+			Line2: отключена
+			Line3: при использовании контроллера
+		}
+
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: Настройка 2 кнопок
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: Только геймпад
+		HintLine2: Любая срабатывает
+		HintLine3: ""
+		HoldUnavailableHint: Недоступно
 	}
 }

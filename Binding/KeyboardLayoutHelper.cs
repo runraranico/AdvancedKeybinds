@@ -44,19 +44,26 @@ namespace AdvancedKeybinds.Binding
 
 		public static bool IsJapaneseKeyboardLayout()
 		{
+			// Windows layout APIs live in user32; off Windows there is no HKL to inspect.
+			if (!OperatingSystem.IsWindows())
+				return false;
+
 			uint lang = (uint)GetKeyboardLayout(0).ToInt64() & 0xFFFF;
 			return lang == JapaneseKeyboardLayoutId;
 		}
 
 		public static bool IsKoreanKeyboardLayout()
 		{
+			if (!OperatingSystem.IsWindows())
+				return false;
+
 			uint lang = (uint)GetKeyboardLayout(0).ToInt64() & 0xFFFF;
 			return lang == KoreanKeyboardLayoutId;
 		}
 
 		/// <summary>True when Windows reports a JIS physical keyboard (independent of the active layout).</summary>
 		public static bool IsJapanesePhysicalKeyboard()
-			=> GetKeyboardType(0) == JapanesePhysicalKeyboardType;
+			=> OperatingSystem.IsWindows() && GetKeyboardType(0) == JapanesePhysicalKeyboardType;
 
 		/// <summary>
 		/// True when 「半角／全角」 can appear on scan 0x29 (JIS hardware and/or Japanese layout).
@@ -75,6 +82,9 @@ namespace AdvancedKeybinds.Binding
 		/// <summary>Active thread keyboard layout HKL (for capture layout-change recovery).</summary>
 		public static IntPtr GetActiveLayoutHandle()
 		{
+			if (!OperatingSystem.IsWindows())
+				return IntPtr.Zero;
+
 			try
 			{
 				return GetKeyboardLayout(0);
@@ -174,6 +184,9 @@ namespace AdvancedKeybinds.Binding
 		/// <summary>One-line layout snapshot for capture-begin diagnostics.</summary>
 		public static string FormatCaptureLayoutDiag()
 		{
+			if (!OperatingSystem.IsWindows())
+				return "layout=unavailable reason=non-Windows";
+
 			uint lang = (uint)GetKeyboardLayout(0).ToInt64() & 0xFFFF;
 			string jpTag = lang == JapaneseKeyboardLayoutId ? "(JP)" : string.Empty;
 			return "layout=0x" + lang.ToString("X4") + jpTag

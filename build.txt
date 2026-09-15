@@ -1,5 +1,6 @@
 displayName = Advanced Keybinds
 author = runohito
-version = 0.4.1
+version = 5.0.0
 includeSource = true
 side = Client
+buildIgnore = _developer\*, .cursor\*, .git\*, bin\*, obj\*, *.csproj, *.user, *.suo, *.md, .ak-enable-diagnostics

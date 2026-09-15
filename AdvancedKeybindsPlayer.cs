@@ -1,3 +1,4 @@
+using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Patches;
 using Terraria.ModLoader;
 
@@ -29,6 +30,7 @@ namespace AdvancedKeybinds
 		public override void SetControls()
 		{
 			KeybindUiWorldInputGuard.ApplyWorldRightClickBlock(Player);
+			ComboPanelBackgroundInputBlock.SuppressLocalPlayerGameplay(Player);
 		}
 
 		public override void PostUpdate()

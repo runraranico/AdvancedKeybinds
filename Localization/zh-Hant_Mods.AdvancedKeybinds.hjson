@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: 自動
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: 啟用
+			Tooltip: 無法註冊按鍵時可以試試此項
+		}
+
+		Disabled: {
+			Label: 停用
+			Tooltip: 不使用手把時建議選擇此項
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: 特殊按鍵與 UI 控制
+		Header: UI 控制 / 特殊按鍵
 
 		Suppress: {
 			Label: 抑制 Windows 鍵
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: 下次載入模組時自動啟用
 			Tooltip: 開啟：下次載入模組時以視窗內固定開啟。關閉：下次載入時以關閉狀態開始
+		}
+	}
+
+	GamePad: {
+		Header: 手把
+
+		Mode: {
+			Label: 手把輸入
+			Tooltip: Advanced Keybinds 讀取手把的方式。詳情請見下方各選項說明
 		}
 	}
 
@@ -143,7 +171,7 @@ UI: {
 		HintLine1: 左鍵點擊欄位，然後按下按鍵或滑鼠按鈕。
 		HintLine2: Hold 僅限 1 鍵時可用。
 		HintLine3: 將游標移到欄位上並右鍵點擊以清除設定。
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: 預設
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 按住時
 		HoldOnReleaseTitle: Hold
@@ -151,8 +179,9 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: 可輸入 10～10000 的數值
-		RejectLeftClickOnly: 要單獨綁定左鍵嗎？再按一次儲存以確認。
 		ConfirmLeftClickOnly: 要單獨綁定左鍵嗎？再按一次儲存以確認。
+		ClearConfirmPad: 要清除嗎？
+		RejectOppositeStickDirection: 同一搖桿的相反方向不能同時綁定（例如 上+下）
 		KeyInfoSelectHint: 請選擇按鍵
 		KeyInfoSelectGuide: 選擇按鍵
 		KeyInfoCurrent: 原始按鍵
@@ -174,7 +203,25 @@ UI: {
 		KeyInfoDisplayRestored: 已將顯示名稱 {0} 還原為 {1}
 		SlotOriginalKey: 原始：{0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: 朝自己滾
-		MouseWheelDown: 向外滾
+		DisplayNameUnavailable: {
+			Line1: 顯示名變更功能
+			Line2: 在使用控制器時
+			Line3: 將停用
+		}
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: 雙鍵設定
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: 僅限手把
+		HintLine2: 任一鍵可觸發
+		HintLine3: ""
+		HoldUnavailableHint: 不可用
 	}
 }

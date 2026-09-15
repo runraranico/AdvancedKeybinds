@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using AdvancedKeybinds.Core;
 using Newtonsoft.Json;
@@ -32,6 +33,21 @@ namespace AdvancedKeybinds.Binding
 		public string Slot2Display;
 		/// <summary>Optional display override for <see cref="Slot3"/> (empty = use FormatToken).</summary>
 		public string Slot3Display;
+
+		/// <summary>
+		/// Controller-only OR alternate (<c>Pad:*</c>). Independent of Slot1–3 AND combo semantics.
+		/// </summary>
+		public string AlternateGamePadToken;
+
+		/// <summary>
+		/// Explicit empty GamePad two-key Terraria-OR record must stay in Combos/JSON.
+		/// </summary>
+		public bool PersistAsEmptyRecord;
+
+		/// <summary>
+		/// Slot1/Slot2 → Terraria KeyStatus OR; BindingInputEngine skips evaluation.
+		/// </summary>
+		public bool UseTerrariaKeyStatusOr;
 
 		public bool Hold;
 
@@ -90,7 +106,17 @@ namespace AdvancedKeybinds.Binding
 		/// hook-managed, or SC/VK/measured tokens). Keys-name single taps stay in vanilla.
 		/// </summary>
 		public bool RequiresAdvancedStorage()
-			=> PlainSingleTapPolicy.RequiresAdvancedStorage(Hold, Keys, IsEmpty);
+		{
+			if (UseTerrariaKeyStatusOr || PersistAsEmptyRecord)
+				return false;
+			return PlainSingleTapPolicy.RequiresAdvancedStorage(Hold, Keys, IsEmpty)
+				|| AlternateGamePadBindingPolicy.RequiresAdvancedOwnershipForAlternate(
+					Hold, AlternateGamePadToken, FilledSlotCount);
+		}
+
+		[JsonIgnore]
+		public bool HasAlternateGamePad
+			=> AlternateGamePadBindingPolicy.HasAlternate(AlternateGamePadToken);
 
 		public string GetSlot(int index) => index switch {
 			1 => Slot1,
@@ -162,9 +188,34 @@ namespace AdvancedKeybinds.Binding
 			Slot1Display = Slot1Display,
 			Slot2Display = Slot2Display,
 			Slot3Display = Slot3Display,
+			AlternateGamePadToken = AlternateGamePadToken,
+			PersistAsEmptyRecord = PersistAsEmptyRecord,
+			UseTerrariaKeyStatusOr = UseTerrariaKeyStatusOr,
 			Hold = Hold,
 			HoldOnRelease = HoldOnRelease,
 			HoldMs = HoldMs
 		};
+
+		/// <summary>Value equality for panel edit history (slots, displays, hold flags, HoldMs).</summary>
+		public static bool ContentEquals(ComboBinding a, ComboBinding b)
+		{
+			if (ReferenceEquals(a, b))
+				return true;
+			if (a == null || b == null)
+				return false;
+
+			return string.Equals(a.Slot1, b.Slot1, StringComparison.Ordinal)
+				&& string.Equals(a.Slot2, b.Slot2, StringComparison.Ordinal)
+				&& string.Equals(a.Slot3, b.Slot3, StringComparison.Ordinal)
+				&& string.Equals(a.Slot1Display, b.Slot1Display, StringComparison.Ordinal)
+				&& string.Equals(a.Slot2Display, b.Slot2Display, StringComparison.Ordinal)
+				&& string.Equals(a.Slot3Display, b.Slot3Display, StringComparison.Ordinal)
+				&& string.Equals(a.AlternateGamePadToken, b.AlternateGamePadToken, StringComparison.Ordinal)
+				&& a.Hold == b.Hold
+				&& a.HoldOnRelease == b.HoldOnRelease
+				&& a.HoldMs == b.HoldMs
+				&& a.PersistAsEmptyRecord == b.PersistAsEmptyRecord
+				&& a.UseTerrariaKeyStatusOr == b.UseTerrariaKeyStatusOr;
+		}
 	}
 }

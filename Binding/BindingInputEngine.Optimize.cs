@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using AdvancedKeybinds.Core;
 
 namespace AdvancedKeybinds.Binding
 {
@@ -55,6 +56,24 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, ComboBinding> pair in BindingStorage.AllBindings)
 			{
 				ComboBinding combo = pair.Value;
+
+				// 28-record Terraria-OR path: never compile into AK Trigger evaluation.
+				if (GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key)
+					|| combo.UseTerrariaKeyStatusOr)
+				{
+					arr[i] = new CompiledBinding
+					{
+						ActionId = pair.Key,
+						Keys = Array.Empty<string>(),
+						IsPlainSingleTap = true,
+						RequiresAdvancedStorage = false,
+						IsHookManagedTap = false,
+						IsMultiKeyToggleCombo = false
+					};
+					i++;
+					continue;
+				}
+
 				List<string> keys = combo.Keys;
 				var keyArr = new string[keys.Count];
 				for (int k = 0; k < keys.Count; k++)

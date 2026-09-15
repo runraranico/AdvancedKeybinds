@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Logic;
+using Terraria.GameInput;
 using Terraria.ModLoader;
 
 namespace AdvancedKeybinds.Patches
@@ -12,28 +14,40 @@ namespace AdvancedKeybinds.Patches
 
 		public static void Apply()
 		{
-			// New ModKeybinds can throw KeyNotFoundException from vanilla JustPressed/Current until the
-			// input profile gains that action id (common right after adding a keybind / on the title screen).
+			// New ModKeybinds are absent from TriggersSet.KeyStatus until tModLoader rebuilds the trigger
+			// sets after mod load, and vanilla JustPressed/Current index that dictionary directly. Skip
+			// orig while the action id is unreadable: throwing there would be logged by tModLoader's
+			// first-chance handler even though the keybind is simply unbound / not yet registered.
+			// The catch stays as a guard for foreign hooks further down the chain; it must not be the
+			// mechanism that keeps normal frames quiet.
 			HookBoolGetter("get_JustPressed", (orig, self) => {
+				string actionId = ModKeybindReflection.GetActionId(self);
 				try
 				{
-					return orig(self) || BindingInputEngine.WasJustPressed(ModKeybindReflection.GetActionId(self));
+					bool vanilla = ModKeybindTriggerReadPolicy.IsActionIdReadable(
+							PlayerInput.Triggers?.JustPressed?.KeyStatus, actionId)
+						&& orig(self);
+					return vanilla || BindingInputEngine.WasJustPressed(actionId);
 				}
 				catch (KeyNotFoundException)
 				{
-					if (AkDiag.Enabled) AkDiag.Log("ModKeybind.JustPressed KeyNotFound for " + ModKeybindReflection.GetActionId(self));
-					return BindingInputEngine.WasJustPressed(ModKeybindReflection.GetActionId(self));
+					if (AkDiag.Enabled) AkDiag.Log("ModKeybind.JustPressed KeyNotFound for " + actionId);
+					return BindingInputEngine.WasJustPressed(actionId);
 				}
 			});
 			HookBoolGetter("get_Current", (orig, self) => {
+				string actionId = ModKeybindReflection.GetActionId(self);
 				try
 				{
-					return orig(self) || BindingInputEngine.IsCurrent(ModKeybindReflection.GetActionId(self));
+					bool vanilla = ModKeybindTriggerReadPolicy.IsActionIdReadable(
+							PlayerInput.Triggers?.Current?.KeyStatus, actionId)
+						&& orig(self);
+					return vanilla || BindingInputEngine.IsCurrent(actionId);
 				}
 				catch (KeyNotFoundException)
 				{
-					if (AkDiag.Enabled) AkDiag.Log("ModKeybind.Current KeyNotFound for " + ModKeybindReflection.GetActionId(self));
-					return BindingInputEngine.IsCurrent(ModKeybindReflection.GetActionId(self));
+					if (AkDiag.Enabled) AkDiag.Log("ModKeybind.Current KeyNotFound for " + actionId);
+					return BindingInputEngine.IsCurrent(actionId);
 				}
 			});
 		}

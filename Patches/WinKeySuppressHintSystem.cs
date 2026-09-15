@@ -1,3 +1,4 @@
+using System;
 using AdvancedKeybinds.Binding;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -26,6 +27,10 @@ namespace AdvancedKeybinds.Patches
 		{
 			_remainingFrames = 0;
 			_escapeWasDown = true;
+
+			// Win-key shell suppression exists only on Windows; do not tip Linux/macOS players.
+			if (!OperatingSystem.IsWindows())
+				return;
 
 			AdvancedKeybindsConfig config = AdvancedKeybindsConfig.Instance;
 			if (config == null || config.SuppressWindowsKey)

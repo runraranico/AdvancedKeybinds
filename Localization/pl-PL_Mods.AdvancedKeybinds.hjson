@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Automatycznie
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: Włączone
+			Tooltip: Jeśli klawisze się nie zapisują, wybierz tę opcję
+		}
+
+		Disabled: {
+			Label: Wyłączone
+			Tooltip: Zalecane, jeśli nie używasz kontrolera
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: Specjalne klawisze / sterowanie UI
+		Header: Sterowanie UI / Specjalne klawisze
 
 		Suppress: {
 			Label: Blokuj klawisz Windows
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: Automatycznie wlacz przy nastepnym ladowaniu moda
 			Tooltip: Włączone: start z blokadą przy następnym ładowaniu. Wyłączone: start bez blokady przy następnym ładowaniu
+		}
+	}
+
+	GamePad: {
+		Header: Kontroler
+
+		Mode: {
+			Label: Wejście kontrolera
+			Tooltip: Sposób, w jaki Advanced Keybinds odczytuje kontroler. Szczegóły w opisach poszczególnych opcji poniżej
 		}
 	}
 
@@ -142,7 +170,7 @@ UI: {
 		HintLine1: Kliknij lewym przyciskiem pole, a nastepnie nacisnij klawisz lub przycisk myszy.
 		HintLine2: Hold tylko przy 1 klawiszu.
 		HintLine3: Najedz kursorem na pole i PPM, aby usunac przypisanie.
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: Domyślne
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: podczas trzymania
 		HoldOnReleaseTitle: Hold
@@ -151,6 +179,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Wpisz wartosc od 10～10000
 		ConfirmLeftClickOnly: Przypisać sam lewy przycisk? Zapisz ponownie, aby potwierdzić.
+		ClearConfirmPad: Wyczyścić?
+		RejectOppositeStickDirection: Przeciwne kierunki sticka nie mogą być łączone (np. Góra+Dół).
 		KeyInfoSelectHint: Wybierz klawisz
 		KeyInfoSelectGuide: Wybierz klawisz
 		KeyInfoCurrent: Oryginalny klawisz
@@ -172,7 +202,27 @@ UI: {
 		KeyInfoDisplayRestored: Przywrócono nazwę wyświetlaną {0} do {1}
 		SlotOriginalKey: Oryginał: {0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: Do siebie
-		MouseWheelDown: Od siebie
+
+		DisplayNameUnavailable: {
+			Line1: Zmiana nazwy wyświetlanej
+			Line2: jest wyłączona
+			Line3: przy użyciu kontrolera
+		}
+
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: Ustaw. 2 klawiszy
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: Tylko pad
+		HintLine2: Dowolny działa
+		HintLine3: ""
+		HoldUnavailableHint: Niedostępne
 	}
 }

@@ -182,6 +182,9 @@ namespace AdvancedKeybinds.Core
 		public static string FormatWheel(bool up)
 			=> Prefix + "WHEEL=" + (up ? "Up" : "Down");
 
+		public static string FormatHorizontalWheel(bool right)
+			=> Prefix + "WHEEL=" + (right ? "Right" : "Left");
+
 		/// <summary>Lookup Windows VK for a known Keys name (diagnostics / DUP-CHECK).</summary>
 		public static bool TryGetVkForKeysName(string keysName, out uint vk)
 			=> KeysNameToVk.TryGetValue(keysName ?? string.Empty, out vk);
@@ -278,6 +281,26 @@ namespace AdvancedKeybinds.Core
 			{
 				physicalId = FormatWheel(up: false);
 				branch = "special:mouse-wheel-down";
+#if AK_DIAGNOSTICS
+				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
+#endif
+				return true;
+			}
+
+			if (StableKeyToken.IsMouseWheelLeftToken(canonical))
+			{
+				physicalId = FormatHorizontalWheel(right: false);
+				branch = "special:mouse-wheel-left";
+#if AK_DIAGNOSTICS
+				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
+#endif
+				return true;
+			}
+
+			if (StableKeyToken.IsMouseWheelRightToken(canonical))
+			{
+				physicalId = FormatHorizontalWheel(right: true);
+				branch = "special:mouse-wheel-right";
 #if AK_DIAGNOSTICS
 				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
 #endif

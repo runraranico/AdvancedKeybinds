@@ -13,6 +13,8 @@ namespace AdvancedKeybinds.Core
 		public const string HankakuZenkakuToken = "HankakuZenkaku";
 		public const string MouseWheelUpToken = "MouseWheelUp";
 		public const string MouseWheelDownToken = "MouseWheelDown";
+		public const string MouseWheelLeftToken = "MouseWheelLeft";
+		public const string MouseWheelRightToken = "MouseWheelRight";
 		/// <summary>Hook-managed Scroll Lock token (not <c>Keys.Scroll</c> / "Scroll").</summary>
 		public const string ScrollLockToken = "ScrollLock";
 
@@ -67,7 +69,10 @@ namespace AdvancedKeybinds.Core
 			"無変換", "変換", "かな", "カタカナ/ひらがな", "半角/全角", "全角/半角", "全角／半角",
 			// Korean layout labels for VK_KANA / VK_KANJI (display only; never save tokens).
 			"Hangul", "Hanja",
-			"WheelUp", "WheelDown", "手前回し", "奥回し",
+			"WheelUp", "WheelDown", "Wheel UP", "Wheel Up", "Wheel Down",
+			"WheelLeft", "WheelRight", "Wheel Left", "Wheel Right",
+			"手前回し", "奥回し",
+			// Legacy loc labels (pre unified Wheel Up/Down) — display only; never save tokens.
 			"Toward you", "Away from you",
 			"Zu sich", "Weg von sich",
 			"Hacia ti", "Lejos de ti",
@@ -95,13 +100,28 @@ namespace AdvancedKeybinds.Core
 		}
 
 		public static bool IsMouseWheelToken(string token)
-			=> IsMouseWheelUpToken(token) || IsMouseWheelDownToken(token);
+			=> IsMouseWheelUpToken(token)
+				|| IsMouseWheelDownToken(token)
+				|| IsMouseWheelLeftToken(token)
+				|| IsMouseWheelRightToken(token);
 
 		public static bool IsMouseWheelUpToken(string token)
 			=> string.Equals(token, MouseWheelUpToken, StringComparison.OrdinalIgnoreCase);
 
 		public static bool IsMouseWheelDownToken(string token)
 			=> string.Equals(token, MouseWheelDownToken, StringComparison.OrdinalIgnoreCase);
+
+		public static bool IsMouseWheelLeftToken(string token)
+			=> string.Equals(token, MouseWheelLeftToken, StringComparison.OrdinalIgnoreCase);
+
+		public static bool IsMouseWheelRightToken(string token)
+			=> string.Equals(token, MouseWheelRightToken, StringComparison.OrdinalIgnoreCase);
+
+		public static bool IsMouseWheelVerticalToken(string token)
+			=> IsMouseWheelUpToken(token) || IsMouseWheelDownToken(token);
+
+		public static bool IsMouseWheelHorizontalToken(string token)
+			=> IsMouseWheelLeftToken(token) || IsMouseWheelRightToken(token);
 
 		public static bool IsHankakuZenkakuToken(string token)
 			=> string.Equals(token, HankakuZenkakuToken, StringComparison.OrdinalIgnoreCase);
@@ -133,6 +153,18 @@ namespace AdvancedKeybinds.Core
 				return true;
 			}
 
+			if (IsMouseWheelLeftToken(token))
+			{
+				canonical = MouseWheelLeftToken;
+				return true;
+			}
+
+			if (IsMouseWheelRightToken(token))
+			{
+				canonical = MouseWheelRightToken;
+				return true;
+			}
+
 			if (token.StartsWith("Mouse", StringComparison.OrdinalIgnoreCase))
 			{
 				if (!int.TryParse(token.AsSpan(5), out mouseButton) || mouseButton < 1 || mouseButton > 5)
@@ -146,6 +178,12 @@ namespace AdvancedKeybinds.Core
 			if (IsHankakuZenkakuToken(token))
 			{
 				canonical = HankakuZenkakuToken;
+				return true;
+			}
+
+			if (GamePadToken.TryCanonicalize(token, out string pad))
+			{
+				canonical = pad;
 				return true;
 			}
 
@@ -230,6 +268,9 @@ namespace AdvancedKeybinds.Core
 			if (string.IsNullOrWhiteSpace(token))
 				return string.Empty;
 
+			if (GamePadToken.IsPadToken(token))
+				return GamePadToken.FormatForDisplay(token);
+
 			if (!TryParse(token, out bool isMouse, out int mouseButton, out string canonical))
 			{
 				if (PhysicalKeyToken.TryParseVk(token, out uint vk))
@@ -238,6 +279,9 @@ namespace AdvancedKeybinds.Core
 					return PhysicalKeyToken.FormatScan(scan, extended);
 				return token;
 			}
+
+			if (GamePadToken.IsPadToken(canonical))
+				return GamePadToken.FormatForDisplay(canonical);
 
 			if (isMouse)
 			{
@@ -265,8 +309,10 @@ namespace AdvancedKeybinds.Core
 				"Kana" => "カタカナ/ひらがな",
 				// Physical key legend on kbd106 is often 「半角／全角」; UI shows 「全角/半角」 (token stays HankakuZenkaku).
 				HankakuZenkakuToken => "全角/半角",
-				MouseWheelUpToken => "Toward you",
-				MouseWheelDownToken => "Away from you",
+				MouseWheelUpToken => "Wheel Up",
+				MouseWheelDownToken => "Wheel Down",
+				MouseWheelLeftToken => "Wheel Left",
+				MouseWheelRightToken => "Wheel Right",
 				_ => canonical
 			};
 		}

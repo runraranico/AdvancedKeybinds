@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: 자동
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: 사용
+			Tooltip: 키 등록이 안 될 때 사용해 보세요
+		}
+
+		Disabled: {
+			Label: 사용 안 함
+			Tooltip: 컨트롤러를 쓰지 않는다면 추천
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: 특수 키·UI 제어
+		Header: UI 제어 / 특수 키
 
 		Suppress: {
 			Label: Windows 키 억제
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: 다음 모드 로드 시 자동으로 켜기
 			Tooltip: 켜짐: 다음 모드 로드 시 커서 고정을 켠 상태로 시작. 꺼짐: 끈 상태로 시작
+		}
+	}
+
+	GamePad: {
+		Header: 컨트롤러
+
+		Mode: {
+			Label: 컨트롤러 입력
+			Tooltip: Advanced Keybinds가 컨트롤러를 읽는 방식입니다. 자세한 내용은 아래 각 항목 설명을 참고하세요
 		}
 	}
 
@@ -143,7 +171,7 @@ UI: {
 		HintLine1: 슬롯을 왼쪽 클릭한 뒤 키나 마우스 버튼을 누르세요.
 		HintLine2: Hold는 1키일 때만 가능
 		HintLine3: 슬롯에 커서를 올리고 오른쪽 클릭으로 설정 해제
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: 기본값
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 누르고 있는 동안
 		HoldOnReleaseTitle: Hold
@@ -151,8 +179,9 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: 10～10000 사이 값을 입력할 수 있습니다
-		RejectLeftClickOnly: 왼쪽 클릭만 등록할까요? 확인하려면 저장을 다시 누르세요.
 		ConfirmLeftClickOnly: 왼쪽 클릭만 등록할까요? 확인하려면 저장을 다시 누르세요.
+		ClearConfirmPad: 지울까요?
+		RejectOppositeStickDirection: 같은 스틱의 반대 방향은 함께 등록할 수 없습니다 (예: 위+아래)
 		KeyInfoSelectHint: 키를 선택하세요
 		KeyInfoSelectGuide: 키를 선택
 		KeyInfoCurrent: 원래 키
@@ -174,7 +203,25 @@ UI: {
 		KeyInfoDisplayRestored: 표시 이름 {0}을(를) {1}(으)로 되돌렸습니다
 		SlotOriginalKey: 원래 키: {0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: 몸 쪽으로
-		MouseWheelDown: 바깥쪽으로
+		DisplayNameUnavailable: {
+			Line1: 표시 이름 변경은
+			Line2: 컨트롤러 사용 시
+			Line3: 비활성화됩니다
+		}
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: 2 키 설정
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: 컨트롤러 전용
+		HintLine2: 어느 키든 발동
+		HintLine3: ""
+		HoldUnavailableHint: 사용 불가
 	}
 }

@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: 自動
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: 有効
+			Tooltip: キーの登録ができない場合はこちらをお試しください
+		}
+
+		Disabled: {
+			Label: 無効
+			Tooltip: コントローラーを利用しない場合はこちらがオススメ
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -40,7 +59,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: 特殊キー・UI制御
+		Header: UI制御 / 特殊キー
 		Suppress: {
 			Label: Windowsキーを抑制する
 			Tooltip: Winキーをバインドに使う場合はオン推奨
@@ -59,6 +78,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: 次回MODロード時に自動で開始
 			Tooltip: オンなら次回MODロード時にウィンドウ内固定をオンで開始し、オフならオフで開始します
+		}
+	}
+
+	GamePad: {
+		Header: コントローラー
+
+		Mode: {
+			Label: コントローラー入力
+			Tooltip: Advanced Keybinds がコントローラーを読み取る方法。詳細は下の各選択肢の説明を参照
 		}
 	}
 
@@ -234,6 +262,67 @@ Config: {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	ColorChannel: {
 		Red.Label: 赤
 		Green.Label: 緑
@@ -277,6 +366,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: 10～10000迄を入力可能
 		ConfirmLeftClickOnly: 左クリック単独でよろしいですか？もう一度保存で確定
+		ClearConfirmPad: クリアしますか？
+		RejectOppositeStickDirection: 同じスティックの反対方向は同時に登録できません（例: 上+下）
 		KeyInfoSelectHint: キーを選択してください
 		KeyInfoSelectGuide: キーを選ぶ
 		KeyInfoCurrent: 元のキー
@@ -298,7 +389,25 @@ UI: {
 		KeyInfoDisplayRestored: 表示名{0}を{1}に戻しました
 		SlotOriginalKey: 元のキー : {0}
 		SlotDisplayNameHover: "{0} : {1}"
-		MouseWheelUp: Toward you
-		MouseWheelDown: Away from you
+		DisplayNameUnavailable: {
+			Line1: 表示名変更機能は
+			Line2: コントローラー使用時
+			Line3: 無効となります
+		}
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: 2 キー 設定
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: コントローラー限定
+		HintLine2: どちらのキーでも発動可
+		HintLine3: ""
+		HoldUnavailableHint: 使用不可
 	}
 }

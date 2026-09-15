@@ -96,6 +96,19 @@ namespace AdvancedKeybinds.Core
 			var held = ToCanonicalSet(heldNow);
 			var edges = ToCanonicalSet(edgeTokens);
 
+			// Snapshot last frame before we mutate — required so Mouse1-up + new key same frame works.
+			var prevSnapshot = new HashSet<string>(_prevHeld, StringComparer.OrdinalIgnoreCase);
+
+			// GamePad digital press wins over SI-injected Mouse/Keyboard still held from slot-open click.
+			// Completes the current slot only (does not close ComboPanel).
+			if (CurrentPhase == Phase.WaitingForRelease
+				|| CurrentPhase == Phase.WaitingForNewInput
+				|| CurrentPhase == Phase.RecoveringFromInvalidState)
+			{
+				if (TryAcceptPreferredGamePadNewcomer(held, edges, prevSnapshot, out acceptedToken))
+					return true;
+			}
+
 			if (CurrentPhase == Phase.RecoveringFromInvalidState)
 			{
 				// One-frame recovery gate: never accept on the transition out of invalid state.
@@ -110,9 +123,6 @@ namespace AdvancedKeybinds.Core
 					: "post-recover-waiting-for-release remaining=[" + string.Join(",", _blockedAtBegin) + "]";
 				return false;
 			}
-
-			// Snapshot last frame before we mutate — required so Mouse1-up + new key same frame works.
-			var prevSnapshot = new HashSet<string>(_prevHeld, StringComparer.OrdinalIgnoreCase);
 
 			if (CurrentPhase == Phase.WaitingForRelease)
 			{
@@ -141,6 +151,53 @@ namespace AdvancedKeybinds.Core
 			}
 
 			return TryAcceptNewPresses(held, edges, prevSnapshot, out acceptedToken);
+		}
+
+		/// <summary>
+		/// Accept a single new Pad:* token even while WaitingForRelease (Mouse1 still blocked from UI click).
+		/// </summary>
+		private bool TryAcceptPreferredGamePadNewcomer(
+			HashSet<string> held,
+			HashSet<string> edges,
+			HashSet<string> prevSnapshot,
+			out string acceptedToken)
+		{
+			acceptedToken = null;
+			var pads = new List<string>(2);
+
+			void Consider(string token, bool fromHeld)
+			{
+				if (!GamePadToken.IsPadToken(token))
+					return;
+				// Stick-direction Held uses RuntimePress (0.50); Capture must only accept CaptureArming edges (0.65).
+				if (fromHeld && GamePadToken.IsStickDirectionToken(token))
+					return;
+				// CaptureArming edges may fire while Runtime already Held the same direction token.
+				if (prevSnapshot != null && prevSnapshot.Contains(token))
+				{
+					if (fromHeld || !GamePadToken.IsStickDirectionToken(token))
+						return;
+				}
+				if (!ContainsOrdinalIgnoreCase(pads, token))
+					pads.Add(token);
+			}
+
+			foreach (string token in held)
+				Consider(token, fromHeld: true);
+			foreach (string token in edges)
+				Consider(token, fromHeld: false);
+
+			if (pads.Count != 1)
+				return false;
+
+			Phase phaseWas = CurrentPhase;
+			string blockedDiag = string.Join(",", _blockedAtBegin);
+			Accept(pads[0], "prefer-gamepad-newcomer");
+			LastDiagReason = "prefer-gamepad-newcomer AcceptedToken=" + AcceptedToken
+				+ " phaseWas=" + phaseWas
+				+ " blocked=[" + blockedDiag + "]";
+			acceptedToken = AcceptedToken;
+			return true;
 		}
 
 		/// <summary>
@@ -239,14 +296,18 @@ namespace AdvancedKeybinds.Core
 			{
 				if (prevSnapshot.Contains(token))
 					continue;
+				// Stick directions: Runtime Held must not register; CaptureArming edges only.
+				if (GamePadToken.IsStickDirectionToken(token))
+					continue;
 				if (!ContainsOrdinalIgnoreCase(newcomers, token))
 					newcomers.Add(token);
 			}
 
 			foreach (string token in edges)
 			{
-				// Pulse edges count as Up→Down only when not already held last frame.
-				if (prevSnapshot.Contains(token))
+				// Stick-direction Capture edges are authored by CaptureArming (0.65).
+				// Runtime may already have held the same token from 0.50 — still accept the Capture edge.
+				if (prevSnapshot.Contains(token) && !GamePadToken.IsStickDirectionToken(token))
 					continue;
 				if (!ContainsOrdinalIgnoreCase(newcomers, token))
 					newcomers.Add(token);

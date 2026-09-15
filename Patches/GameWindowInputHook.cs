@@ -236,7 +236,8 @@ namespace AdvancedKeybinds.Patches
 			lock (InstallLock)
 			{
 				PendingEdges.Clear();
-				RestoreWndProc();
+				if (OperatingSystem.IsWindows())
+					RestoreWndProc();
 				_wndProcInstalled = false;
 				_rawInputRegistered = false;
 				_rawInputMode = "none";
@@ -246,6 +247,9 @@ namespace AdvancedKeybinds.Patches
 
 		public static void Poll()
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			EnsureInstalledIfNeeded();
 			TryRefreshNoHotkeys();
 		}
@@ -463,6 +467,9 @@ namespace AdvancedKeybinds.Patches
 		/// <summary>Re-apply raw-input flags after Win-suppression config changes.</summary>
 		internal static void RefreshRawInputForWinSuppressSetting()
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			if (!_wndProcInstalled)
 				return;
 
@@ -951,7 +958,7 @@ namespace AdvancedKeybinds.Patches
 		private static void HandleMouseWheel(IntPtr wParam)
 		{
 			short delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
-			MouseInputHelper.OnWin32WheelDelta(delta);
+			MouseInputHelper.OnWin32VerticalWheelDelta(delta);
 		}
 
 		private static void HandleMouseHWheel(IntPtr wParam)

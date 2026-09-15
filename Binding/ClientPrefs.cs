@@ -29,6 +29,8 @@ namespace AdvancedKeybinds.Binding
 			public bool HoldHudHasMouseModeToggles;
 			public bool HoldHudMouseEnabled;
 			public bool HoldHudMouseAllowDrag;
+			/// <summary>Set once the GamePad mode setting has been reconciled with pre-existing Pad bindings.</summary>
+			public bool GamePadModeMigrated;
 		}
 
 		private static PrefsData _data = new();
@@ -86,6 +88,24 @@ namespace AdvancedKeybinds.Binding
 					return;
 
 				_data.EnableCursorConfineOnLoad = value;
+				Save();
+			}
+		}
+
+		public static bool GamePadModeMigrated
+		{
+			get
+			{
+				EnsureLoaded();
+				return _data.GamePadModeMigrated;
+			}
+			set
+			{
+				EnsureLoaded();
+				if (_data.GamePadModeMigrated == value)
+					return;
+
+				_data.GamePadModeMigrated = value;
 				Save();
 			}
 		}

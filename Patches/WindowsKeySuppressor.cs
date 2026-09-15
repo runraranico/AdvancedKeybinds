@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using AdvancedKeybinds.Binding;
 using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Diagnostics;
+using AdvancedKeybinds.Logic;
 using Terraria;
 using Terraria.ModLoader;
 
@@ -629,6 +630,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static void EnsureThreadKeyboardHook(uint threadId)
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			if (_threadHookId != IntPtr.Zero)
 				return;
 
@@ -638,6 +642,18 @@ namespace AdvancedKeybinds.Patches
 
 		private static void UninstallHookCore()
 		{
+			// Nothing was ever hooked off Windows; never touch UnhookWindowsHookEx there.
+			if (!OperatingSystem.IsWindows())
+			{
+				_threadHookId = IntPtr.Zero;
+				_hookId = IntPtr.Zero;
+				_proc = null;
+				_threadProc = null;
+				_attempted = false;
+				_hookThreadId = 0;
+				return;
+			}
+
 			if (_threadHookId != IntPtr.Zero)
 			{
 				try
@@ -748,7 +764,14 @@ namespace AdvancedKeybinds.Patches
 			_prevScrollPhysicallyDown = IsScrollLockPhysicallyDown;
 		}
 
-		private static bool IsPhysicalKeyDown(uint vkCode) => (GetAsyncKeyState((int)vkCode) & 0x8000) != 0;
+		private static bool IsPhysicalKeyDown(uint vkCode)
+		{
+			// user32 does not exist off Windows (Linux / other non-Windows runtimes).
+			if (!OperatingSystem.IsWindows())
+				return false;
+
+			return (GetAsyncKeyState((int)vkCode) & 0x8000) != 0;
+		}
 
 		public static void SetModalWindowsKeySuppress(bool enabled)
 		{
@@ -760,6 +783,9 @@ namespace AdvancedKeybinds.Patches
 		/// <summary>Re-sync hook-tracked Win state from the OS (avoids stale LeftWindows in slot capture).</summary>
 		public static void SyncWindowsKeyStateFromOs()
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			IsLeftWindowsDown = IsPhysicalKeyDown(VK_LWIN);
 			IsRightWindowsDown = IsPhysicalKeyDown(VK_RWIN);
 		}
@@ -777,11 +803,17 @@ namespace AdvancedKeybinds.Patches
 			return true;
 		}
 
-		/// <summary>Mod Config default-on; when false, Win / Ctrl+Esc reach the OS normally.</summary>
+		/// <summary>
+		/// Win / Ctrl+Esc shell blocking is Windows-only. A saved SuppressWindowsKey=true on
+		/// Linux/macOS must not enable suppression (value is preserved for when the user returns to Windows).
+		/// </summary>
 		internal static bool IsWinKeySuppressionEnabled()
 		{
 			AdvancedKeybindsConfig config = ModContent.GetInstance<AdvancedKeybindsConfig>();
-			return config == null || config.SuppressWindowsKey;
+			bool saved = config != null && config.SuppressWindowsKey;
+			return WindowsKeySuppressConfigPolicy.ShouldExecuteWindowsKeySuppression(
+				OperatingSystem.IsWindows(),
+				saved);
 		}
 
 		/// <summary>Called when the user turns Win suppression off in Mod Config.</summary>
@@ -793,7 +825,8 @@ namespace AdvancedKeybinds.Patches
 		}
 
 		private static bool IsAnyWinPhysicallyDown()
-			=> IsPhysicalKeyDown(VK_LWIN) || IsPhysicalKeyDown(VK_RWIN);
+			=> OperatingSystem.IsWindows()
+				&& (IsPhysicalKeyDown(VK_LWIN) || IsPhysicalKeyDown(VK_RWIN));
 
 		private static void BeginWinPressSwallow()
 		{
@@ -860,7 +893,7 @@ namespace AdvancedKeybinds.Patches
 			=> AnyWindowsDown || IsAnyWinPhysicallyDown() || _winPressActiveWhileSuppressing;
 
 		internal static bool IsShiftDownForDiag()
-			=> (GetAsyncKeyState((int)VK_SHIFT) & 0x8000) != 0;
+			=> OperatingSystem.IsWindows() && (GetAsyncKeyState((int)VK_SHIFT) & 0x8000) != 0;
 
 		internal static string DescribeWinChordState()
 		{
@@ -1054,7 +1087,7 @@ namespace AdvancedKeybinds.Patches
 		}
 
 		private static bool IsControlDown()
-			=> (GetAsyncKeyState((int)VK_CONTROL) & 0x8000) != 0;
+			=> OperatingSystem.IsWindows() && (GetAsyncKeyState((int)VK_CONTROL) & 0x8000) != 0;
 
 		/// <summary>Ctrl+Esc is treated like Win by the shell and opens the Start menu.</summary>
 		public static bool IsStartMenuChord(uint vkCode, bool isDown)
@@ -1080,7 +1113,7 @@ namespace AdvancedKeybinds.Patches
 			=> IsControlDown();
 
 		internal static long ForegroundHwndForDiag
-			=> GetForegroundWindow().ToInt64();
+			=> OperatingSystem.IsWindows() ? GetForegroundWindow().ToInt64() : 0L;
 
 		/// <summary>Why suppression is off (for StartMenuDiag).</summary>
 		internal static string DescribeWhyNotBlocking()
@@ -1208,6 +1241,9 @@ namespace AdvancedKeybinds.Patches
 
 		public static void PollWinKeyReleaseGuard()
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			GameWindowInputHook.EnsureInstalledIfNeeded();
 
 			if (!IsGameForegroundCore())
@@ -2660,6 +2696,9 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		public static void PollGameplayToggleLockEdges()
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			if (Main.gameMenu || !IsGameForeground() || IsSlotCapturePassthrough)
 				return;
 
@@ -3584,6 +3623,9 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		public static void FlushDeferredWinActions()
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			FlushScreenshotRequests();
 			FlushPendingArrowChords();
 		}
@@ -3657,6 +3699,9 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		private static bool TryMoveGameWindowToAdjacentMonitor(bool toRight)
 		{
+			if (!OperatingSystem.IsWindows())
+				return false;
+
 			IntPtr hwnd = GameWindowHandle.TryGet(preferForeground: true);
 			if (hwnd == IntPtr.Zero)
 				hwnd = GetForegroundWindow();
@@ -3723,6 +3768,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static bool MoveAndFitBorderlessToMonitor(IntPtr hwnd, MonitorEntry dest)
 		{
+			if (!OperatingSystem.IsWindows())
+				return false;
+
 			int destW = dest.Monitor.Width;
 			int destH = dest.Monitor.Height;
 			if (destW < 640 || destH < 480)
@@ -3773,6 +3821,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static bool MoveWindowKeepSize(IntPtr hwnd, MonitorEntry current, MonitorEntry dest)
 		{
+			if (!OperatingSystem.IsWindows())
+				return false;
+
 			if (!GetWindowRect(hwnd, out RECT windowRect))
 			{
 				if (AkDiag.Enabled) AkDiag.Log("MonitorMove aborted: GetWindowRect failed.");
@@ -3827,6 +3878,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static long GetWindowLongValue(IntPtr hwnd, int index)
 		{
+			if (!OperatingSystem.IsWindows())
+				return 0L;
+
 			if (IntPtr.Size == 8)
 				return GetWindowLongPtr64(hwnd, index).ToInt64();
 			return GetWindowLong32(hwnd, index);
@@ -3834,6 +3888,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static void SetWindowLongValue(IntPtr hwnd, int index, long value)
 		{
+			if (!OperatingSystem.IsWindows())
+				return;
+
 			if (IntPtr.Size == 8)
 				SetWindowLongPtr64(hwnd, index, new IntPtr(value));
 			else
@@ -3885,6 +3942,9 @@ namespace AdvancedKeybinds.Patches
 		private static List<MonitorEntry> EnumerateMonitors()
 		{
 			List<MonitorEntry> list = new();
+			if (!OperatingSystem.IsWindows())
+				return list;
+
 			EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMonitor, IntPtr hdc, ref RECT rect, IntPtr data) => {
 				MONITORINFO info = new() { cbSize = Marshal.SizeOf<MONITORINFO>() };
 				if (GetMonitorInfo(hMonitor, ref info))
@@ -3920,6 +3980,9 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		private static uint EmitWinCtrlArrowChord(uint arrowVk, uint winVk)
 		{
+			if (!OperatingSystem.IsWindows())
+				return 0;
+
 			uint ctrlVk = (GetAsyncKeyState((int)VK_RCONTROL) & 0x8000) != 0 ? VK_RCONTROL : VK_LCONTROL;
 			INPUT[] batch = {
 				KeyEvent(winVk, false),
@@ -3980,6 +4043,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static bool IsGameForegroundCore()
 		{
+			if (!OperatingSystem.IsWindows())
+				return false;
+
 			IntPtr foreground = GetForegroundWindow();
 			if (foreground == IntPtr.Zero)
 				return false;

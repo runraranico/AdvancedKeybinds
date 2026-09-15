@@ -1,10 +1,12 @@
 using System;
 using System.Reflection;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Logic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 using Terraria;
 using Terraria.Audio;
+using Terraria.GameInput;
 using Terraria.ID;
 using Terraria.Localization;
 using Terraria.ModLoader;
@@ -120,16 +122,22 @@ namespace AdvancedKeybinds.Patches
 		/// Vanilla <see cref="ModKeybind.JustPressed"/> can stay false while Controls / FancyUI
 		/// swallows input; BindingInputEngine still records the advanced/plain trigger edge
 		/// (also covered by <see cref="ModKeybindPatches"/>, kept here as an explicit fallback).
+		/// The vanilla read is gated by <see cref="ModKeybindTriggerReadPolicy"/> because this system
+		/// already runs while tModLoader is still loading, before the trigger sets know the action id.
 		/// </summary>
 		private static bool IsMenuHotkeyJustPressed(ModKeybind hotkey)
 		{
 			if (hotkey == null)
 				return false;
 
-			if (hotkey.JustPressed)
-				return true;
-
 			string actionId = ModKeybindReflection.GetActionId(hotkey);
+
+			if (ModKeybindTriggerReadPolicy.IsActionIdReadable(PlayerInput.Triggers?.JustPressed?.KeyStatus, actionId)
+				&& hotkey.JustPressed)
+			{
+				return true;
+			}
+
 			return !string.IsNullOrEmpty(actionId) && BindingInputEngine.WasJustPressed(actionId);
 		}
 

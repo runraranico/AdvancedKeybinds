@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using AdvancedKeybinds.Core;
+using AdvancedKeybinds.Diagnostics;
 using Terraria.GameInput;
 
 namespace AdvancedKeybinds.Binding
@@ -79,15 +80,16 @@ namespace AdvancedKeybinds.Binding
 		}
 
 		private static readonly List<KeyConfiguration> WritableScratch = new(2);
+		private static readonly List<KeyConfiguration> ModeWritableScratch = new(4);
 
-		private static void WriteKeyStatusList(string trigger, IReadOnlyList<string> entries)
+		private static void WriteKeyStatusListToConfigs(
+			List<KeyConfiguration> configs,
+			string trigger,
+			IReadOnlyList<string> entries)
 		{
-			if (!TryGetWritableKeyboardConfigs(WritableScratch))
-				return;
-
-			for (int c = 0; c < WritableScratch.Count; c++)
+			for (int c = 0; c < configs.Count; c++)
 			{
-				KeyConfiguration config = WritableScratch[c];
+				KeyConfiguration config = configs[c];
 				if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys) || keys == null)
 				{
 					keys = new List<string>();
@@ -104,8 +106,249 @@ namespace AdvancedKeybinds.Binding
 						keys.Add(entry);
 				}
 			}
+		}
 
+		private static bool TryGetWritableConfigsForModes(List<KeyConfiguration> configs, params InputMode[] modes)
+		{
+			configs.Clear();
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null || modes == null || modes.Length == 0)
+				return false;
+
+			for (int i = 0; i < modes.Length; i++)
+			{
+				if (!profile.InputModes.TryGetValue(modes[i], out KeyConfiguration config)
+					|| config?.KeyStatus == null)
+					continue;
+
+				bool already = false;
+				for (int c = 0; c < configs.Count; c++)
+				{
+					if (ReferenceEquals(configs[c], config))
+					{
+						already = true;
+						break;
+					}
+				}
+				if (!already)
+					configs.Add(config);
+			}
+
+			return configs.Count > 0;
+		}
+
+		/// <summary>First assigned key for a specific InputMode, or null.</summary>
+		public static string GetAssignedKeyForInputMode(string trigger, InputMode mode)
+		{
+			IReadOnlyList<string> keys = GetAssignedKeysForInputMode(trigger, mode);
+			return keys != null && keys.Count > 0 ? keys[0] : null;
+		}
+
+		/// <summary>All KeyStatus entries for a trigger under one InputMode (list display source).</summary>
+		public static IReadOnlyList<string> GetAssignedKeysForInputMode(string trigger, InputMode mode)
+		{
+			if (string.IsNullOrEmpty(trigger))
+				return null;
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null
+				|| !profile.InputModes.TryGetValue(mode, out KeyConfiguration config)
+				|| config?.KeyStatus == null)
+				return null;
+			if (config.KeyStatus.TryGetValue(trigger, out List<string> keys) && keys != null && keys.Count > 0)
+				return keys;
+			return null;
+		}
+
+		/// <summary>
+		/// Removes AKAdv markers from one mode when they are orphaned (caller decides ownership).
+		/// Keeps non-marker tokens. Returns true when KeyStatus changed.
+		/// </summary>
+		public static bool TryStripAdvancedMarkersOnly(string trigger, InputMode mode)
+		{
+			if (string.IsNullOrEmpty(trigger))
+				return false;
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null
+				|| !profile.InputModes.TryGetValue(mode, out KeyConfiguration config)
+				|| config?.KeyStatus == null)
+				return false;
+			if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys) || keys == null || keys.Count == 0)
+				return false;
+
+			bool hadMarker = false;
+			var kept = new List<string>(keys.Count);
+			for (int i = 0; i < keys.Count; i++)
+			{
+				string token = keys[i];
+				if (AdvancedVanillaOwnershipMarker.IsMarker(token))
+				{
+					hadMarker = true;
+					continue;
+				}
+
+				if (!string.IsNullOrEmpty(token))
+					kept.Add(token);
+			}
+
+			if (!hadMarker)
+				return false;
+
+			WriteKeyStatusForInputModes(trigger, kept, mode);
+			return true;
+		}
+
+		/// <summary>Trigger ids that currently hold at least one AKAdv marker under <paramref name="mode"/>.</summary>
+		public static List<string> ListTriggersWithAdvancedMarkers(InputMode mode)
+		{
+			var result = new List<string>();
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null
+				|| !profile.InputModes.TryGetValue(mode, out KeyConfiguration config)
+				|| config?.KeyStatus == null)
+				return result;
+
+			foreach (KeyValuePair<string, List<string>> pair in config.KeyStatus)
+			{
+				if (string.IsNullOrEmpty(pair.Key) || pair.Value == null)
+					continue;
+				for (int i = 0; i < pair.Value.Count; i++)
+				{
+					if (!AdvancedVanillaOwnershipMarker.IsMarker(pair.Value[i]))
+						continue;
+					result.Add(pair.Key);
+					break;
+				}
+			}
+
+			return result;
+		}
+
+		/// <summary>
+		/// Token suitable for ComboPanel slots: GamePad Buttons name becomes Pad:Y etc.
+		/// </summary>
+		public static string GetAssignedPanelTokenForInputMode(string trigger, InputMode mode)
+		{
+			string raw = GetAssignedKeyForInputMode(trigger, mode);
+			if (string.IsNullOrEmpty(raw))
+				return null;
+			if (ControlsEditTargetPolicy.TryVanillaButtonsNameToPadToken(raw, out string pad))
+				return pad;
+			if (GamePadToken.TryCanonicalize(raw, out string canonicalPad))
+				return canonicalPad;
+			return raw;
+		}
+
+		public static void WriteKeyStatusForInputModes(
+			string trigger,
+			IReadOnlyList<string> entries,
+			params InputMode[] modes)
+		{
+			if (string.IsNullOrEmpty(trigger)
+				|| !TryGetWritableConfigsForModes(ModeWritableScratch, modes))
+				return;
+
+			WriteKeyStatusListToConfigs(ModeWritableScratch, trigger, entries);
 			NotifyBindingChanged();
+#if AK_DIAGNOSTICS
+			ControlsGameUiSeparationTrace.LogStage(
+				"1_after_terraria_keystatus_write",
+				trigger,
+				"WriteKeyStatusForInputModes modes=" + FormatModes(modes));
+#endif
+		}
+
+		private static void WriteKeyStatusList(string trigger, IReadOnlyList<string> entries)
+		{
+			if (!TryGetWritableKeyboardConfigs(WritableScratch))
+				return;
+
+			WriteKeyStatusListToConfigs(WritableScratch, trigger, entries);
+			NotifyBindingChanged();
+#if AK_DIAGNOSTICS
+			ControlsGameUiSeparationTrace.LogStage(
+				"1_after_terraria_keystatus_write",
+				trigger,
+				"WriteKeyStatusList KeyboardBoth count=" + WritableScratch.Count);
+#endif
+		}
+
+		private static string FormatModes(InputMode[] modes)
+		{
+			if (modes == null || modes.Length == 0)
+				return "-";
+			var sb = new System.Text.StringBuilder();
+			for (int i = 0; i < modes.Length; i++)
+			{
+				if (i > 0)
+					sb.Append('+');
+				sb.Append(modes[i].ToString());
+			}
+			return sb.ToString();
+		}
+
+		public static void ClearVanillaBindingForInputModes(
+			string trigger,
+			string reason,
+			params InputMode[] modes)
+		{
+			if (string.IsNullOrEmpty(trigger))
+				return;
+			WriteKeyStatusForInputModes(trigger, Array.Empty<string>(), modes);
+		}
+
+		public static void AssignVanillaBindingForInputModes(
+			string trigger,
+			string keyOrPadToken,
+			string reason,
+			params InputMode[] modes)
+		{
+			if (string.IsNullOrEmpty(trigger) || string.IsNullOrEmpty(keyOrPadToken))
+				return;
+
+			string write = keyOrPadToken;
+			if (ControlsEditTargetPolicy.TryPadTokenToVanillaButtonsName(keyOrPadToken, out string buttons))
+				write = buttons;
+			WriteKeyStatusForInputModes(trigger, new[] { write }, modes);
+		}
+
+		/// <summary>Writes multiple Buttons names (OR) for GamePad KeyStatus.</summary>
+		public static void AssignVanillaBindingListForInputModes(
+			string trigger,
+			IReadOnlyList<string> keyOrPadTokens,
+			string reason,
+			params InputMode[] modes)
+		{
+			if (string.IsNullOrEmpty(trigger) || keyOrPadTokens == null || keyOrPadTokens.Count == 0)
+				return;
+
+			var writes = new List<string>(keyOrPadTokens.Count);
+			for (int i = 0; i < keyOrPadTokens.Count; i++)
+			{
+				string raw = keyOrPadTokens[i];
+				if (string.IsNullOrEmpty(raw))
+					continue;
+				string write = raw;
+				if (ControlsEditTargetPolicy.TryPadTokenToVanillaButtonsName(raw, out string buttons))
+					write = buttons;
+				if (!writes.Contains(write))
+					writes.Add(write);
+			}
+
+			if (writes.Count == 0)
+				return;
+			WriteKeyStatusForInputModes(trigger, writes, modes);
+		}
+
+		public static void AssignAdvancedOwnershipMarkersForInputModes(
+			string trigger,
+			IReadOnlyList<string> bindingKeys,
+			string reason,
+			params InputMode[] modes)
+		{
+			if (string.IsNullOrEmpty(trigger))
+				return;
+			List<string> markers = AdvancedVanillaOwnershipMarker.BuildMarkers(bindingKeys);
+			WriteKeyStatusForInputModes(trigger, markers, modes);
 		}
 
 		/// <summary>True when CurrentProfile has at least one writable keyboard KeyConfiguration.</summary>
@@ -134,6 +377,24 @@ namespace AdvancedKeybinds.Binding
 			}
 
 			return true;
+		}
+
+		/// <summary>Ownership match for a single InputMode only (GAME/UI separation).</summary>
+		public static bool AssignedOwnershipMatchesSlotsForInputMode(
+			string trigger,
+			InputMode mode,
+			bool hold,
+			string slot1,
+			string slot2,
+			string slot3)
+		{
+			if (string.IsNullOrEmpty(trigger)
+				|| !TryGetWritableConfigsForModes(ModeWritableScratch, mode))
+				return false;
+
+			KeyConfiguration config = ModeWritableScratch[0];
+			config.KeyStatus.TryGetValue(trigger, out List<string> keys);
+			return BindingVanillaOwnershipSync.MatchesOwnershipFromSlots(keys, hold, slot1, slot2, slot3);
 		}
 
 		/// <summary>
@@ -170,6 +431,93 @@ namespace AdvancedKeybinds.Binding
 				return new List<string>();
 
 			return new List<string>(keys);
+		}
+
+		/// <summary>
+		/// Independent copy of KeyStatus for one InputMode (includes empty list when the trigger
+		/// exists with Count==0). Does not fall back to other modes.
+		/// </summary>
+		public static List<string> GetAssignedKeysSnapshotForInputMode(string trigger, InputMode mode)
+		{
+			if (string.IsNullOrEmpty(trigger))
+				return new List<string>();
+
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null
+				|| !profile.InputModes.TryGetValue(mode, out KeyConfiguration config)
+				|| config?.KeyStatus == null)
+				return new List<string>();
+
+			if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys) || keys == null)
+				return new List<string>();
+
+			return new List<string>(keys);
+		}
+
+		/// <summary>
+		/// Restores <paramref name="trigger"/> KeyStatus for exactly one InputMode.
+		/// Does not write Keyboard+KeyboardUI dual lists.
+		/// </summary>
+		public static void RestoreAssignedKeysForInputMode(
+			string trigger,
+			IReadOnlyList<string> restoreKeys,
+			InputMode mode,
+			string reason = null)
+		{
+			if (string.IsNullOrEmpty(trigger))
+				return;
+
+			WriteKeyStatusForInputModes(trigger, restoreKeys ?? Array.Empty<string>(), mode);
+#if AK_DIAGNOSTICS
+			ControlsGameUiSeparationTrace.LogStage(
+				"1_after_terraria_keystatus_write",
+				trigger,
+				(reason ?? "RestoreAssignedKeysForInputMode") + " mode=" + mode);
+#endif
+		}
+
+		/// <summary>Deep-copy every KeyStatus entry for one InputMode (Lists cloned).</summary>
+		public static Dictionary<string, List<string>> CloneKeyStatusDictionary(InputMode mode)
+		{
+			var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null
+				|| !profile.InputModes.TryGetValue(mode, out KeyConfiguration config)
+				|| config?.KeyStatus == null)
+				return result;
+
+			foreach (KeyValuePair<string, List<string>> pair in config.KeyStatus)
+				result[pair.Key] = pair.Value == null ? null : new List<string>(pair.Value);
+			return result;
+		}
+
+		/// <summary>
+		/// Replace one InputMode KeyStatus entirely from a deep snapshot
+		/// (Clear then restore every key + list).
+		/// </summary>
+		public static bool ReplaceKeyStatusDictionary(InputMode mode, Dictionary<string, List<string>> snapshot)
+		{
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null
+				|| !profile.InputModes.TryGetValue(mode, out KeyConfiguration config)
+				|| config?.KeyStatus == null)
+				return false;
+
+			config.KeyStatus.Clear();
+			if (snapshot != null)
+			{
+				foreach (KeyValuePair<string, List<string>> pair in snapshot)
+				{
+					if (string.IsNullOrEmpty(pair.Key))
+						continue;
+					config.KeyStatus[pair.Key] = pair.Value == null
+						? new List<string>()
+						: new List<string>(pair.Value);
+				}
+			}
+
+			NotifyBindingChanged();
+			return true;
 		}
 
 		/// <summary>Human-readable vanilla KeyStatus list for diagnostics; "(unset)" when empty/missing.</summary>
@@ -256,6 +604,8 @@ namespace AdvancedKeybinds.Binding
 		/// <summary>
 		/// Restores <paramref name="trigger"/> to the keys stored in <see cref="PlayerInput.OriginalProfiles"/>
 		/// (same source as the per-row / profile defaults). Clears the list when the original had none.
+		/// Writes Keyboard + KeyboardUI (legacy dual write) — prefer
+		/// <see cref="ResetVanillaBindingToDefaultForInputModes"/> for GAME/UI separation.
 		/// </summary>
 		public static void ResetVanillaBindingToDefault(string trigger, string reason = null)
 		{
@@ -272,47 +622,120 @@ namespace AdvancedKeybinds.Binding
 #endif
 		}
 
+		/// <summary>
+		/// Restores <paramref name="trigger"/> for each InputMode independently (no GAME↔UI copy).
+		/// Source: OriginalProfiles via the same profile pick as <c>PlayerInput.ResetKeyBinding</c>
+		/// (Custom → Redigit's Pick). Writes that mode's official KeyStatus exactly
+		/// (<see cref="OfficialDefaultKeyRestoreLogic"/>) — no cross-mode fallback and no
+		/// guesswork Sanitize (Sanitize destroyed runtime Buttons.ToString face names A/B/X/Y
+		/// and KeyboardUI Menu DPad* tokens). Empty Original entry → write empty (no invented keys).
+		/// </summary>
+		public static void ResetVanillaBindingToDefaultForInputModes(
+			string trigger,
+			string reason,
+			params InputMode[] modes)
+		{
+			if (string.IsNullOrEmpty(trigger) || !IsProfileReady() || modes == null || modes.Length == 0)
+				return;
+
+			for (int i = 0; i < modes.Length; i++)
+			{
+				InputMode mode = modes[i];
+				// OfficialProfiles[mode][trigger] only — never Keyboard↔KeyboardUI fallback.
+				List<string> defaults = TryGetOriginalKeysForInputMode(trigger, mode)
+					?? new List<string>();
+				// Keyboard + KeyboardUI product contract: WASD / Mouse1 only (drop Space on
+				// MouseLeft, drop ActionId-named arrow echoes). No cross-device Sanitize.
+				defaults = OfficialDefaultKeyRestoreLogic.ApplyKeyboardGameMovementWriteContract(
+					(int)mode,
+					trigger,
+					defaults);
+
+				WriteKeyStatusForInputModes(trigger, defaults, mode);
+			}
+
+#if AK_DIAGNOSTICS
+			ControlsGameUiSeparationTrace.LogStage(
+				"1_after_terraria_keystatus_write",
+				trigger,
+				(reason ?? "ResetVanillaBindingToDefaultForInputModes") + " modes=" + FormatModes(modes));
+#endif
+		}
+
+		/// <summary>
+		/// Game→UI one-way: copy CurrentProfile KeyStatus from <paramref name="fromMode"/> to
+		/// <paramref name="toMode"/> (same token list). Used after middle-click restores Game
+		/// defaults so Menu matches Game — not Menu's separate OriginalProfiles entry.
+		/// </summary>
+		public static void CopyAssignedKeysBetweenInputModes(
+			string trigger,
+			InputMode fromMode,
+			InputMode toMode,
+			string reason = null)
+		{
+			if (string.IsNullOrEmpty(trigger) || !IsProfileReady() || fromMode == toMode)
+				return;
+
+			IReadOnlyList<string> source = GetAssignedKeysForInputMode(trigger, fromMode);
+			var copy = source == null || source.Count == 0
+				? new List<string>()
+				: new List<string>(source);
+			WriteKeyStatusForInputModes(trigger, copy, toMode);
+#if AK_DIAGNOSTICS
+			ControlsGameUiSeparationTrace.LogStage(
+				"1_after_terraria_keystatus_write",
+				trigger,
+				(reason ?? "CopyAssignedKeysBetweenInputModes")
+				+ " " + fromMode + "->" + toMode + " count=" + copy.Count);
+#endif
+		}
+
 		private static List<string> TryGetOriginalKeys(string trigger)
 		{
+			// Legacy dual-write path: Keyboard only (never fall back to KeyboardUI — that mixed arrows into GAME).
+			return TryGetOriginalKeysForInputMode(trigger, InputMode.Keyboard);
+		}
+
+		/// <summary>
+		/// Keys from OriginalProfiles for one InputMode, using the same profile pick as
+		/// <c>PlayerInput.ResetKeyBinding</c> (Custom → Redigit's Pick).
+		/// Null when profile/mode/trigger is missing (caller may write empty — must not invent keys).
+		/// </summary>
+		public static List<string> TryGetOriginalKeysForInputMode(string trigger, InputMode mode)
+		{
 			Dictionary<string, PlayerInputProfile> originals = PlayerInput.OriginalProfiles;
-			if (originals == null || originals.Count == 0)
+			if (originals == null || originals.Count == 0 || string.IsNullOrEmpty(trigger))
 				return null;
 
-			PlayerInputProfile current = PlayerInput.CurrentProfile;
-			if (current != null
-				&& !string.IsNullOrEmpty(current.Name)
-				&& originals.TryGetValue(current.Name, out PlayerInputProfile named)
-				&& TryReadKeys(named, trigger, out List<string> fromNamed))
+			string selected = PlayerInput.CurrentProfile?.Name;
+			bool containsSelected = !string.IsNullOrEmpty(selected) && originals.ContainsKey(selected);
+			string profileName = ControlsVanillaDefaultKeysPolicy.ResolveOriginalProfileName(
+				selected,
+				containsSelected);
+
+			if (originals.TryGetValue(profileName, out PlayerInputProfile profile)
+				&& TryReadKeysForMode(profile, trigger, mode, out List<string> fromNamed))
 			{
 				return fromNamed;
 			}
 
-			foreach (KeyValuePair<string, PlayerInputProfile> pair in originals)
-			{
-				if (TryReadKeys(pair.Value, trigger, out List<string> found))
-					return found;
-			}
-
+			// Exact mode only — never read another InputMode as fallback (that produced S/Down on GAME).
 			return null;
 		}
 
-		private static bool TryReadKeys(PlayerInputProfile profile, string trigger, out List<string> keys)
+		private static bool TryReadKeysForMode(
+			PlayerInputProfile profile,
+			string trigger,
+			InputMode mode,
+			out List<string> keys)
 		{
 			keys = null;
 			if (profile?.InputModes == null)
 				return false;
-
-			if (!profile.InputModes.TryGetValue(InputMode.Keyboard, out KeyConfiguration config)
-				&& !profile.InputModes.TryGetValue(InputMode.KeyboardUI, out config))
-			{
-				foreach (KeyValuePair<InputMode, KeyConfiguration> pair in profile.InputModes)
-				{
-					config = pair.Value;
-					break;
-				}
-			}
-
-			if (config?.KeyStatus == null || !config.KeyStatus.TryGetValue(trigger, out List<string> source) || source == null)
+			if (!profile.InputModes.TryGetValue(mode, out KeyConfiguration config)
+				|| config?.KeyStatus == null)
+				return false;
+			if (!config.KeyStatus.TryGetValue(trigger, out List<string> source) || source == null)
 				return false;
 
 			keys = new List<string>(source);

@@ -14,6 +14,10 @@ namespace AdvancedKeybinds.Patches
 
 		public static IntPtr TryGet(bool preferForeground = false)
 		{
+			// No HWND concept off Windows (Linux / other non-Windows runtimes).
+			if (!OperatingSystem.IsWindows())
+				return IntPtr.Zero;
+
 			long now = Environment.TickCount64;
 			if (_cached != IntPtr.Zero && IsWindow(_cached) && now - _cachedMs < 3000)
 				return _cached;

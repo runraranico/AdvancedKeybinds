@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Automatisch
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: Aktiviert
+			Tooltip: Falls sich keine Tasten zuweisen lassen, dies testen
+		}
+
+		Disabled: {
+			Label: Deaktiviert
+			Tooltip: Empfohlen, wenn du keinen Controller nutzt
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: Spezielle Tasten / UI-Steuerung
+		Header: UI-Steuerung / Spezielle Tasten
 
 		Suppress: {
 			Label: Windows-Taste unterdrücken
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: Beim nächsten Mod-Laden automatisch aktivieren
 			Tooltip: An: beim nächsten Mod-Laden mit Sperre starten. Aus: beim nächsten Laden ohne Sperre starten
+		}
+	}
+
+	GamePad: {
+		Header: Controller
+
+		Mode: {
+			Label: Controller-Eingabe
+			Tooltip: Wie Advanced Keybinds deinen Controller ausliest. Details siehe die Optionen unten
 		}
 	}
 
@@ -142,7 +170,7 @@ UI: {
 		HintLine1: Linksklick auf ein Feld, dann Taste oder Maustaste drücken.
 		HintLine2: Hold nur bei 1 Taste möglich.
 		HintLine3: Maus über ein Feld und Rechtsklick zum Aufheben der Belegung.
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: Standard
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: gehalten
 		HoldOnReleaseTitle: Hold
@@ -151,6 +179,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Geben Sie einen Wert von 10～10000 ein
 		ConfirmLeftClickOnly: Linksklick allein belegen? Speichern erneut zum Bestätigen.
+		ClearConfirmPad: Löschen?
+		RejectOppositeStickDirection: Entgegengesetzte Stickrichtungen können nicht kombiniert werden (z. B. Hoch+Runter).
 		KeyInfoSelectHint: Taste auswählen
 		KeyInfoSelectGuide: Taste wählen
 		KeyInfoCurrent: Originaltaste
@@ -170,9 +200,29 @@ UI: {
 		KeyInfoResetDisplaysLine2: auf Standard zurück
 		KeyInfoResetDisplaysConfirm: Alle benutzerdefinierten Tasten-Anzeigenamen auf Standard zurücksetzen?
 		KeyInfoDisplayRestored: Anzeigename {0} auf {1} zurückgesetzt
-		SlotOriginalKey: Original: {0}
+		SlotOriginalKey: Originaltaste: {0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: Zu sich
-		MouseWheelDown: Weg von sich
+
+		DisplayNameUnavailable: {
+			Line1: Anzeigeänderungen sind
+			Line2: bei Controller-Nutzung
+			Line3: deaktiviert
+		}
+
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: 2-Tasten-Setup
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: Nur Controller
+		HintLine2: Beliebige Taste wirkt
+		HintLine3: ""
+		HoldUnavailableHint: Nicht verfügbar
 	}
 }

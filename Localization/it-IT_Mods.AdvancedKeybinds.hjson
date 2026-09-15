@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Automatico
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: Attivo
+			Tooltip: Se i tasti non si registrano, prova questa opzione
+		}
+
+		Disabled: {
+			Label: Disattivato
+			Tooltip: Consigliato se non usi un controller
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: Tasti speciali / controllo UI
+		Header: Controllo UI / Tasti speciali
 
 		Suppress: {
 			Label: Sopprimi tasto Windows
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: Attiva automaticamente al prossimo caricamento del mod
 			Tooltip: Attivo: avvia con blocco al prossimo caricamento. Disattivo: avvia senza blocco al prossimo caricamento
+		}
+	}
+
+	GamePad: {
+		Header: Controller
+
+		Mode: {
+			Label: Input controller
+			Tooltip: Come Advanced Keybinds legge il controller. Vedi ogni opzione sotto per i dettagli
 		}
 	}
 
@@ -142,7 +170,7 @@ UI: {
 		HintLine1: Clic sinistro su uno slot, poi premi un tasto o un pulsante del mouse.
 		HintLine2: Hold solo con 1 tasto.
 		HintLine3: Porta il cursore su uno slot e clic destro per togliere l'assegnazione.
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: Predefinito
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: tenuto premuto
 		HoldOnReleaseTitle: Hold
@@ -151,6 +179,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Inserisci un valore da 10～10000
 		ConfirmLeftClickOnly: Assegnare solo il clic sinistro? Salva di nuovo per confermare.
+		ClearConfirmPad: Cancellare?
+		RejectOppositeStickDirection: Direzioni opposte dello stick non combinabili (es. Su+Giù).
 		KeyInfoSelectHint: Seleziona un tasto
 		KeyInfoSelectGuide: Scegli un tasto
 		KeyInfoCurrent: Tasto originale
@@ -172,7 +202,27 @@ UI: {
 		KeyInfoDisplayRestored: Nome visualizzato {0} ripristinato a {1}
 		SlotOriginalKey: Originale: {0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: Verso di sé
-		MouseWheelDown: Lontano da sé
+
+		DisplayNameUnavailable: {
+			Line1: La modifica del nome
+			Line2: è disabilitata
+			Line3: con un controller
+		}
+
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: Impost. 2 tasti
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: Solo controller
+		HintLine2: Qualunque attiva
+		HintLine3: ""
+		HoldUnavailableHint: Non disponibile
 	}
 }

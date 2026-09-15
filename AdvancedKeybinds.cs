@@ -31,11 +31,20 @@ namespace AdvancedKeybinds
 			Instance = this;
 			AkDiag.ResetAnnounceState();
 
+			AkPlatform.ResetForReload();
+			// Single line per launch: the only way to confirm Deck detection on real hardware.
+			Logger.Info("AK platform: " + AkPlatform.SteamDeckEvidence);
+
 			ComboPanel.ResetStaticState();
 			ModDetours.DisposeAll();
 			FargoActiveSkillDisplayCompat.ResetAppliedFlag();
+			MachineTranslateDisplayCompat.ResetAppliedFlag();
+			DialogueTweakGamepadCompat.ResetAppliedFlag();
+			NativeCursorGamepadCompat.ResetAppliedFlag();
+			AlchemistNpcLiteShopListGamepadCompat.ResetAppliedFlag();
+			GamePadUiNavigationPatches.ClearRuntimeState();
 
-			// Registered defaults: L / K / O / U (reset button). Rows start 未設定 until the user binds or resets.
+			// Registered defaults: L / K / O / U (reset button). Rows start unset until the user binds or resets.
 			// Cursor confine is config + hidden shortcut only (no Controls row):
 			// Ctrl+Shift+Alt+M -> toggle cursor confine.
 			// Ctrl+Shift+Alt+Win+Del -> save and exit.
@@ -49,16 +58,29 @@ namespace AdvancedKeybinds
 			ClientPrefs.Load();
 			// Pref drives session on/off for this load (ON→on, OFF→off). Manual toggles after load are free.
 			CursorConfineHelper.ApplyOnLoadPreference(ClientPrefs.EnableCursorConfineOnLoad);
+			WheelDirectionMigration.RunBeforeStorageLoad();
 			BindingStorage.Initialize();
 			KeyDisplayAliasStorage.Initialize();
 			OpenKeybindMenuDefaults.ApplyStartupState();
 			ModKeybindPatches.Apply();
 			PlayerInputPatches.Apply();
+			// Temporary cursor / GamePad probes are archived stubs — do not register draw hooks.
 			KeybindingUiPatches.Apply();
 			ControlsOverlayPatches.Apply();
+			ControlsGamepadAutoScrollPatches.Apply();
+			GamePadControlTabProbe.Apply();
+			GamePadUiNavigationPatches.Apply();
 			KeybindUiWorldInputGuard.Apply();
 			TerrariaDebugUiHotkeyPatches.Apply();
+			DiagnosticCommandHelpHidePatches.Apply();
 			FargoActiveSkillDisplayCompat.Apply();
+			MachineTranslateDisplayCompat.Apply();
+			DialogueTweakGamepadCompat.Apply();
+			NativeCursorGamepadCompat.Apply();
+			AlchemistNpcLiteShopListGamepadCompat.Apply();
+
+			// Diagnosis-only: immediate parent restore once; deferred re-apply off (NOT a product fix).
+			ParentRestoreFlickerTest.AnnounceOnLoad(this);
 
 			// Dup-check file / resolve-trace only in AK_DIAGNOSTICS builds (never in public DLL).
 #if AK_DIAGNOSTICS
@@ -93,19 +115,88 @@ namespace AdvancedKeybinds
 #endif
 		}
 
+		public override void PostSetupContent()
+		{
+			MigrateGamePadInputModeOnce();
+		}
+
+		/// <summary>
+		/// Installs that predate the GamePad mode setting keep working untouched: anyone who already
+		/// bound a <c>Pad:</c> token is moved to Enabled once, everyone else stays on Auto and pays
+		/// no gamepad cost. Never re-runs, so an explicit Disabled is never silently undone.
+		/// </summary>
+		private static void MigrateGamePadInputModeOnce()
+		{
+			if (ClientPrefs.GamePadModeMigrated)
+				return;
+
+			AdvancedKeybindsConfig config = AdvancedKeybindsConfig.Instance;
+			if (config == null)
+				return;
+
+			bool hasPadTokens = false;
+			foreach (System.Collections.Generic.KeyValuePair<string, ComboBinding> pair in BindingStorage.AllBindings)
+			{
+				if (GamePadSubsystemPolicy.ContainsPadToken(pair.Value?.Keys))
+				{
+					hasPadTokens = true;
+					break;
+				}
+			}
+
+			ClientPrefs.GamePadModeMigrated = true;
+
+			if (!GamePadSubsystemPolicy.MigrationChangesSavedMode(
+					alreadyMigrated: false,
+					config.GamePadInputMode,
+					hasPadTokens))
+			{
+				GamePadSubsystemRuntime.Mode = config.GamePadInputMode;
+				return;
+			}
+
+			config.GamePadInputMode = GamePadSubsystemPolicy.ResolveMigratedMode(
+				alreadyMigrated: false,
+				config.GamePadInputMode,
+				hasPadTokens);
+			GamePadSubsystemRuntime.Mode = config.GamePadInputMode;
+			config.SaveClientSettingsSilent();
+		}
+
 		public override void Unload()
 		{
 			LiveInputDiagnosticSession.Shutdown();
 #if AK_DIAGNOSTICS
 			PhysicalKeyDupDiag.Reset();
+			KeybindEscapeDiagSystem.Reset();
 #endif
 			ComboPanel.ResetStaticState();
 			ModDetours.DisposeAll();
 			FargoActiveSkillDisplayCompat.ResetAppliedFlag();
+			MachineTranslateDisplayCompat.ResetAppliedFlag();
+			DialogueTweakGamepadCompat.ResetAppliedFlag();
+			NativeCursorGamepadCompat.ResetAppliedFlag();
+			AlchemistNpcLiteShopListGamepadCompat.ResetAppliedFlag();
+			GamePadUiNavigationPatches.ClearRuntimeState();
 			KeybindingUiPatches.ClearCaches();
+			ControlsGamepadAutoScrollPatches.ClearRuntimeState();
+			ControlsPadBHoldCancelFocus.ClearRuntimeState();
+			ControlsSectionHeaderSupport.ClearRuntimeState();
+			ControlsUiHost.ClearRuntimeState();
+			ComboPanelCloseInputConsumeGate.ClearRuntimeState();
+			PendingGamePadRowConfirm.ClearRuntimeState();
+			FixedGamepadUiConfirmApplicator.ClearRuntimeState();
+#if AK_DIAGNOSTICS
+			JumpApplyStageDiag.Reset();
+			PadFaceMappingAutoDiagnosticSystem.Reset();
+			PadConfirmAfterComboSaveDiagSystem.Reset();
+			InGameTriggerNavDiag.ClearRuntimeState();
+			ComboPanelRegistrationWaitDiag.Unload();
+#endif
 			CursorConfineHelper.ResetSession();
 			GameWindowInputHook.Uninstall();
 			WindowsKeySuppressor.Uninstall();
+			FnaGamePadProvider.Reset();
 			BindingInputEngine.Unload();
 			BindingStorage.Unload();
 			KeyDisplayAliasStorage.Unload();
@@ -115,6 +206,7 @@ namespace AdvancedKeybinds
 			OpenModConfigHotkey = null;
 			CycleHoldTierHudAnchorHotkey = null;
 			AkDiag.ResetAnnounceState();
+			AkPlatform.ResetForReload();
 			AdvancedKeybindsDiagnosticEvents.ClearAllSubscribers();
 			Instance = null;
 		}

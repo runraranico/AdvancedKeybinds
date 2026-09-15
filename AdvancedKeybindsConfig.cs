@@ -4,6 +4,7 @@ using AdvancedKeybinds.Binding;
 using AdvancedKeybinds.Config.UI;
 using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Diagnostics;
+using AdvancedKeybinds.Logic;
 using AdvancedKeybinds.Patches;
 using Microsoft.Xna.Framework;
 using Terraria;
@@ -39,16 +40,20 @@ namespace AdvancedKeybinds
 		[CustomModConfigItem(typeof(HiddenConfigElement))]
 		public float HoldTierHudCustomPositionY = -1f;
 
+		// Header lives on the all-OS Debug UI row so Linux/macOS never keep an orphan section title
+		// when SuppressWindowsKey is collapsed by WindowsOnlyBoolElement.
 		[Header("$Mods.AdvancedKeybinds.Config.WindowsKey.Header")]
-		[LabelKey("$Mods.AdvancedKeybinds.Config.WindowsKey.Suppress.Label")]
-		[TooltipKey("$Mods.AdvancedKeybinds.Config.WindowsKey.Suppress.Tooltip")]
-		[DefaultValue(false)]
-		public bool SuppressWindowsKey { get; set; } = false;
-
 		[LabelKey("$Mods.AdvancedKeybinds.Config.WindowsKey.SuppressDebugUi.Label")]
 		[TooltipKey("$Mods.AdvancedKeybinds.Config.WindowsKey.SuppressDebugUi.Tooltip")]
 		[DefaultValue(false)]
 		public bool SuppressTerrariaDebugUiHotkeys { get; set; } = false;
+
+		// Windows-only UI row. Saved value is never rewritten for Linux/macOS — only hidden / ignored.
+		[LabelKey("$Mods.AdvancedKeybinds.Config.WindowsKey.Suppress.Label")]
+		[TooltipKey("$Mods.AdvancedKeybinds.Config.WindowsKey.Suppress.Tooltip")]
+		[DefaultValue(false)]
+		[CustomModConfigItem(typeof(WindowsOnlyBoolElement))]
+		public bool SuppressWindowsKey { get; set; } = false;
 
 		// Cursor-confine section: hidden from ModConfig UI for now (logic + prefs + Ctrl+Shift+Alt+M remain).
 		// To show again: restore [Header] below and add [ShowDespiteJsonIgnore] on both properties.
@@ -77,6 +82,13 @@ namespace AdvancedKeybinds
 			set => ClientPrefs.EnableCursorConfineOnLoad = value;
 		}
 
+		// Persisted by enum member name, so it round-trips identically on Windows / Linux / macOS.
+		[Header("$Mods.AdvancedKeybinds.Config.GamePad.Header")]
+		[LabelKey("$Mods.AdvancedKeybinds.Config.GamePad.Mode.Label")]
+		[TooltipKey("$Mods.AdvancedKeybinds.Config.GamePad.Mode.Tooltip")]
+		[DefaultValue(GamePadInputMode.Auto)]
+		public GamePadInputMode GamePadInputMode { get; set; } = GamePadInputMode.Auto;
+
 		[Header("$Mods.AdvancedKeybinds.Config.HoldTierHud.Header")]
 		[LabelKey("$Mods.AdvancedKeybinds.Config.HoldTierHud.Enabled.Label")]
 		[TooltipKey("$Mods.AdvancedKeybinds.Config.HoldTierHud.Enabled.Tooltip")]
@@ -92,8 +104,8 @@ namespace AdvancedKeybinds
 		[Header("$Mods.AdvancedKeybinds.Config.KeyboardDiag.Header")]
 		[LabelKey("$Mods.AdvancedKeybinds.Config.KeyboardDiag.Mode.Label")]
 		[TooltipKey("$Mods.AdvancedKeybinds.Config.KeyboardDiag.Mode.Tooltip")]
-		[DefaultValue(false)]
-		public bool KeyboardDiagnosticMode { get; set; }
+		[DefaultValue(true)]
+		public bool KeyboardDiagnosticMode { get; set; } = true;
 
 		[LabelKey("$Mods.AdvancedKeybinds.Config.KeyboardDiag.LogToFile.Label")]
 		[TooltipKey("$Mods.AdvancedKeybinds.Config.KeyboardDiag.LogToFile.Tooltip")]
@@ -128,6 +140,7 @@ namespace AdvancedKeybinds
 			if (HoldTierHudSystem.RecoverCustomPlacementIfWiped(this))
 				HoldTierHudSystem.PersistRecoveredPlacement(this);
 			SyncTerrariaDebugUiHotkeyPolicy();
+			GamePadSubsystemRuntime.Mode = GamePadInputMode;
 			HoldTierHudSystem.LogHoldHudConfigStateIfChanged(this, "OnLoaded-exit");
 		}
 
@@ -176,10 +189,10 @@ namespace AdvancedKeybinds
 
 			HoldTierHudSystem.LogHoldHudConfigStateIfChanged(this, "OnChanged-exit");
 
-			if (!SuppressWindowsKey)
-				WindowsKeySuppressor.OnSuppressionDisabled();
-			else
-				GameWindowInputHook.RefreshRawInputForWinSuppressSetting();
+			ApplyWindowsKeySuppressRuntimeFromConfig();
+
+			// Takes effect from the next input tick; Disabled also flushes held/pressed state there.
+			GamePadSubsystemRuntime.Mode = GamePadInputMode;
 
 			SyncTerrariaDebugUiHotkeyPolicy();
 
@@ -189,6 +202,23 @@ namespace AdvancedKeybinds
 			else
 				KeyboardDiagMode.Clear();
 #endif
+		}
+
+		/// <summary>
+		/// Applies Win-key suppress hooks only on Windows. Never assigns SuppressWindowsKey from the host OS —
+		/// a true saved on Steam Deck / Linux must remain true when returning to Windows.
+		/// </summary>
+		private void ApplyWindowsKeySuppressRuntimeFromConfig()
+		{
+			bool isWindows = OperatingSystem.IsWindows();
+			if (!WindowsKeySuppressConfigPolicy.ShouldExecuteWindowsKeySuppression(isWindows, SuppressWindowsKey))
+			{
+				if (isWindows)
+					WindowsKeySuppressor.OnSuppressionDisabled();
+				return;
+			}
+
+			GameWindowInputHook.RefreshRawInputForWinSuppressSetting();
 		}
 
 		private void SyncTerrariaDebugUiHotkeyPolicy()
@@ -304,6 +334,10 @@ namespace AdvancedKeybinds
 		/// Persist client Hold-HUD fields without UI sound. Call only on discrete events
 		/// (drag commit, Esc/silent cancel restore, CycleAnchor) 窶・not every frame while dragging.
 		/// </summary>
+		/// <summary>Persist client settings without UI sound. One-shot events only, never per frame.</summary>
+		internal void SaveClientSettingsSilent()
+			=> SaveHoldHudChangesSilent();
+
 		internal void SaveHoldHudChangesSilent()
 		{
 			try

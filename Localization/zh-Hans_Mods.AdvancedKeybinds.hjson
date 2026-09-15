@@ -20,6 +20,25 @@ Configs: {
 		}
 	}
 
+	GamePadInputMode: {
+		Tooltip: ""
+
+		Auto: {
+			Label: 自动
+			Tooltip: ""
+		}
+
+		Enabled: {
+			Label: 启用
+			Tooltip: 无法注册按键时可以试试此项
+		}
+
+		Disabled: {
+			Label: 禁用
+			Tooltip: 不使用手柄时推荐选择此项
+		}
+	}
+
 	HoldTierHudAnchor: {
 		Tooltip: ""
 
@@ -42,7 +61,7 @@ Configs: {
 
 Config: {
 	WindowsKey: {
-		Header: 特殊按键与 UI 控制
+		Header: UI 控制 / 特殊按键
 
 		Suppress: {
 			Label: 抑制 Windows 键
@@ -66,6 +85,15 @@ Config: {
 		CursorConfineOnLoad: {
 			Label: 下次加载模组时自动启用
 			Tooltip: 开启：下次加载模组时以光标锁定开启状态开始。关闭：下次加载时以关闭状态开始
+		}
+	}
+
+	GamePad: {
+		Header: 手柄
+
+		Mode: {
+			Label: 手柄输入
+			Tooltip: Advanced Keybinds 读取手柄的方式。详情见下方各选项说明
 		}
 	}
 
@@ -142,7 +170,7 @@ UI: {
 		HintLine1: 左键点击槽位，然后按下按键或鼠标按钮。
 		HintLine2: Hold 仅限 1 键时可用。
 		HintLine3: 将光标移到槽位上并右键点击以清除设置。
-		HoldDefaultLabel: Default
+		HoldDefaultLabel: 默认
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 按住时
 		HoldOnReleaseTitle: Hold
@@ -151,6 +179,8 @@ UI: {
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: 可输入 10～10000
 		ConfirmLeftClickOnly: 要单独绑定左键吗？再按一次保存以确认。
+		ClearConfirmPad: 要清除吗？
+		RejectOppositeStickDirection: 同一摇杆的相反方向不能同时绑定（例如 上+下）
 		KeyInfoSelectHint: 请选择按键
 		KeyInfoSelectGuide: 选择按键
 		KeyInfoCurrent: 原始按键
@@ -172,7 +202,27 @@ UI: {
 		KeyInfoDisplayRestored: 已将显示名称 {0} 还原为 {1}
 		SlotOriginalKey: 原始：{0}
 		SlotDisplayNameHover: "{0}: {1}"
-		MouseWheelUp: 朝自己滚
-		MouseWheelDown: 向外滚
+
+		DisplayNameUnavailable: {
+			Line1: 显示名更改功能
+			Line2: 在使用控制器时
+			Line3: 将停用
+		}
+
+		MouseWheelUp: Wheel Up
+		MouseWheelDown: Wheel Down
+		MouseWheelLeft: Wheel Left
+		MouseWheelRight: Wheel Right
+	}
+
+	TwoKeySetup: {
+		Line1: 双键设置
+		Line2: ""
+		Line3: ""
+		Line4: ""
+		HintLine1: 仅限手柄
+		HintLine2: 任一键可触发
+		HintLine3: ""
+		HoldUnavailableHint: 不可用
 	}
 }

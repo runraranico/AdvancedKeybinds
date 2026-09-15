@@ -93,11 +93,20 @@ namespace AdvancedKeybinds.Core
 
 				foreach (KeyValuePair<string, ComboBindingData> pair in data)
 				{
-					if (string.IsNullOrEmpty(pair.Key) || pair.Value == null || pair.Value.IsEmpty)
+					if (string.IsNullOrEmpty(pair.Key) || pair.Value == null)
 						continue;
 
-					ComboBindingData sanitized = SanitizeBinding(pair.Value);
-					if (sanitized == null || sanitized.IsEmpty)
+					bool allowEmptyPersist = pair.Value.PersistAsEmptyRecord
+						&& GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key);
+					if (pair.Value.IsEmpty && !allowEmptyPersist)
+						continue;
+
+					ComboBindingData sanitized = SanitizeBinding(pair.Value, pair.Key);
+					if (sanitized == null)
+						continue;
+					if (sanitized.IsEmpty
+						&& !(sanitized.PersistAsEmptyRecord
+							&& GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key)))
 						continue;
 
 					result[pair.Key] = sanitized;
@@ -121,6 +130,15 @@ namespace AdvancedKeybinds.Core
 		/// Never converts display aliases into slots.
 		/// </summary>
 		public static ComboBindingData SanitizeBinding(ComboBindingData source)
+			=> SanitizeBinding(source, storageKey: null);
+
+		/// <summary>
+		/// Canonicalize known tokens; leave unknown strings as-is (safe for load, ignored at runtime).
+		/// Never converts display aliases into slots.
+		/// Slot3 retention for TwoKey OR shapes applies only when
+		/// <paramref name="storageKey"/> is a <see cref="GamePadTwoKeyTerrariaOrPolicy"/> target.
+		/// </summary>
+		public static ComboBindingData SanitizeBinding(ComboBindingData source, string storageKey)
 		{
 			if (source == null)
 				return null;
@@ -156,6 +174,41 @@ namespace AdvancedKeybinds.Core
 			{
 				copy.Hold = false;
 				copy.HoldOnRelease = false;
+			}
+
+			// Terraria-OR two-key shape flags: never treat as AND / Alternate.
+			// Slot3 keep is GamePad TwoKey storage keys only — not every UseTerrariaKeyStatusOr row.
+			if (copy.UseTerrariaKeyStatusOr || copy.PersistAsEmptyRecord)
+			{
+				bool twoKeyTarget = GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(storageKey);
+				if (!twoKeyTarget)
+				{
+					copy.Slot3 = null;
+					copy.Slot3Display = null;
+				}
+
+				copy.AlternateGamePadToken = null;
+				copy.Hold = false;
+				copy.HoldOnRelease = false;
+				copy.UseTerrariaKeyStatusOr = true;
+				if (copy.IsEmpty)
+					copy.PersistAsEmptyRecord = true;
+				return copy;
+			}
+
+			// Alternate is independent of AND slots; sanitize Pad-only and clear when empty/AND-combo.
+			if (copy.IsEmpty || copy.FilledSlotCount > 1)
+			{
+				copy.AlternateGamePadToken = null;
+			}
+			else if (!string.IsNullOrEmpty(copy.AlternateGamePadToken))
+			{
+				string primary = AlternateGamePadBindingPolicy.ResolvePrimaryToken(copy.Keys);
+				if (!AlternateGamePadBindingPolicy.TryNormalizeAlternateToken(
+					    copy.AlternateGamePadToken, primary, out string altCanon, out _))
+					copy.AlternateGamePadToken = null;
+				else
+					copy.AlternateGamePadToken = altCanon;
 			}
 
 			return copy;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Diagnostics;
 using AdvancedKeybinds.Logic;
 using AdvancedKeybinds.UI;
@@ -118,6 +119,8 @@ namespace AdvancedKeybinds.Patches
 		private static Vector2 _preDragCustomPos;
 		private static HoldTierHudAnchor _preDragAnchor;
 		private static bool _prevEscapeDown;
+		/// <summary>True while PostUpdateInput is skipping coordinate upkeep (Hold HUD Off).</summary>
+		private static bool _hudCoordinateUpkeepWasOff;
 		private static bool _prevAllowDrag;
 		/// <summary>Tracks whether the last PollDrag saw Enabled=true (edge-log when turning off).</summary>
 		private static bool _prevAllowDragLoggedEnabled;
@@ -329,6 +332,37 @@ namespace AdvancedKeybinds.Patches
 				if (config == null)
 					return;
 
+				// Off: nothing can be drawn, hit-tested or dragged this frame, so none of the
+				// coordinate upkeep below has an observable effect. The anchor hotkey still runs
+				// because cycling the anchor is allowed while the gauge is hidden.
+				bool needsCoordinateUpkeep = HoldHudActivityPolicy.RequiresCoordinateUpkeep(
+					inWorld: true,
+					IsHudFeatureEnabled(config),
+					IsDragging || _customPixelDragActive);
+
+				if (!needsCoordinateUpkeep)
+				{
+					_hudCoordinateUpkeepWasOff = true;
+					if (IsCycleAnchorHotkeyJustPressed())
+					{
+						// Entering Custom seeds a placement, so re-capture the surface first rather
+						// than seeding against whatever was cached before the skipped frames.
+						HoldHudCoords.InvalidateGamePixelSurface("hold-hud-off-cycle");
+						HoldHudCoords.RefreshGamePixelSurface("PostUpdateInput-off-cycle");
+						config.CycleAnchor();
+					}
+
+					return;
+				}
+
+				// The cached surface went stale while Off was skipping refreshes, so the first
+				// active frame must invalidate it instead of reusing a pre-resize capture.
+				if (HoldHudActivityPolicy.RequiresSurfaceRecaptureOnResume(_hudCoordinateUpkeepWasOff, isOff: false))
+				{
+					_hudCoordinateUpkeepWasOff = false;
+					HoldHudCoords.InvalidateGamePixelSurface("hold-hud-resume");
+				}
+
 				// Capture game-pixel surface before any UI zoom pollutes Main.screenWidth.
 				HoldHudCoords.RefreshGamePixelSurface("PostUpdateInput");
 				HoldHudCoords.LogPhaseSnapshot("PostUpdateInput", config);
@@ -338,7 +372,7 @@ namespace AdvancedKeybinds.Patches
 				if (!IsDragging && !_customPixelDragActive)
 					SyncCustomPositionToScreenSize(config, "PostUpdateInput");
 
-				if (AdvancedKeybinds.CycleHoldTierHudAnchorHotkey?.JustPressed == true)
+				if (IsCycleAnchorHotkeyJustPressed())
 					config.CycleAnchor();
 
 				// Same timing as KeybindShortcutSystem (physical middle works reliably here).
@@ -350,6 +384,27 @@ namespace AdvancedKeybinds.Patches
 				AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdHoldHudPostUpdateInput);
 				#endif
 			}
+		}
+
+		/// <summary>
+		/// ModKeybind.JustPressed indexes TriggersSet.KeyStatus directly, so it throws while tModLoader
+		/// has not rebuilt the trigger sets for this action id yet (see <see cref="ModKeybindTriggerReadPolicy"/>).
+		/// </summary>
+		private static bool IsCycleAnchorHotkeyJustPressed()
+		{
+			ModKeybind hotkey = AdvancedKeybinds.CycleHoldTierHudAnchorHotkey;
+			if (hotkey == null)
+				return false;
+
+			string actionId = ModKeybindReflection.GetActionId(hotkey);
+
+			if (ModKeybindTriggerReadPolicy.IsActionIdReadable(PlayerInput.Triggers?.JustPressed?.KeyStatus, actionId)
+				&& hotkey.JustPressed)
+			{
+				return true;
+			}
+
+			return !string.IsNullOrEmpty(actionId) && BindingInputEngine.WasJustPressed(actionId);
 		}
 
 		/// <summary>

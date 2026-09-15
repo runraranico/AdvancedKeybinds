@@ -4,6 +4,8 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Core;
+using AdvancedKeybinds.Diagnostics;
 using AdvancedKeybinds.UI;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -18,6 +20,7 @@ using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.UI;
 using Terraria.UI.Chat;
+using Terraria.UI.Gamepad;
 using ReLogic.Graphics;
 
 namespace AdvancedKeybinds.Patches
@@ -106,6 +109,15 @@ namespace AdvancedKeybinds.Patches
 		private static bool _physicalMiddleResetJustPressed;
 		private static bool _prevPhysicalMiddleForRowReset;
 		private static bool _prevPhysicalLeftForUnsetConfirmCancel;
+		/// <summary>Physical LMB press edge this input tick (for ComboPanel open source).</summary>
+		private static bool _physicalLeftOpenJustPressed;
+		/// <summary>
+		/// Latched from physical LMB press until consumed by Open or expiry.
+		/// Terraria often fires row OnClick after LMB RELEASE, so IsPhysicalLeftDown is already false.
+		/// </summary>
+		private static bool _physicalLeftOpenArmed;
+		private static int _physicalLeftOpenArmedEpoch = int.MinValue;
+		private const int PhysicalLeftOpenArmMaxAgeEpochs = 8;
 		// Ctrl+Shift+Alt+RMB (etc.) opens controls while RMB is still down; ignore row-unset until up.
 		private static bool _suppressRowRightClearUntilRightUp;
 		/// <summary>Action id armed for two-step right-click unset; null when idle.</summary>
@@ -132,7 +144,29 @@ namespace AdvancedKeybinds.Patches
 		/// <summary>
 		/// Adds a one-level Undo button immediately left of vanilla's profile ("Custom") panel.
 		/// The button uses the same UIKeybindingSimpleListItem type and tint as that panel.
+		/// ja-JP localization uses 「取消」 for Undo — Pad:B hold focuses this button.
 		/// </summary>
+		internal static UIElement TryGetControlsUndoButton(UIElement root)
+		{
+			if (root == null)
+				return null;
+			return _controlsUndoButtons.TryGetValue(root, out UIElement button) ? button : null;
+		}
+
+		/// <summary>
+		/// Shared Controls-screen Undo (mouse button, top-bar Pad:A, Pad:B long-press).
+		/// Does not close UIManageControls.
+		/// </summary>
+		internal static bool TryExecuteControlsUndo(string reason)
+		{
+			_ = reason;
+			if (ComboPanel.IsOpen)
+				return false;
+
+			ClearPendingUnsetConfirm();
+			return ControlsBindingUndo.TryUndo();
+		}
+
 		internal static void EnsureControlsUndoButton(UIElement root)
 		{
 			if (root == null || _controlsUndoButtons.TryGetValue(root, out _))
@@ -161,11 +195,7 @@ namespace AdvancedKeybinds.Patches
 			undoButton.MarginRight = profileButton.MarginRight + profileWidth + ControlsUndoButtonGap;
 
 			undoButton.OnLeftClick += (_, _) => {
-				if (ComboPanel.IsOpen)
-					return;
-
-				ClearPendingUnsetConfirm();
-				if (ControlsBindingUndo.TryUndo())
+				if (TryExecuteControlsUndo("MouseClick"))
 					SoundEngine.PlaySound(SoundID.MenuOpen);
 			};
 
@@ -187,18 +217,72 @@ namespace AdvancedKeybinds.Patches
 			ModDetours.Apply(genInput, (orig_GenInput orig, UIKeybindingListItem self, List<string> list) => {
 				if (_suppressVanillaKeyLabelDraw)
 					return " ";
-				return orig(self, PreferComboPanelDisplayLabels(list));
+				if (TryResolveCanonicalRowStorageTokens(self, list, out List<string> canonical))
+					list = canonical;
+				return orig(self, PreferComboPanelDisplayLabels(self, list));
 			});
 		}
 
 		/// <summary>
 		/// Maps raw saved tokens to the same display strings used in combo-panel slots.
 		/// Does not mutate the live KeyStatus list.
+		/// Alternate GamePad OR on GamePad Controls rows: two Buttons-name cells for vanilla GenInput glyphs.
+		/// Stick directions on GamePad Controls rows use FNA Buttons names for GlyphTagHandler (display-only).
 		/// </summary>
-		private static List<string> PreferComboPanelDisplayLabels(List<string> list)
+
+		private static bool TryResolveCanonicalRowStorageTokens(
+			UIElement self,
+			List<string> keyStatusListFromDraw,
+			out List<string> canonical)
 		{
+			canonical = null;
+			if (self == null)
+				return false;
+
+			string actionId = ResolveActionId(self, self.GetType(), forClick: false);
+			if (string.IsNullOrEmpty(actionId))
+				return false;
+
+			if (!TryGetRowInputMode(self, out InputMode rowMode))
+				rowMode = InputMode.Keyboard;
+
+			string storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)rowMode, actionId);
+			bool hasAk = BindingStorage.HasRecord(storageKey);
+			IReadOnlyList<string> akKeys = null;
+			if (hasAk)
+			{
+				ComboBinding combo = BindingStorage.Get(storageKey);
+				if (combo != null && !combo.IsEmpty && !combo.UseTerrariaKeyStatusOr)
+					akKeys = combo.Keys;
+				else if (combo != null && combo.UseTerrariaKeyStatusOr)
+					hasAk = false;
+			}
+
+			IReadOnlyList<string> keyStatus = keyStatusListFromDraw;
+			if (keyStatus == null || keyStatus.Count == 0)
+				keyStatus = VanillaRebindHelper.GetAssignedKeysForInputMode(actionId, rowMode);
+
+			canonical = ControlsBindingViewResolvePolicy.ResolveCanonicalStorageTokens(
+				hasAk && akKeys != null && akKeys.Count > 0,
+				akKeys,
+				keyStatus,
+				(int)rowMode,
+				actionId);
+
+			// Display-only: never WriteKeyStatus from GenInput/Draw (breaks capture / purple wait).
+			return canonical != null;
+		}
+		private static List<string> PreferComboPanelDisplayLabels(UIElement self, List<string> list)
+		{
+			if (TryBuildAlternateOverPrimaryGenInputList(self, out List<string> glyphPair))
+				return glyphPair;
+
 			if (list == null || list.Count == 0)
 				return list;
+
+			bool isGamePadRow = TryGetRowInputMode(self, out InputMode rowMode)
+				&& ControlsGamePadGlyphDisplayPolicy.IsTargetControlsGamePadMode(rowMode.ToString());
+			string modeName = isGamePadRow ? rowMode.ToString() : null;
 
 			List<string> mapped = null;
 			for (int i = 0; i < list.Count; i++)
@@ -206,6 +290,36 @@ namespace AdvancedKeybinds.Patches
 				string token = list[i];
 				if (string.IsNullOrEmpty(token))
 					continue;
+
+				// Do not rewrite vanilla Buttons names on GamePad rows — GenInput needs them for [g:N].
+				if (isGamePadRow
+					&& !GamePadToken.IsPadToken(token)
+					&& !PhysicalKeyToken.IsFallbackToken(token)
+					&& !token.StartsWith("AKAdv:", StringComparison.Ordinal))
+				{
+					continue;
+				}
+
+				if (isGamePadRow && GamePadToken.IsPadToken(BindingDisplayText.UnwrapOwnershipMarkerForDisplay(token)))
+				{
+					string alias = TryGetUserDisplayAliasOnly(token);
+					ControlsGamePadGlyphDisplayPolicy.DisplayPath path =
+						ControlsGamePadGlyphDisplayPolicy.ResolveDisplay(
+							modeName,
+							BindingDisplayText.UnwrapOwnershipMarkerForDisplay(token),
+							alias,
+							out string resolved);
+					if (path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.GlyphButtonsName
+						|| path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.UserAlias)
+					{
+						if (!string.Equals(resolved, token, StringComparison.Ordinal))
+						{
+							mapped ??= new List<string>(list);
+							mapped[i] = resolved;
+						}
+						continue;
+					}
+				}
 
 				string display = KeyToken.FormatDisplayForToken(token);
 				if (string.IsNullOrEmpty(display) || string.Equals(display, token, StringComparison.Ordinal))
@@ -216,6 +330,80 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			return mapped ?? list;
+		}
+
+		/// <summary>Display-alias only (does not run FormatToken). Name-change panel storage untouched.</summary>
+		private static string TryGetUserDisplayAliasOnly(string token)
+		{
+			string displayToken = BindingDisplayText.UnwrapOwnershipMarkerForDisplay(token);
+			if (string.IsNullOrEmpty(displayToken))
+				return null;
+			string alias = KeyDisplayAliasStorage.GetDisplay(displayToken);
+			return string.IsNullOrEmpty(alias) ? null : alias;
+		}
+
+		/// <summary>
+		/// GamePad Controls (game/menu): feed GenInput two Buttons names so GlyphTagHandler draws icons.
+		/// Keyboard rows: false (unchanged). Does not touch save tokens.
+		/// </summary>
+		private static bool TryBuildAlternateOverPrimaryGenInputList(UIElement self, out List<string> genInputList)
+		{
+			genInputList = null;
+			if (self == null)
+				return false;
+
+			string actionId = ResolveActionId(self, self.GetType(), forClick: false);
+			if (string.IsNullOrEmpty(actionId))
+				return false;
+
+			if (!TryGetRowInputMode(self, out InputMode rowMode))
+				rowMode = InputMode.Keyboard;
+
+			bool isGamePadRow = AlternateGamePadControlsGlyphPolicy.IsGamePadControlsInputModeName(rowMode.ToString());
+			string storageKey = ControlsEditTargetPolicy.ToStorageKey(
+				ControlsEditTargetPolicy.FromTerrariaInputModeOrdinal((int)rowMode),
+				actionId);
+			storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)rowMode, actionId);
+			ComboBinding combo = BindingStorage.Get(storageKey);
+			if (combo == null)
+				return false;
+
+			string primary;
+			string alternate;
+			if (combo.UseTerrariaKeyStatusOr
+				|| GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(storageKey))
+			{
+				if (string.IsNullOrEmpty(combo.Slot1) || string.IsNullOrEmpty(combo.Slot2))
+					return false;
+				primary = combo.Slot2;
+				alternate = combo.Slot1;
+			}
+			else if (combo.HasAlternateGamePad && combo.FilledSlotCount == 1)
+			{
+				primary = combo.Keys[0];
+				alternate = combo.AlternateGamePadToken;
+			}
+			else
+				return false;
+
+			if (!AlternateGamePadControlsGlyphPolicy.ShouldUseGlyphPairGenInput(
+				    isGamePadRow,
+				    hasAlternate: true,
+				    GamePadToken.IsPadToken(primary),
+				    GamePadToken.IsPadToken(alternate)))
+				return false;
+
+			if (!AlternateGamePadControlsGlyphPolicy.TryBuildGenInputPair(
+				    primary,
+				    alternate,
+				    pad => ControlsGamePadGlyphDisplayPolicy.TryResolveGlyphButtonsName(pad, out string b) ? b : null,
+				    GamePadToken.FormatForDisplay,
+				    out AlternateGamePadControlsGlyphPolicy.DisplayEntry left,
+				    out AlternateGamePadControlsGlyphPolicy.DisplayEntry right))
+				return false;
+
+			genInputList = AlternateGamePadControlsGlyphPolicy.ToGenInputList(left, right);
+			return genInputList != null && genInputList.Count == 2;
 		}
 
 		private delegate void orig_KeybindCtor(object self, string bind, InputMode mode, Color color);
@@ -239,8 +427,8 @@ namespace AdvancedKeybinds.Patches
 				RememberRowActionId(self, bind);
 				if (self is UIElement row)
 				{
-					HookRowRightClickClear(row, bind);
-					HookRowMiddleClickReset(row, bind);
+					HookRowRightClickClear(row, bind, mode);
+					HookRowMiddleClickReset(row, bind, mode);
 				}
 			});
 		}
@@ -252,7 +440,7 @@ namespace AdvancedKeybinds.Patches
 		/// sampled once per input tick and consumed on use. Ignored while the left button is
 		/// held (scroll/drag). Does not use UI OnRightClick / 対話・動作.
 		/// </summary>
-		private static void HookRowRightClickClear(UIElement row, string bind)
+		private static void HookRowRightClickClear(UIElement row, string bind, InputMode mode)
 		{
 			row.OnUpdate += _ => {
 				if (ComboPanel.IsOpen)
@@ -283,13 +471,18 @@ namespace AdvancedKeybinds.Patches
 				if (IsPendingUnsetConfirm(bind))
 				{
 					ClearPendingUnsetConfirm();
-					ClearRowToUnset(bind);
+					ClearRowToUnset(bind, mode);
 					return;
 				}
 
 				// Only arm confirm when the row actually has something to clear.
-				if (!BindingStorage.HasAdvancedBindings(bind)
-					&& string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKey(bind)))
+				string storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)mode, bind);
+				bool hadAdvanced = BindingStorage.HasRecord(storageKey)
+					|| BindingStorage.HasAdvancedBindings(storageKey);
+				bool hadVanilla = ControlsEditTargetPolicy.IsGamePadModeOrdinal((int)mode)
+					? !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKeyForInputMode(bind, mode))
+					: !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKey(bind));
+				if (!hadAdvanced && !hadVanilla)
 					return;
 
 				ArmPendingUnsetConfirm(bind);
@@ -300,7 +493,7 @@ namespace AdvancedKeybinds.Patches
 		/// Restore a single row to its profile default on physical middle mouse button (hardware wheel click).
 		/// Uses the device button, not the Middle Mouse action — remapping that action must not break this.
 		/// </summary>
-		private static void HookRowMiddleClickReset(UIElement row, string bind)
+		private static void HookRowMiddleClickReset(UIElement row, string bind, InputMode mode)
 		{
 			row.OnUpdate += _ => {
 				if (ComboPanel.IsOpen || !row.IsMouseHovering)
@@ -313,7 +506,11 @@ namespace AdvancedKeybinds.Patches
 					return;
 
 				ClearPendingUnsetConfirm();
-				ResetRowToDefault(bind);
+				// Prefer live _inputmode so GAME (Keyboard) never restores KeyboardUI (S/Down) defaults.
+				InputMode effective = mode;
+				if (TryGetRowInputMode(row, out InputMode live))
+					effective = live;
+				ResetRowToDefault(bind, effective);
 			};
 		}
 
@@ -348,10 +545,227 @@ namespace AdvancedKeybinds.Patches
 			_prevPhysicalMiddleForRowReset = middleDown;
 
 			// Left-click cancels a pending unset confirm (does not change bindings).
+			// Also arms ComboPanel open: Terraria often fires row OnClick after LMB RELEASE,
+			// so edge/down alone is insufficient. Keep the latch while LMB is held (refresh epoch),
+			// then allow a short post-release window for delayed OnClick.
 			bool leftDown = MouseInputHelper.IsPhysicalLeftDown();
-			if (leftDown && !_prevPhysicalLeftForUnsetConfirmCancel)
+			_physicalLeftOpenJustPressed = leftDown && !_prevPhysicalLeftForUnsetConfirmCancel;
+			if (_physicalLeftOpenJustPressed)
 				ClearPendingUnsetConfirm();
+
+			if (leftDown)
+			{
+				_physicalLeftOpenArmed = true;
+				_physicalLeftOpenArmedEpoch = FnaGamePadProvider.InputTickEpoch;
+			}
+			else if (_physicalLeftOpenArmed
+				&& _physicalLeftOpenArmedEpoch != int.MinValue
+				&& FnaGamePadProvider.InputTickEpoch - _physicalLeftOpenArmedEpoch > PhysicalLeftOpenArmMaxAgeEpochs)
+			{
+				_physicalLeftOpenArmed = false;
+				_physicalLeftOpenArmedEpoch = int.MinValue;
+			}
+
 			_prevPhysicalLeftForUnsetConfirmCancel = leftDown;
+		}
+
+		private static void ConsumePhysicalLeftOpenArm()
+		{
+			_physicalLeftOpenArmed = false;
+			_physicalLeftOpenArmedEpoch = int.MinValue;
+			_physicalLeftOpenJustPressed = false;
+		}
+
+		/// <summary>
+		/// Decide whether a keybind-row OnClick may open ComboPanel, and with which input source.
+		/// Order: Close gate → Save epoch gate → suppress if Pad:A already direct-opened →
+		/// physical mouse → UI confirm (Pad:A) edge → matching Pending (Pad:A gesture only) →
+		/// refuse IsDown-only / unmatched clicks. Never treats Item Use as UI confirm.
+		/// </summary>
+		internal static bool TryResolveComboPanelOpenIntent(
+			string clickActionId,
+			out bool openedByGamePad,
+			out string source,
+			out string blockReason,
+			out string gamePadOpenToken)
+		{
+			openedByGamePad = false;
+			source = "Other";
+			blockReason = null;
+			gamePadOpenToken = null;
+
+			string confirmTok = AkUiPadNavigationPolicy.ConfirmToken;
+			bool confirmEdge = FnaGamePadProvider.WasJustPressed(confirmTok)
+				&& AkUiPadNavigationPolicy.ShouldAcceptConfirmEdge(wasJustPressed: true, isDownOnly: false);
+			bool confirmDown = FnaGamePadProvider.IsDown(confirmTok);
+			bool physicalLeftDown = MouseInputHelper.IsPhysicalLeftDown();
+			bool physicalLeftEdge = _physicalLeftOpenJustPressed;
+			bool physicalLeftArmed = _physicalLeftOpenArmed;
+
+			if (ComboPanelCloseInputConsumeGate.ShouldBlockParentKeybindRowOpen())
+			{
+				source = confirmDown || confirmEdge ? (confirmEdge ? "PadConfirmEdge" : "PadConfirmHeld") : "Other";
+				blockReason = "CloseInputConsumeGate";
+				return false;
+			}
+
+			if (ComboPanel.ShouldBlockOpenAfterSaveClose())
+			{
+				source = confirmEdge ? "PadConfirmEdge" : (confirmDown ? "PadConfirmHeld" : (physicalLeftDown || physicalLeftArmed ? "PhysicalMouse" : "Other"));
+				blockReason = "SaveCloseEpochGate";
+				return false;
+			}
+
+			// Pad:A already opened this hold via PollArm direct path — ignore delayed ItemUse OnClick.
+			if (PendingGamePadRowConfirm.ShouldSuppressOnClickOpen)
+			{
+				source = confirmEdge || confirmDown ? "PadConfirmEdge" : "Other";
+				blockReason = "AlreadyDirectOpened";
+				return false;
+			}
+
+			// Physical mouse: edge, currently down, or armed latch (OnClick often after RELEASE).
+			if ((physicalLeftEdge || physicalLeftDown || physicalLeftArmed)
+				&& !confirmEdge
+				&& !confirmDown)
+			{
+				source = "PhysicalMouse";
+				openedByGamePad = false;
+				ConsumePhysicalLeftOpenArm();
+				return true;
+			}
+
+			if (confirmEdge)
+			{
+				source = "PadConfirmEdge";
+				openedByGamePad = true;
+				gamePadOpenToken = confirmTok;
+				return true;
+			}
+
+			if (PendingGamePadRowConfirm.TryConsumeMatching(
+				clickActionId,
+				out string pendingSource,
+				out string pendingReject,
+				out string pendingToken))
+			{
+				source = pendingSource;
+				openedByGamePad = true;
+				gamePadOpenToken = pendingToken ?? confirmTok;
+				return true;
+			}
+
+			if (!string.IsNullOrEmpty(pendingReject))
+			{
+				source = "PadConfirmPending";
+				blockReason = pendingReject;
+				return false;
+			}
+
+			if (confirmDown)
+			{
+				source = "PadConfirmHeld";
+				blockReason = "PadConfirmHeldNotEdge";
+				return false;
+			}
+
+			source = "Other";
+			blockReason = "NoTrustedInputSource";
+			return false;
+		}
+
+		/// <summary>
+		/// Opens ComboPanel from Pad:A PollArm without synthesizing MouseLeft / OnClick.
+		/// </summary>
+		internal static bool TryOpenComboPanelFromPadConfirm(
+			UIElement row,
+			string actionId,
+			string openToken,
+			out string rejectReason)
+		{
+			rejectReason = null;
+			if (row == null || string.IsNullOrEmpty(actionId))
+			{
+				rejectReason = "NoRowOrAction";
+				return false;
+			}
+
+			if (ComboPanel.IsOpen)
+			{
+				rejectReason = "ComboPanelAlreadyOpen";
+				return false;
+			}
+
+			if (ComboPanelCloseInputConsumeGate.ShouldBlockParentKeybindRowOpen())
+			{
+				rejectReason = "CloseInputConsumeGate";
+				return false;
+			}
+
+			if (ComboPanel.ShouldBlockOpenAfterSaveClose())
+			{
+				rejectReason = "SaveCloseEpochGate";
+				return false;
+			}
+
+			if (!TryGetRowInputMode(row, out InputMode rowMode))
+				rowMode = InputMode.Keyboard;
+
+			string token = string.IsNullOrEmpty(openToken)
+				? AkUiPadNavigationPolicy.ConfirmToken
+				: openToken;
+			GamePadControlTabProbe.NoteComboPanelOpenedFromRow(actionId, rowMode);
+			ControlsSectionHeaderSupport.TryResolveRowSectionSemantic(row, out string sectionSemantic);
+			ComboPanel.Open(
+				actionId,
+				GetRowLabel(row, actionId),
+				GetRowAccent(row),
+				openedByGamePad: true,
+				gamePadOpenToken: token,
+				openSource: ComboPanelOpenSource.GamePad,
+				editInputMode: rowMode,
+				sectionSemantic: sectionSemantic);
+			return true;
+		}
+
+		/// <summary>
+		/// Maps trusted open-intent labels to a session-fixed <see cref="ComboPanelOpenSource"/>.
+		/// Does not poll live InputMode — only the source string from this open attempt.
+		/// </summary>
+		private static ComboPanelOpenSource MapComboPanelOpenSource(string openSource, bool openedByGamePad)
+		{
+			if (openedByGamePad
+				|| string.Equals(openSource, "PadConfirmEdge", StringComparison.Ordinal)
+				|| string.Equals(openSource, "PadConfirmPending", StringComparison.Ordinal)
+				|| string.Equals(openSource, "DirectPadAOpen", StringComparison.Ordinal)
+				|| string.Equals(openSource, "PadAEdge", StringComparison.Ordinal)
+				|| string.Equals(openSource, "PadAPending", StringComparison.Ordinal))
+				return ComboPanelOpenSource.GamePad;
+
+			if (string.Equals(openSource, "PhysicalMouse", StringComparison.Ordinal))
+				return ComboPanelOpenSource.Mouse;
+
+			if (string.Equals(openSource, "Keyboard", StringComparison.Ordinal))
+				return ComboPanelOpenSource.Keyboard;
+
+			// Non-GamePad trusted opens today are physical mouse only.
+			return ComboPanelOpenSource.Mouse;
+		}
+
+		/// <summary>Resolve action id for a list row element (PendingGamePadRowConfirm arm).</summary>
+		internal static string TryResolveActionIdFromRowElement(UIElement row)
+		{
+			if (row == null)
+				return null;
+			return ResolveActionId(row, row.GetType(), forClick: false);
+		}
+
+		/// <summary>True when the row's InputMode is XBoxGamepad / XBoxGamepadUI (controller Controls pages).</summary>
+		internal static bool IsGamePadControlsListItem(UIElement row)
+		{
+			if (row == null || !TryGetRowInputMode(row, out InputMode mode))
+				return false;
+			return AlternateGamePadControlsGlyphPolicy.IsGamePadControlsInputModeName(mode.ToString());
 		}
 
 		private static bool IsPendingUnsetConfirm(string actionId)
@@ -408,59 +822,196 @@ namespace AdvancedKeybinds.Patches
 			return true;
 		}
 
-		private static void ClearRowToUnset(string actionId)
+		private static void ClearRowToUnset(string actionId, InputMode mode)
 		{
 			if (string.IsNullOrEmpty(actionId))
 				return;
 
-			bool hadAdvanced = BindingStorage.HasAdvancedBindings(actionId);
-			bool hadVanilla = !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKey(actionId));
+			ControlsEditTargetPolicy.DeviceKind kind =
+				ControlsEditTargetPolicy.FromTerrariaInputModeOrdinal((int)mode);
+			string storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)mode, actionId);
+			bool gamePad = kind == ControlsEditTargetPolicy.DeviceKind.GamePad;
+			bool twoKeyTerrariaOr = GamePadTwoKeyTerrariaOrPolicy.IsTarget((int)mode, actionId);
+			bool modKeybind = ControlsGameUiSeparationPolicy.IsModKeybindActionId(actionId);
+
+			bool hadAdvanced = BindingStorage.HasRecord(storageKey)
+				|| BindingStorage.HasAdvancedBindings(storageKey);
+			bool hadVanilla = gamePad
+				? !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKeyForInputMode(actionId, mode))
+				: !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKeyForInputMode(actionId, mode));
 			if (!hadAdvanced && !hadVanilla)
 				return;
 
-			ControlsBindingUndo.Snapshot undo = ControlsBindingUndo.Capture(actionId);
+			ControlsBindingUndo.Snapshot undo = ControlsBindingUndo.Capture(storageKey);
 
 			if (OpenKeybindMenuDefaults.IsOpenKeybindMenuAction(actionId))
 				OpenKeybindMenuDefaults.MarkCustomized();
 			if (OpenKeybindMenuDefaults.IsHoldTierHudHotkeyAction(actionId))
 				OpenKeybindMenuDefaults.MarkHoldTierHudHotkeyCustomized();
 
-			BindingStorage.ClearBindings(actionId, "row-right-click-unset");
-			VanillaRebindHelper.ClearVanillaBinding(actionId, "row-right-click-unset");
+			BindingStorage.ClearBindings(storageKey, "row-right-click-unset");
+			if (twoKeyTerrariaOr)
+			{
+				// ClearBindings already persisted empty + synced this InputMode;
+				// Game→UI mirror also clears Menu Combos/KeyStatus when editing Game.
+			}
+			else if (modKeybind && gamePad)
+			{
+				VanillaRebindHelper.ClearVanillaBindingForInputModes(
+					actionId,
+					"row-right-click-unset-mod-gamepad",
+					InputMode.XBoxGamepad,
+					InputMode.XBoxGamepadUI);
+			}
+			else if (modKeybind)
+			{
+				VanillaRebindHelper.ClearVanillaBinding(actionId, "row-right-click-unset-mod");
+			}
+			else
+			{
+				// Vanilla GAME/UI: clear the edited InputMode.
+				VanillaRebindHelper.ClearVanillaBindingForInputModes(
+					actionId,
+					"row-right-click-unset-mode",
+					mode);
+				// Game→UI one-way: also clear Menu KeyStatus when editing Game Controls.
+				if (ControlsGameUiSeparationPolicy.TryGetGameToUiMirrorInputModeOrdinal(
+					    storageKey, out int uiModeOrdinal))
+				{
+					VanillaRebindHelper.ClearVanillaBindingForInputModes(
+						actionId,
+						"row-right-click-unset-game-to-ui",
+						(InputMode)uiModeOrdinal);
+					BindingStorage.TryPersistPlayerInputProfilesAfterGamePadEdit(
+						"row-right-click-unset-game-to-ui");
+				}
+			}
 			ControlsBindingUndo.RememberIfChanged(undo, "row-right-click-unset");
 			SoundEngine.PlaySound(SoundID.MenuClose);
-			if (AkDiag.Enabled) AkDiag.Log($"Row right-click cleared binding to unset for '{actionId}'.");
+			if (AkDiag.Enabled) AkDiag.Log($"Row right-click cleared binding to unset for '{storageKey}'.");
 		}
 
-		private static void ResetRowToDefault(string actionId)
+		internal static bool TryExecuteRowResetToDefault(string actionId)
+		{
+			if (string.IsNullOrEmpty(actionId) || ComboPanel.IsOpen)
+				return false;
+			ResetRowToDefault(actionId, InputMode.Keyboard);
+			return true;
+		}
+
+		private static void ResetRowToDefault(string actionId, InputMode mode)
 		{
 			if (string.IsNullOrEmpty(actionId))
 				return;
 
-			ControlsBindingUndo.Snapshot undo = ControlsBindingUndo.Capture(actionId);
+			ControlsEditTargetPolicy.DeviceKind kind =
+				ControlsEditTargetPolicy.FromTerrariaInputModeOrdinal((int)mode);
+			string storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)mode, actionId);
+			bool gamePad = kind == ControlsEditTargetPolicy.DeviceKind.GamePad;
+			bool twoKeyTerrariaOr = GamePadTwoKeyTerrariaOrPolicy.IsTarget((int)mode, actionId);
+			bool modKeybind = ControlsGameUiSeparationPolicy.IsModKeybindActionId(actionId);
+			ControlsRowResetDefaultAction resetAction = ControlsRowResetDefaultPolicy.Resolve(
+				modKeybind,
+				twoKeyTerrariaOr);
+
+			ControlsBindingUndo.Snapshot undo = ControlsBindingUndo.Capture(storageKey);
 
 			OpenKeybindMenuDefaults.MarkCustomizedIfTracked(actionId);
 
-			BindingStorage.ClearBindings(actionId, "row-reset-default");
-
-			if (OpenKeybindMenuDefaults.TryGetRegisteredDefaultKey(actionId, out string registeredDefault))
+			if (resetAction == ControlsRowResetDefaultAction.ClearTwoKeyTerrariaOrRecord)
 			{
-				VanillaRebindHelper.AssignVanillaBinding(actionId, registeredDefault, "row-reset-default-open-menu");
-				if (AkDiag.Enabled) AkDiag.Log($"Row middle-click restored default binding for '{actionId}' via open-menu default '{registeredDefault}'.");
+				// Exact (Gamepad, GAME, Up|Down|Left|Right): Reset → Slot1=LS direction, Slot2 unset,
+				// persist AK record. Other TwoKey rows: explicit empty Persist (product unset).
+				if (GamePadTwoKeyTerrariaOrPolicy.TryGetGameMovementLeftStickDefault(
+					    (int)mode, actionId, out string lsDefault))
+				{
+					var restored = new ComboBinding {
+						Slot1 = lsDefault,
+						Slot2 = null,
+						UseTerrariaKeyStatusOr = true,
+						PersistAsEmptyRecord = false
+					};
+					BindingStorage.TryCommitGamePadTwoKeyTerrariaOr(
+						storageKey, restored, "row-reset-default-two-key-game-move-ls");
+					ControlsBindingUndo.RememberIfChanged(undo, "row-reset-default-two-key-game-move-ls");
+				}
+				else
+				{
+					BindingStorage.ClearBindings(storageKey, "row-reset-default-two-key");
+					ControlsBindingUndo.RememberIfChanged(undo, "row-reset-default-two-key");
+				}
+				SoundEngine.PlaySound(SoundID.MenuOpen);
+				if (AkDiag.Enabled) AkDiag.Log($"Row reset two-key Terraria-OR for '{storageKey}'.");
+				return;
 			}
-			else if (ModKeybindReflection.TryGetRegisteredDefaultBinding(actionId, out string modDefault))
+
+			// ClearBindings syncs KeyStatus to empty for the storage mode. If the profile is not
+			// writable, skip Clear+Restore so we do not leave Jump/etc permanently unset.
+			if (resetAction != ControlsRowResetDefaultAction.RestoreModDefault
+				&& !VanillaRebindHelper.IsProfileReady())
 			{
-				VanillaRebindHelper.AssignVanillaBinding(actionId, modDefault, "row-reset-default-modkeybind");
-				if (AkDiag.Enabled) AkDiag.Log($"Row middle-click restored default binding for '{actionId}' via ModKeybind default '{modDefault}'.");
+				if (AkDiag.Enabled) AkDiag.Log($"Row reset aborted: profile not ready for '{storageKey}'.");
+				return;
+			}
+
+			BindingStorage.ClearBindings(storageKey, "row-reset-default");
+
+			if (resetAction == ControlsRowResetDefaultAction.RestoreModDefault)
+			{
+				if (gamePad)
+				{
+					VanillaRebindHelper.ClearVanillaBindingForInputModes(
+						actionId,
+						"row-reset-default-mod-gamepad",
+						InputMode.XBoxGamepad,
+						InputMode.XBoxGamepadUI);
+				}
+				else if (OpenKeybindMenuDefaults.TryGetRegisteredDefaultKey(actionId, out string registeredDefault))
+					VanillaRebindHelper.AssignVanillaBinding(actionId, registeredDefault, "row-reset-default-open-menu");
+				else if (ModKeybindReflection.TryGetRegisteredDefaultBinding(actionId, out string modDefault))
+					VanillaRebindHelper.AssignVanillaBinding(actionId, modDefault, "row-reset-default-modkeybind");
+				else
+					VanillaRebindHelper.ResetVanillaBindingToDefault(actionId, "row-reset-default-original-profiles");
 			}
 			else
 			{
-				VanillaRebindHelper.ResetVanillaBindingToDefault(actionId, "row-reset-default-original-profiles");
-				if (AkDiag.Enabled) AkDiag.Log($"Row middle-click restored default binding for '{actionId}' via OriginalProfiles.");
+				// Vanilla Keyboard / KeyboardUI / GamePad / GamePadUI:
+				// exact OriginalProfiles[edited mode][action] (OfficialDefaultKeyRestoreLogic).
+				// Game→UI one-way: after Game restore, copy that KeyStatus list to Menu
+				// (do not restore Menu from its own OriginalProfiles — those often differ / empty).
+				VanillaRebindHelper.ResetVanillaBindingToDefaultForInputModes(
+					actionId,
+					"row-reset-default-original-mode",
+					mode);
+				BindingStorage.DiscardEmptyPersistAfterVanillaDefaultRestore(storageKey);
+
+				if (ControlsGameUiSeparationPolicy.TryGetGameToUiMirrorInputModeOrdinal(
+					    storageKey, out int uiModeOrdinal)
+					&& ControlsGameUiSeparationPolicy.TryGetGameToUiMirrorStorageKey(
+					    storageKey, out string uiStorageKey))
+				{
+					VanillaRebindHelper.CopyAssignedKeysBetweenInputModes(
+						actionId,
+						mode,
+						(InputMode)uiModeOrdinal,
+						"row-reset-default-game-to-ui-copy");
+					BindingStorage.DiscardEmptyPersistAfterVanillaDefaultRestore(uiStorageKey);
+					BindingStorage.SaveBindingsFileAfterMirrorDefaultRestore();
+					BindingStorage.TryPersistPlayerInputProfilesAfterGamePadEdit(
+						"row-reset-default-game-to-ui");
+				}
+				else
+				{
+					BindingStorage.SaveBindingsFileAfterMirrorDefaultRestore();
+					if (gamePad)
+						BindingStorage.TryPersistPlayerInputProfilesAfterGamePadEdit(
+							"row-reset-default");
+				}
 			}
 
 			ControlsBindingUndo.RememberIfChanged(undo, "row-reset-default");
 			SoundEngine.PlaySound(SoundID.MenuOpen);
+			if (AkDiag.Enabled) AkDiag.Log($"Row reset storage='{storageKey}' mode={mode} action={resetAction}.");
 		}
 
 		/// <summary>
@@ -487,7 +1038,7 @@ namespace AdvancedKeybinds.Patches
 				if (panel != null && !string.IsNullOrEmpty(bind))
 				{
 					RegisterRowActionId(panel, bind);
-					HookResetButton(panel, bind);
+					HookResetButton(panel, bind, mode);
 				}
 
 				return panel;
@@ -500,7 +1051,7 @@ namespace AdvancedKeybinds.Patches
 		/// row itself (those open the combo panel); anything else in the row is the Reset button, so we clear
 		/// the advanced binding for that action to complete the reset.
 		/// </summary>
-		private static void HookResetButton(UIElement panel, string bind)
+		private static void HookResetButton(UIElement panel, string bind, InputMode mode)
 		{
 			panel.OnLeftClick += (evt, listeningElement) => {
 				if (ComboPanel.IsOpen)
@@ -509,7 +1060,7 @@ namespace AdvancedKeybinds.Patches
 					return;
 
 				// Full row reset (same as middle-click), not only clearing advanced storage.
-				ResetRowToDefault(bind);
+				ResetRowToDefault(bind, mode);
 			};
 
 			// Middle-click anywhere on the CreatePanel row (key slot or Reset label) restores default.
@@ -523,7 +1074,9 @@ namespace AdvancedKeybinds.Patches
 				if (!TryConsumePhysicalMiddleJustPressedForRowReset())
 					return;
 
-				ResetRowToDefault(bind);
+				ClearPendingUnsetConfirm();
+				// CreatePanel passes the list's InputMode (Keyboard vs KeyboardUI); keep it.
+				ResetRowToDefault(bind, mode);
 			};
 		}
 
@@ -532,12 +1085,20 @@ namespace AdvancedKeybinds.Patches
 		{
 			for (UIElement e = target; e != null; e = e.Parent)
 			{
-				string name = e.GetType().Name;
-				if (name.Contains("UIKeybindingListItem") || name.Contains("UIKeybindingToggleListItem"))
+				if (e is UIKeybindingListItem or UIKeybindingToggleListItem)
 					return true;
 			}
 
 			return false;
+		}
+
+		/// <summary>
+		/// Only real keybind rows open ComboPanel. Headers, SimpleListItem (Undo/Profile), and
+		/// default-reset rows must not read <c>UIKeybindingListItem._keybind</c>.
+		/// </summary>
+		private static bool IsComboPanelEligibleKeybindRow(object self)
+		{
+			return self is UIKeybindingListItem or UIKeybindingToggleListItem;
 		}
 
 		private static void HookListItem(Type itemType)
@@ -555,8 +1116,27 @@ namespace AdvancedKeybinds.Patches
 					if (ComboPanel.IsOpen)
 					{
 						if (AkDiag.Enabled) AkDiag.Log("Keybinding row click swallowed because combo panel is already open.");
+						GamePadProbeSystem.LogKeybindRowOpenEarlyReturn("ComboPanelAlreadyOpen");
 						return;
 					}
+
+					// Never treat SimpleListItem / HeaderElement / unknown as ListItem rows.
+					if (!IsComboPanelEligibleKeybindRow(self))
+					{
+						string runtimeName = self?.GetType().Name ?? "null";
+						if (AkDiag.Enabled)
+							AkDiag.Log($"Keybinding row click ignored: ineligible type='{runtimeName}' (hooked as '{itemType.Name}').");
+						GamePadProbeSystem.LogKeybindRowOpenEarlyReturn("IneligibleRowType:" + runtimeName);
+						return;
+					}
+
+					bool mousePhysical = MouseInputHelper.IsPhysicalLeftDown() || _physicalLeftOpenArmed || _physicalLeftOpenJustPressed;
+					GamePadProbeSystem.LogKeybindRowClickHookEnter(
+						itemType.Name,
+						mousePhysical,
+						FnaGamePadProvider.WasJustPressed(GamePadToken.A),
+						UILinkPointNavigator.CurrentPoint,
+						ControlsGamepadAutoScrollPatches.IsManualScrollActive);
 
 						string actionId = ResolveActionId(self, itemType, forClick: true);
 						if (string.IsNullOrEmpty(actionId))
@@ -570,16 +1150,77 @@ namespace AdvancedKeybinds.Patches
 							if (string.IsNullOrEmpty(actionId))
 							{
 								if (AkDiag.Enabled) AkDiag.Log("Probe failed: ListeningTrigger was empty. Ignoring click (panel not opened).");
+								GamePadProbeSystem.LogKeybindRowActionResolve(success: false, action: null, reason: "Unresolved");
+								GamePadProbeSystem.LogKeybindRowOpenEarlyReturn("ActionIdUnresolved");
 								return;
 							}
 
 							if (AkDiag.Enabled) AkDiag.Log($"Probe resolved action='{actionId}' via vanilla ListeningTrigger.");
 						}
 
+						GamePadProbeSystem.LogKeybindRowActionResolve(success: true, action: actionId, reason: null);
+						GamePadProbeSystem.LogKeybindRowOpenResolveEnter(actionId);
+
+						if (!TryResolveComboPanelOpenIntent(
+							actionId,
+							out bool openedByGamePad,
+							out string openSource,
+							out string blockReason,
+							out string resolvedOpenToken))
+						{
+							#if AK_DIAGNOSTICS
+							PadConfirmAfterComboSaveDiagSystem.ObserveOpenIntent(
+								actionId, accepted: false, openSource, blockReason, openedByGamePad: false);
+							#endif
+							GamePadProbeSystem.LogPanelOpenAttempt(
+								actionId,
+								openSource,
+								FnaGamePadProvider.WasJustPressed(GamePadToken.A),
+								FnaGamePadProvider.IsDown(GamePadToken.A),
+								ComboPanelCloseInputConsumeGate.ShouldBlockParentKeybindRowOpen(),
+								FnaGamePadProvider.InputTickEpoch);
+							GamePadProbeSystem.LogPanelOpenBlocked(actionId, blockReason ?? "Unknown");
+							GamePadProbeSystem.LogKeybindRowOpenEarlyReturn(blockReason ?? "OpenIntentRejected");
+							if (AkDiag.Enabled)
+								AkDiag.Log($"ComboPanel open blocked action='{actionId}' source={openSource} reason={blockReason}");
+							return;
+						}
+
+						#if AK_DIAGNOSTICS
+						PadConfirmAfterComboSaveDiagSystem.ObserveOpenIntent(
+							actionId, accepted: true, openSource, blockReason: null, openedByGamePad);
+						#endif
+
+						GamePadProbeSystem.LogPanelOpenAttempt(
+							actionId,
+							openSource,
+							FnaGamePadProvider.WasJustPressed(GamePadToken.A),
+							FnaGamePadProvider.IsDown(GamePadToken.A),
+							ComboPanelCloseInputConsumeGate.ShouldBlockParentKeybindRowOpen(),
+							FnaGamePadProvider.InputTickEpoch);
+
 						// Open our combo panel instead of starting a vanilla listen. This is the key change
 						// that eliminates the old input-lock / stuck-listen problems entirely.
-						if (AkDiag.Enabled) AkDiag.Log($"Opening combo panel for action='{actionId}'.");
-						ComboPanel.Open(actionId, GetRowLabel(self as UIElement, actionId), GetRowAccent(self));
+						if (AkDiag.Enabled) AkDiag.Log($"Opening combo panel for action='{actionId}' source={openSource}.");
+						string gamePadOpenToken = openedByGamePad
+							? (resolvedOpenToken ?? AkUiPadNavigationPolicy.ConfirmToken)
+							: null;
+						ComboPanelOpenSource panelOpenSource = MapComboPanelOpenSource(openSource, openedByGamePad);
+
+						if (!TryGetRowInputMode(self as UIElement, out InputMode rowMode))
+							rowMode = InputMode.Keyboard;
+						GamePadControlTabProbe.NoteComboPanelOpenedFromRow(actionId, rowMode);
+						ControlsSectionHeaderSupport.TryResolveRowSectionSemantic(
+							self as UIElement, out string sectionSemantic);
+						ComboPanel.Open(
+							actionId,
+							GetRowLabel(self as UIElement, actionId),
+							GetRowAccent(self),
+							openedByGamePad,
+							gamePadOpenToken,
+							panelOpenSource,
+							rowMode,
+							sectionSemantic);
 				});
 			}
 
@@ -615,13 +1256,34 @@ namespace AdvancedKeybinds.Patches
 			if (string.IsNullOrEmpty(actionId))
 				return false;
 
-			ComboBinding combo = BindingStorage.Get(actionId);
+			if (!TryGetRowInputMode(self, out InputMode rowMode))
+				rowMode = InputMode.Keyboard;
+			string storageKey = ControlsEditTargetPolicy.ToStorageKey(
+				ControlsEditTargetPolicy.FromTerrariaInputModeOrdinal((int)rowMode),
+				actionId);
+			storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)rowMode, actionId);
+
+			ComboBinding combo = BindingStorage.Get(storageKey);
 			if (combo == null)
+				return false;
+
+			// Terraria-OR two-key: KeyStatus owns display/fire — no advanced overlay.
+			if (combo.UseTerrariaKeyStatusOr
+				|| GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(storageKey))
 				return false;
 
 			// Plain single-key taps use vanilla's label path. GenInput already remaps raw tokens
 			// (VK:/SC:/Oem*) to the same glyphs as the combo-panel slots, so no overlay is needed.
 			if (combo.IsPlainSingleTap)
+				return false;
+			// Must use OrPair (not Single): Alternate 2-key GamePad rows need the overlay so
+			// Menu Controls (XBoxGamepadUI) get [g:] icons like Game Controls — Single would
+			// skip overlay and GenInput can fall back to "R2/Pad ←" text.
+			if (ControlsEditTargetPolicy.IsGamePadStorageKey(storageKey)
+				&& ControlsEditTargetPolicy.IsVanillaOwnedGamePadOrPair(
+					combo.Hold,
+					combo.Keys,
+					combo.AlternateGamePadToken))
 				return false;
 
 			return true;
@@ -637,11 +1299,18 @@ namespace AdvancedKeybinds.Patches
 			BindingMutationDiag.ObserveControlsRow(actionId);
 #endif
 
-			ComboBinding combo = BindingStorage.Get(actionId);
+			if (!TryGetRowInputMode(self, out InputMode rowMode))
+				rowMode = InputMode.Keyboard;
+			string storageKey = ControlsEditTargetPolicy.ToStorageKey(
+				ControlsEditTargetPolicy.FromTerrariaInputModeOrdinal((int)rowMode),
+				actionId);
+			storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)rowMode, actionId);
+
+			ComboBinding combo = BindingStorage.Get(storageKey);
 			if (combo == null)
 				return;
 
-			string fullLabel = BuildComboLabel(combo);
+			string fullLabel = BuildComboLabelForControlsRow(combo, rowMode);
 			string comboLabel = fullLabel;
 			if (string.IsNullOrEmpty(fullLabel))
 				fullLabel = Lang.menu[195].Value;
@@ -1130,6 +1799,118 @@ namespace AdvancedKeybinds.Patches
 			=> BindingDisplayResolver.FormatComboDisplayLabel(combo);
 
 		/// <summary>
+		/// Overlay labels: on GamePad Controls rows, prefer GlyphTagHandler Buttons names
+		/// (including stick directions). Keyboard / ComboPanel keep plain FormatComboDisplayLabel.
+		/// </summary>
+		private static string BuildComboLabelForControlsRow(ComboBinding combo, InputMode rowMode)
+		{
+			if (combo == null || combo.IsEmpty)
+				return string.Empty;
+
+			string modeName = rowMode.ToString();
+			if (!ControlsGamePadGlyphDisplayPolicy.IsTargetControlsGamePadMode(modeName))
+				return BindingDisplayResolver.FormatComboDisplayLabel(combo);
+
+			if (combo.HasAlternateGamePad
+				&& combo.FilledSlotCount == 1
+				&& GamePadToken.IsPadToken(combo.Keys[0])
+				&& GamePadToken.IsPadToken(combo.AlternateGamePadToken)
+				&& AlternateGamePadControlsGlyphPolicy.TryBuildGenInputPair(
+					combo.Keys[0],
+					combo.AlternateGamePadToken,
+					pad => ControlsGamePadGlyphDisplayPolicy.TryResolveGlyphButtonsName(pad, out string b) ? b : null,
+					GamePadToken.FormatForDisplay,
+					out AlternateGamePadControlsGlyphPolicy.DisplayEntry left,
+					out AlternateGamePadControlsGlyphPolicy.DisplayEntry right))
+			{
+				string joined = AlternateGamePadControlsGlyphPolicy.JoinForChatOverlay(
+					left,
+					right,
+					buttonsName => GlyphTagHandler.GenerateTag(buttonsName));
+				return ApplyControlsHoldPrefix(joined, combo);
+			}
+
+			if (TryBuildControlsGamePadGlyphJoinedLabel(combo, modeName, out string glyphJoined))
+				return ApplyControlsHoldPrefix(glyphJoined, combo);
+
+			return BindingDisplayResolver.FormatComboDisplayLabel(combo);
+		}
+
+		private static string ApplyControlsHoldPrefix(string joined, ComboBinding combo)
+		{
+			string whileHeld = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewWhileHeld");
+			string onRelease = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewOnRelease");
+			return BindingDisplayText.ApplyHoldPrefix(
+				joined,
+				combo.Hold,
+				combo.HoldOnRelease,
+				combo.FilledSlotCount,
+				whileHeld,
+				onRelease);
+		}
+
+		/// <summary>
+		/// Builds overlay text for GamePad Controls: glyph tags when Buttons names exist; aliases/text otherwise.
+		/// Returns false when nothing benefited from glyph resolution (caller uses plain FormatComboDisplayLabel).
+		/// </summary>
+		private static bool TryBuildControlsGamePadGlyphJoinedLabel(
+			ComboBinding combo,
+			string modeName,
+			out string joined)
+		{
+			joined = null;
+			if (combo == null || combo.IsEmpty)
+				return false;
+
+			bool anyGlyph = false;
+			var parts = new List<string>(4);
+
+			if (combo.HasAlternateGamePad && combo.FilledSlotCount == 1)
+			{
+				AppendToken(combo.AlternateGamePadToken, null);
+				AppendToken(combo.Keys[0], combo.GetSlotDisplay(1));
+				if (!anyGlyph || parts.Count == 0)
+					return false;
+				joined = string.Join(AlternateGamePadControlsGlyphPolicy.VanillaGenInputSeparator, parts);
+				return true;
+			}
+
+			AppendToken(combo.Slot1, combo.Slot1Display);
+			AppendToken(combo.Slot2, combo.Slot2Display);
+			AppendToken(combo.Slot3, combo.Slot3Display);
+			if (!anyGlyph || parts.Count == 0)
+				return false;
+			joined = string.Join("+", parts);
+			return true;
+
+			void AppendToken(string token, string slotDisplayOverride)
+			{
+				if (string.IsNullOrEmpty(token))
+					return;
+				string raw = BindingDisplayText.UnwrapOwnershipMarkerForDisplay(token);
+				if (!GamePadToken.IsPadToken(raw))
+				{
+					parts.Add(KeyToken.FormatDisplayForToken(token, slotDisplayOverride));
+					return;
+				}
+
+				string alias = TryGetUserDisplayAliasOnly(raw);
+				if (string.IsNullOrEmpty(alias) && !string.IsNullOrWhiteSpace(slotDisplayOverride))
+					alias = slotDisplayOverride.Trim();
+
+				ControlsGamePadGlyphDisplayPolicy.DisplayPath path =
+					ControlsGamePadGlyphDisplayPolicy.ResolveDisplay(modeName, raw, alias, out string value);
+				if (path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.GlyphButtonsName)
+				{
+					anyGlyph = true;
+					parts.Add(GlyphTagHandler.GenerateTag(value));
+				}
+				else
+					parts.Add(value);
+			}
+		}
+
+		/// <summary>
 		/// Reads the row's private InputMode so gamepad Y offset matches vanilla DrawSelf.
 		/// </summary>
 		private static bool TryGetRowInputMode(UIElement self, out InputMode mode)
@@ -1251,8 +2032,9 @@ namespace AdvancedKeybinds.Patches
 		/// Resolves the input-action name (e.g. "QuickHeal" or "ModName/MyBind") stored on a keybinding row.
 		/// Priority:
 		///   1. Row instance registered when UIManageControls.CreatePanel built the row.
-		///   2. Read the known private string field by name (_keybind / _bind / ...).
-		///   3. Scan string fields/properties that look like vanilla or mod action ids.
+		///   2. Read the known private string field by name (_keybind / _bind / ...), only when
+		///      <see cref="KeybindRowReflectionSafety.CanReadInstanceField"/> passes.
+		///   3. Scan string fields/properties that look like vanilla or mod action ids (same guard).
 		/// </summary>
 		private static string ResolveActionId(object self, Type itemType, bool forClick)
 		{
@@ -1265,17 +2047,23 @@ namespace AdvancedKeybinds.Patches
 			Type type = self.GetType();
 			const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
 
+			// Headers / SimpleListItem / unknown rows never expose UIKeybindingListItem._keybind.
+			if (!IsComboPanelEligibleKeybindRow(self))
+				return null;
+
 			if (!forClick && _bindReflectionFailedTypes.Contains(type))
 				return null;
 
 			// Fast path: reuse the field we resolved earlier for this row type.
 			if (_bindFieldCache.TryGetValue(type, out FieldInfo cached)
-				&& cached != null
-				&& cached.GetValue(self) is string cachedValue
-				&& !string.IsNullOrEmpty(cachedValue))
+				&& KeybindRowReflectionSafety.TryReadStringField(cached, self, out string cachedValue))
 			{
 				return cachedValue;
 			}
+
+			// Drop a stale cache entry that pointed at an incompatible FieldInfo.
+			if (cached != null && !KeybindRowReflectionSafety.CanReadInstanceField(cached, self))
+				_bindFieldCache.Remove(type);
 
 			// 1) Try the well-known field names directly, walking the inheritance chain.
 			foreach (string name in _bindFieldNames)
@@ -1285,7 +2073,7 @@ namespace AdvancedKeybinds.Patches
 					FieldInfo fi = t.GetField(name, flags | BindingFlags.DeclaredOnly);
 					if (fi == null || fi.FieldType != typeof(string))
 						continue;
-					if (fi.GetValue(self) is not string value || string.IsNullOrEmpty(value))
+					if (!KeybindRowReflectionSafety.TryReadStringField(fi, self, out string value))
 						continue;
 
 					if (AkDiag.Enabled) AkDiag.Log($"Resolved keybind field '{fi.Name}' = '{value}' for '{type.Name}'.");
@@ -1302,7 +2090,7 @@ namespace AdvancedKeybinds.Patches
 				{
 					if (fi.FieldType != typeof(string))
 						continue;
-					if (fi.GetValue(self) is not string value || string.IsNullOrEmpty(value))
+					if (!KeybindRowReflectionSafety.TryReadStringField(fi, self, out string value))
 						continue;
 					if (!LooksLikeActionId(value))
 						continue;

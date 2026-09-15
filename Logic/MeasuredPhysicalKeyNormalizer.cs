@@ -41,7 +41,8 @@ namespace AdvancedKeybinds.Core
 
 			if (StableKeyToken.IsHankakuZenkakuToken(token)
 				|| string.Equals(token, StableKeyToken.ScrollLockToken, StringComparison.OrdinalIgnoreCase)
-				|| StableKeyToken.IsMouseToken(token))
+				|| StableKeyToken.IsMouseToken(token)
+				|| GamePadToken.IsPadToken(token))
 				return true;
 
 			if (string.Equals(token, "LeftWindows", StringComparison.OrdinalIgnoreCase)

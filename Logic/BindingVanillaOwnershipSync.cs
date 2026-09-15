@@ -86,7 +86,7 @@ namespace AdvancedKeybinds.Core
 			if (!empty2) { filled++; sole = slot2; }
 			if (!empty3) { filled++; sole = slot3; }
 
-			// Plain = sole Keys-name tap. Advanced path for hold / multi / mouse / SC|VK / hook tokens.
+			// Plain = sole Keys-name tap (VK/SC Escape equivalents stay Advanced — not remapped).
 			if (filled == 1 && IsPlainOwnershipSole(hold, sole))
 				return AdvancedVanillaOwnershipMarker.IsSoleRawToken(current, sole);
 
@@ -141,11 +141,13 @@ namespace AdvancedKeybinds.Core
 			return true;
 		}
 
-		/// <summary>Mouse1–5 / MouseWheelUp|Down via fixed compares only (no TryParse).</summary>
+		/// <summary>Mouse1–5 / MouseWheel Up|Down|Left|Right via fixed compares only (no TryParse).</summary>
 		private static bool IsMouseTokenFastNoAlloc(string token)
 		{
 			if (string.Equals(token, StableKeyToken.MouseWheelUpToken, StringComparison.OrdinalIgnoreCase)
-				|| string.Equals(token, StableKeyToken.MouseWheelDownToken, StringComparison.OrdinalIgnoreCase))
+				|| string.Equals(token, StableKeyToken.MouseWheelDownToken, StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, StableKeyToken.MouseWheelLeftToken, StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(token, StableKeyToken.MouseWheelRightToken, StringComparison.OrdinalIgnoreCase))
 				return true;
 
 			// "Mouse1".."Mouse5"
