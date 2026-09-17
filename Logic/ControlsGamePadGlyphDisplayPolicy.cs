@@ -38,12 +38,30 @@ namespace AdvancedKeybinds.Core
 
 		/// <summary>
 		/// Resolve a Pad:* token for Controls GamePad glyph display.
-		/// Priority: userAlias (if non-empty) → Glyph Buttons name → fallback text.
+		/// Priority: userAlias → family plain label (PS) → Glyph Buttons name → fallback text.
+		/// Family defaults to <see cref="GamePadControllerFamily.Unknown"/> (Xbox atlas).
+		/// Product Controls rows should call the overload with <c>GamePadControllerFamilySnapshot.Current</c>.
 		/// </summary>
 		public static DisplayPath ResolveDisplay(
 			string inputModeName,
 			string padToken,
 			string userAliasOrNull,
+			out string displayValue)
+			=> ResolveDisplay(
+				inputModeName,
+				padToken,
+				userAliasOrNull,
+				GamePadControllerFamily.Unknown,
+				out displayValue);
+
+		/// <summary>
+		/// Same as <see cref="ResolveDisplay(string,string,string,out string)"/> with an explicit controller family.
+		/// </summary>
+		public static DisplayPath ResolveDisplay(
+			string inputModeName,
+			string padToken,
+			string userAliasOrNull,
+			GamePadControllerFamily family,
 			out string displayValue)
 		{
 			displayValue = null;
@@ -59,6 +77,13 @@ namespace AdvancedKeybinds.Core
 				return DisplayPath.UserAlias;
 			}
 
+			if (ControlsGamePadFamilyGlyphPolicy.TryResolveFamilyPlainLabel(
+				    family, padToken, out string familyLabel))
+			{
+				displayValue = familyLabel;
+				return DisplayPath.FallbackText;
+			}
+
 			if (TryResolveGlyphButtonsName(padToken, out string buttonsName))
 			{
 				displayValue = buttonsName;
@@ -69,6 +94,34 @@ namespace AdvancedKeybinds.Core
 			if (string.IsNullOrEmpty(displayValue))
 				displayValue = padToken ?? string.Empty;
 			return DisplayPath.FallbackText;
+		}
+
+		/// <summary>
+		/// Buttons name only when the family uses the Xbox glyph atlas; otherwise false
+		/// so GenInput / Alternate paths fall through to family plain labels.
+		/// </summary>
+		public static bool TryResolveGlyphButtonsNameForFamily(
+			GamePadControllerFamily family,
+			string padToken,
+			out string buttonsName)
+		{
+			buttonsName = null;
+			if (!GamePadControllerFamilyPolicy.UsesXboxGlyphAtlas(family)
+				&& ControlsGamePadFamilyGlyphPolicy.TryResolveFamilyPlainLabel(family, padToken, out _))
+				return false;
+			return TryResolveGlyphButtonsName(padToken, out buttonsName);
+		}
+
+		/// <summary>Family-aware Controls fallback (PS labels, else <see cref="GamePadToken.FormatForDisplay"/>).</summary>
+		public static string FormatControlsFallbackForFamily(
+			GamePadControllerFamily family,
+			string padToken)
+		{
+			if (ControlsGamePadFamilyGlyphPolicy.TryResolveFamilyPlainLabel(
+				    family, padToken, out string familyLabel))
+				return familyLabel;
+			string text = GamePadToken.FormatForDisplay(padToken);
+			return string.IsNullOrEmpty(text) ? (padToken ?? string.Empty) : text;
 		}
 
 		/// <summary>

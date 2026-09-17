@@ -72,6 +72,11 @@ Config: {
 			Label: Terraria-Debug-UI-Hotkeys unterdrücken
 			Tooltip: Verhindert, dass Terrarias spezielle UI mit F7, F8, F10 und F11 geöffnet wird. Die Tasten können weiterhin für Tastenbelegungen und Mod-Aktionen verwendet werden.
 		}
+
+		SuppressImeDuringKeyCapture: {
+			Label: IME während der Tastenbelegung pausieren
+			Tooltip: Wenn Input Method Fixer installiert ist und die IME aktiv ist, wird die IME nur während der Tastenregistrierung im Kombofeld vorübergehend ausgeschaltet und danach wiederhergestellt.
+		}
 	}
 
 	Guide: {
@@ -213,6 +218,20 @@ UI: {
 		MouseWheelDown: Wheel Down
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
+	}
+
+	AdditionalOr: {
+		TabAnd: Kombo (AND)
+		TabOr: Zusatztaste (OR)
+		TabAndTooltipTitle: Kombo (AND)
+		TabAndTooltipBody: Wird ausgelöst, wenn alle registrierten Tasten gleichzeitig gedrückt werden
+		TabOrTooltipTitle: Zusatztaste (OR)
+		TabOrTooltipBody: Erweitert die nutzbaren Tasten
+		CenterLabel: Zusatztasten-Einrichtung
+		SlotEmpty: Zusatztaste
+		HintLine1: Linksklick auf das rechte Feld, um eine Zusatztaste zu registrieren
+		HintLine2: Zusatztasten können nicht in Kombos verwendet werden
+		HintLine3: Rechtsklick auf das Zusatztasten-Feld zum Aufheben
 	}
 
 	TwoKeySetup: {

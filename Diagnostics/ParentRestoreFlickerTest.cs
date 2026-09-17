@@ -19,14 +19,8 @@ namespace AdvancedKeybinds.Diagnostics
 
 		public static void AnnounceOnLoad(Mod mod)
 		{
-			try
-			{
-				mod?.Logger?.Info("[ParentRestoreFlickerTest] IMMEDIATE_ONLY_DEFERRED_DISABLED");
-			}
-			catch
-			{
-				/* ignore */
-			}
+			// Public: no client.log noise. Gate values above remain product behavior.
+			_ = mod;
 		}
 	}
 }

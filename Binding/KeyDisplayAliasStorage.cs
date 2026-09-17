@@ -42,11 +42,9 @@ namespace AdvancedKeybinds.Binding
 
 			token = token.Trim();
 
-			// Display label only — never a save token. Map to Mouse1 so panel pick / legacy
-			// aliases share the same bucket as Controls KeyStatus ("Mouse1" → PHYS:MOUSE=1).
-			// RightClick / MiddleClick / MB4 / MB5 are intentionally NOT remapped here.
-			if (string.Equals(token, "LeftClick", StringComparison.OrdinalIgnoreCase))
-				token = "Mouse1";
+			// Display label only — never a save token. Map to MouseN so panel pick / legacy
+			// aliases share the same bucket as Controls KeyStatus.
+			token = DisplayAliasStorageKeyPolicy.RemapDisplayLabelToStorageToken(token);
 
 			// Vanilla list rows keep Keys names; key-info pick stores SC:. Unify here.
 			if (PhysicalKeyIdentity.TryResolve(token, out string physicalId)

@@ -17,6 +17,7 @@ _developer/
 
 # Local diagnostics enable marker
 .ak-enable-diagnostics
+.ak-inventory-esc-live-verify
 
 # Empty / local test tree
 Core/

@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using AdvancedKeybinds.Binding;
+using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Logic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -414,33 +415,60 @@ namespace AdvancedKeybinds.Patches
 		{
 			_inventoryStateBeforeShortcutUi = Main.playerInventory;
 			_restoreInventoryAfterShortcutUiClose = true;
+			// Inventory open behind settings → ESC leave flashes close. Close now.
+			if (ControlsInventoryBackPolicy.ShouldCloseInventoryWhenOpeningShortcutSettings(
+				Main.playerInventory))
+			{
+				Main.playerInventory = false;
+				if (Main.LocalPlayer != null)
+					Main.LocalPlayer.releaseInventory = false;
+			}
 		}
 
 		/// <summary>
 		/// Vanilla IngameOptions.Close / IngameFancyUI.Close force Main.playerInventory = true.
-		/// Call this immediately after those Close() methods so the inventory never draws for a frame.
-		/// Does not clear the pending flag (CloseSettingsUiForTransition may Close mid-open).
+		/// Call after Close so Esc/Tab back never flashes inventory (shortcut restore preferred).
+		/// Does not clear the pending shortcut flag (CloseSettingsUiForTransition may Close mid-open).
 		/// </summary>
 		internal static void SuppressVanillaInventoryOpenAfterShortcutUiClose()
-		{
-			if (!_restoreInventoryAfterShortcutUiClose)
-				return;
+			=> SuppressVanillaInventoryOpenAfterSettingsUiClose(inventoryOpenBeforeClose: false);
 
+		/// <summary>
+		/// Settings-menu back contract: after Close, restore inventory to shortcut-before-open
+		/// when armed; otherwise to the value captured immediately before Close().
+		/// </summary>
+		internal static void SuppressVanillaInventoryOpenAfterSettingsUiClose(bool inventoryOpenBeforeClose)
+		{
 			if (Main.ingameOptionsWindow || Main.inFancyUI)
 				return;
 
-			Main.playerInventory = _inventoryStateBeforeShortcutUi;
+			// Escape leave from 3 settings menus: always character control (no inventory via-flash).
+			Main.playerInventory = ControlsInventoryBackPolicy.ResolveInventoryAfterSettingsClose(
+				menusFullyClosed: true,
+				shortcutRestoreArmed: _restoreInventoryAfterShortcutUiClose,
+				shortcutInventoryBeforeOpen: _inventoryStateBeforeShortcutUi,
+				inventoryOpenBeforeClose: inventoryOpenBeforeClose,
+				forceGameplayReturn: true);
+			// Disarm PostUpdateInput restore — re-opening pre-open inventory after Suppress
+			// caused inventory flash then gate re-close (user-reported ESC flicker).
+			_restoreInventoryAfterShortcutUiClose = false;
 			if (Main.LocalPlayer != null)
 				Main.LocalPlayer.releaseInventory = false;
 		}
 
 		private static void RestoreInventoryStateAfterShortcutUiClose()
 		{
-			if (!_restoreInventoryAfterShortcutUiClose)
+			if (!ControlsInventoryBackPolicy.ShouldRestoreInventoryAfterShortcutSettingsClose(
+				_restoreInventoryAfterShortcutUiClose,
+				settingsMenusStillOpen: Main.ingameOptionsWindow || Main.inFancyUI,
+				forceGameplayReturnLeaveContract: true))
+			{
+				if (_restoreInventoryAfterShortcutUiClose
+					&& !Main.ingameOptionsWindow
+					&& !Main.inFancyUI)
+					_restoreInventoryAfterShortcutUiClose = false;
 				return;
-
-			if (Main.ingameOptionsWindow || Main.inFancyUI)
-				return;
+			}
 
 			Main.playerInventory = _inventoryStateBeforeShortcutUi;
 			if (Main.LocalPlayer != null)

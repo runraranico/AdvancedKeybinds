@@ -82,13 +82,19 @@ namespace AdvancedKeybinds.Binding
 
 			string whileHeld = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewWhileHeld");
 			string onRelease = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewOnRelease");
-			return BindingDisplayText.ApplyHoldPrefix(
+			string withHold = BindingDisplayText.ApplyHoldPrefix(
 				joined,
 				combo.Hold,
 				combo.HoldOnRelease,
 				combo.FilledSlotCount,
 				whileHeld,
 				onRelease);
+
+			if (!combo.HasAdditionalOr)
+				return withHold;
+
+			string orDisplay = KeyToken.FormatDisplayForToken(combo.AdditionalOrToken);
+			return KeyboardAdditionalOrPolicy.FormatAndWithAdditionalOrDisplay(withHold, orDisplay);
 		}
 	}
 }

@@ -68,6 +68,10 @@ Config: {
 			Label: TerrariaのデバッグUIキーを抑制する
 			Tooltip: F7・F8・F10・F11で開くTerrariaの特殊UIを抑制します。キー登録やMODアクションには引き続き使用できます
 		}
+		SuppressImeDuringKeyCapture: {
+			Label: キー登録中はIMEを一時停止
+			Tooltip: Input Method Fixer導入時かつIMEオンのとき、コンボパネルでキー登録している間だけIMEをオフにし、終了後に戻します
+		}
 	}
 	Guide: {
 		NotesHeader: ウィンドウへのカーソル固定
@@ -130,6 +134,14 @@ Config: {
 			Tooltip: カスタムアンカーの縦座標。ゲージをドラッグすると自動で更新されます。-1 は未設定。
 		}
 	}
+
+
+
+
+
+
+
+
 
 
 
@@ -399,6 +411,21 @@ UI: {
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
 	}
+
+	AdditionalOr: {
+		TabAnd: コンボ (AND)
+		TabOr: 追加キー (OR)
+		TabAndTooltipTitle: コンボ (AND)
+		TabAndTooltipBody: 登録したキーをすべて同時に押すと動作します
+		TabOrTooltipTitle: 追加キー (OR)
+		TabOrTooltipBody: 使えるキーを増やします
+		CenterLabel: 追加キー設定
+		SlotEmpty: 追加キー
+		HintLine1: 右の枠を左クリックして 追加キー を登録
+		HintLine2: 追加キーはコンボに利用できません
+		HintLine3: 追加キー枠を右クリックで解除
+	}
+
 
 	TwoKeySetup: {
 		Line1: 2 キー 設定

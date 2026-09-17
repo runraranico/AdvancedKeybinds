@@ -536,6 +536,10 @@ namespace AdvancedKeybinds.Binding
 			if (WindowsKeySuppressor.IsKanaPhysicallyDown)
 				pressed.Add(nameof(Keys.Kana));
 
+			// Hold while make/break says down — same as Kana. One-frame edge drain alone felt sluggish.
+			if (WindowsKeySuppressor.IsHankakuZenkakuPhysicallyDown)
+				pressed.Add(BindingRestrictions.HankakuZenkakuToken);
+
 			if (IsMouseDown(1)) pressed.Add("Mouse1");
 			if (IsMouseDown(2)) pressed.Add("Mouse2");
 			if (IsMouseDown(3)) pressed.Add("Mouse3");

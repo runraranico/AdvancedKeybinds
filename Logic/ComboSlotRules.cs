@@ -105,6 +105,13 @@ namespace AdvancedKeybinds.Core
 #endif
 			}
 
+			if (KeyboardAdditionalOrPolicy.HasToken(binding.AdditionalOrToken)
+				&& (StableKeyToken.TokensEqual(binding.AdditionalOrToken, canonical)
+					|| PhysicalKeyIdentity.AreSamePhysical(binding.AdditionalOrToken, canonical)))
+			{
+				return SetSlotResult.RejectedDuplicate;
+			}
+
 #if AK_DIAGNOSTICS
 			if (!comparedAny)
 			{

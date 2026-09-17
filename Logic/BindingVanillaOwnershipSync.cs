@@ -64,6 +64,53 @@ namespace AdvancedKeybinds.Core
 		}
 
 		/// <summary>
+		/// KeyStatus for a stored combo including Inventory/MenuInquiry AdditionalOr vanilla OR lists
+		/// (Escape, Tab). Action id is required so AdditionalOr is not dropped to markers / Escape-only.
+		/// </summary>
+		public static List<string> BuildKeyStatusEntries(string storageOrTriggerId, ComboBindingData combo)
+		{
+			if (combo == null || combo.IsEmpty)
+				return new List<string>();
+
+			KeyboardAdditionalOrPolicy.NormalizeSharedUiBackAdditionalOr(storageOrTriggerId, combo);
+
+			if (KeyboardMousePadIsolationPolicy.TryGetDefaultVanillaMouseToken(
+				    storageOrTriggerId,
+				    combo.Hold,
+				    combo.Slot1,
+				    combo.Slot2,
+				    combo.Slot3,
+				    combo.AlternateGamePadToken,
+				    out string defaultMouseToken))
+				return new List<string> { defaultMouseToken };
+
+			var orScratch = new List<string>(2);
+			int inputModeOrdinal = ResolveBuildKeyStatusInputModeOrdinal(storageOrTriggerId);
+			if (KeyboardAdditionalOrPolicy.TryBuildVanillaOrKeyStatusEntries(
+				    storageOrTriggerId, combo.Hold, combo.Keys, combo.AdditionalOrToken, orScratch,
+				    inputModeOrdinal))
+				return new List<string>(orScratch);
+
+			return BuildKeyStatusEntries(combo.Hold, combo.Keys, combo.IsEmpty);
+		}
+
+		/// <summary>
+		/// True when KeyStatus already matches what <see cref="BuildKeyStatusEntries(string, ComboBindingData)"/>
+		/// would write (includes AdditionalOr vanilla OR).
+		/// </summary>
+		public static bool MatchesExpectedKeyStatus(
+			IReadOnlyList<string> current,
+			string storageOrTriggerId,
+			ComboBindingData combo)
+		{
+			if (combo == null || combo.IsEmpty)
+				return MatchesOwnershipFromSlots(current, false, null, null, null);
+
+			List<string> expected = BuildKeyStatusEntries(storageOrTriggerId, combo);
+			return MatchesExpectedKeyStatus(current, expected);
+		}
+
+		/// <summary>
 		/// Zero-alloc ownership compare against slot fields (no <c>Keys</c> list, no marker List).
 		/// Does not call <c>StableKeyToken.TryParse</c> / <c>IsMouseToken</c> (those allocate).
 		/// </summary>
@@ -259,6 +306,17 @@ namespace AdvancedKeybinds.Core
 			advancedCombo = new ComboBindingData { Slot3 = rawToken };
 			keyStatusAfter = AdvancedVanillaOwnershipMarker.BuildMarkers(advancedCombo.Keys);
 			return true;
+		}
+
+		private static int ResolveBuildKeyStatusInputModeOrdinal(string storageOrTriggerId)
+		{
+			var kind = ControlsGameUiSeparationPolicy.ResolveSyncKind(
+				storageOrTriggerId, out int singleOrdinal);
+			if (kind == ControlsGameUiSeparationPolicy.SyncModeKind.SingleInputMode
+				&& singleOrdinal >= 0)
+				return singleOrdinal;
+
+			return KeyboardAdditionalOrPolicy.InputModeKeyboard;
 		}
 	}
 }

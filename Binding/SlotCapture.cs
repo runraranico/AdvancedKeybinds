@@ -91,6 +91,8 @@ namespace AdvancedKeybinds.Binding
 			_prevPhaseForLatency = _session.CurrentPhase;
 			_captureLayoutAtBegin = KeyboardLayoutHelper.GetActiveLayoutHandle();
 			_prevImeComposingDuringCapture = IsImeComposingActive();
+			// IMF soft-compat: stop SDL text input only while capturing (restore on Cancel/Finish).
+			ImfCaptureImeGuard.OnCaptureBegin();
 			if (_session.CurrentPhase == RegisterCaptureSession.Phase.WaitingForRelease)
 				_latency.MarkT1_WaitingForRelease();
 			else if (_session.CurrentPhase == RegisterCaptureSession.Phase.WaitingForNewInput)
@@ -140,6 +142,7 @@ namespace AdvancedKeybinds.Binding
 			_stuckReleaseWarned = false;
 			_rejectStreak = 0;
 			WindowsKeySuppressor.SetSlotCapturePassthrough(false);
+			ImfCaptureImeGuard.OnCaptureEnd();
 			DrainAllLatchEdges();
 			if (AkDiag.Enabled)
 				DigPhase("Cancel");
@@ -380,9 +383,11 @@ namespace AdvancedKeybinds.Binding
 			HashSet<string> confirmedHeld)
 		{
 			IntPtr layoutNow = KeyboardLayoutHelper.GetActiveLayoutHandle();
+			// Spain Traditional (0x040A) vs International sort (0x0C0A) share one keyboard family —
+			// do not treat HKL pointer churn between them as a layout change / recovery trigger.
 			bool layoutChanged = _captureLayoutAtBegin != IntPtr.Zero
 				&& layoutNow != IntPtr.Zero
-				&& layoutNow != _captureLayoutAtBegin;
+				&& !LayoutLangEquivalence.AreEquivalentHkl(_captureLayoutAtBegin, layoutNow);
 			if (layoutChanged)
 				_captureLayoutAtBegin = layoutNow;
 
@@ -592,6 +597,7 @@ namespace AdvancedKeybinds.Binding
 			_session.Cancel();
 			GamePadStickCaptureArming.EndSession();
 			WindowsKeySuppressor.SetSlotCapturePassthrough(false);
+			ImfCaptureImeGuard.OnCaptureEnd();
 			if (string.Equals(token, "LeftWindows", StringComparison.OrdinalIgnoreCase)
 				|| string.Equals(token, "RightWindows", StringComparison.OrdinalIgnoreCase))
 			{

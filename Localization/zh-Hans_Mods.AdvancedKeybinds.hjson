@@ -72,6 +72,11 @@ Config: {
 			Label: 屏蔽 Terraria 调试 UI 快捷键
 			Tooltip: 防止用 F7、F8、F10、F11 打开 Terraria 的特殊 UI。这些键仍可用于键位绑定和模组操作。
 		}
+
+		SuppressImeDuringKeyCapture: {
+			Label: 绑定时暂停输入法
+			Tooltip: 在安装 Input Method Fixer 且输入法开启时，仅在组合键面板绑定时暂时关闭输入法，结束后恢复。
+		}
 	}
 
 	Guide: {
@@ -213,6 +218,20 @@ UI: {
 		MouseWheelDown: Wheel Down
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
+	}
+
+	AdditionalOr: {
+		TabAnd: 组合 (AND)
+		TabOr: 额外按键 (OR)
+		TabAndTooltipTitle: 组合 (AND)
+		TabAndTooltipBody: 同时按下所有已注册按键时触发
+		TabOrTooltipTitle: 额外按键 (OR)
+		TabOrTooltipBody: 增加可用按键
+		CenterLabel: 额外按键设置
+		SlotEmpty: 额外按键
+		HintLine1: 左键点击右侧栏位以注册额外按键
+		HintLine2: 额外按键不能用于组合
+		HintLine3: 右键点击额外按键栏位以清除
 	}
 
 	TwoKeySetup: {

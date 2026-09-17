@@ -48,7 +48,9 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			UIState ingame = Main.InGameUI?.CurrentState;
-			if (IsManageControls(ingame))
+			// In-world: require inFancyUI so a leftover ManageControls CurrentState after Close
+			// does not keep "Controls open" and kill world ESC / Inventory.
+			if (Main.inFancyUI && IsManageControls(ingame))
 			{
 				state = ingame;
 				host = "InGameUI";

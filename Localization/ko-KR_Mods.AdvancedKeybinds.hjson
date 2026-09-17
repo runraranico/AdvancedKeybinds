@@ -72,6 +72,10 @@ Config: {
 			Label: Terraria 디버그 UI 단축키 억제
 			Tooltip: F7, F8, F10, F11로 Terraria의 특수 UI가 열리지 않게 합니다. 키는 키 바인드와 모드 액션에 계속 사용할 수 있습니다.
 		}
+		SuppressImeDuringKeyCapture: {
+			Label: 키 등록 중 IME 일시 중지
+			Tooltip: Input Method Fixer가 설치되어 있고 IME가 켜져 있을 때, 콤보 패널에서 키를 등록하는 동안만 IME를 끄고 끝나면 복구합니다.
+		}
 	}
 
 	Guide: {
@@ -213,6 +217,21 @@ UI: {
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
 	}
+
+	AdditionalOr: {
+		TabAnd: 콤보 (AND)
+		TabOr: 추가 키 (OR)
+		TabAndTooltipTitle: 콤보 (AND)
+		TabAndTooltipBody: 등록한 키를 모두 동시에 누르면 동작합니다
+		TabOrTooltipTitle: 추가 키 (OR)
+		TabOrTooltipBody: 사용 가능한 키를 늘립니다
+		CenterLabel: 추가 키 설정
+		SlotEmpty: 추가 키
+		HintLine1: 오른쪽 칸을 왼쪽 클릭하여 추가 키를 등록
+		HintLine2: 추가 키는 콤보에 사용할 수 없습니다
+		HintLine3: 추가 키 칸을 오른쪽 클릭하여 해제
+	}
+
 
 	TwoKeySetup: {
 		Line1: 2 키 설정

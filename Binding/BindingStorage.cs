@@ -286,24 +286,26 @@ namespace AdvancedKeybinds.Binding
 				ComboBindingData data = ToData(actionId, toStore);
 				if (KeyboardMousePadIsolationPolicy.TrySanitizeKeyboardMouseBinding(actionId, data))
 					toStore = FromData(data);
-				bool defaultMouseLeft = KeyboardMousePadIsolationPolicy.IsDefaultVanillaMouseLeft(
+				bool defaultVanillaMouse = KeyboardMousePadIsolationPolicy.TryGetDefaultVanillaMouseToken(
 					actionId,
 					toStore != null && toStore.Hold,
 					toStore?.Slot1,
 					toStore?.Slot2,
 					toStore?.Slot3,
-					toStore?.AlternateGamePadToken);
-				if (toStore == null || toStore.IsEmpty || defaultMouseLeft)
+					toStore?.AlternateGamePadToken,
+					out string defaultMouseToken);
+				if (toStore == null || toStore.IsEmpty || defaultVanillaMouse)
 				{
 					Combos.Remove(actionId);
 					SyncVanillaKeyStatusForAction(actionId, null, syncReason + "-kb-pad-strip-empty");
-					if (defaultMouseLeft
-						|| string.Equals(actionId, KeyboardMousePadIsolationPolicy.MouseLeftAction, StringComparison.Ordinal))
+					if (defaultVanillaMouse
+						|| KeyboardMousePadIsolationPolicy.TryMapMouseActionToDefaultToken(
+							actionId, out defaultMouseToken))
 					{
 						VanillaRebindHelper.AssignVanillaBinding(
 							ControlsEditTargetPolicy.ToTriggerActionId(actionId),
-							KeyboardMousePadIsolationPolicy.DefaultMouseLeftToken,
-							syncReason + "-default-mouseleft");
+							defaultMouseToken,
+							syncReason + "-default-vanilla-mouse");
 					}
 					MirrorGameBindingToUiIfNeeded(actionId, null, syncReason);
 					return;
@@ -519,11 +521,21 @@ namespace AdvancedKeybinds.Binding
 
 				bool holdBefore = combo.Hold;
 				bool holdOnReleaseBefore = combo.HoldOnRelease;
+				string slot1Before = combo.Slot1;
+				string slot2Before = combo.Slot2;
+				string slot3Before = combo.Slot3;
+				string orBefore = combo.AdditionalOrToken;
 				BindingRestrictions.ClearUnsupportedHoldFlags(combo);
-				if (holdBefore != combo.Hold || holdOnReleaseBefore != combo.HoldOnRelease)
+				NormalizeSharedUiBackAdditionalOrInPlace(pair.Key, combo);
+				if (holdBefore != combo.Hold
+					|| holdOnReleaseBefore != combo.HoldOnRelease
+					|| !string.Equals(slot1Before, combo.Slot1, StringComparison.Ordinal)
+					|| !string.Equals(slot2Before, combo.Slot2, StringComparison.Ordinal)
+					|| !string.Equals(slot3Before, combo.Slot3, StringComparison.Ordinal)
+					|| !string.Equals(orBefore, combo.AdditionalOrToken, StringComparison.Ordinal))
 				{
 					changed = true;
-					if (AkDiag.Enabled) AkDiag.Log("Sanitized unsupported Hold on load action=" + pair.Key);
+					if (AkDiag.Enabled) AkDiag.Log("Sanitized unsupported Hold/AdditionalOr on load action=" + pair.Key);
 				}
 
 				// Keyboard/Mouse storage must never keep Pad:* (kills click + Pad UI confirm via MouseLeft).
@@ -533,12 +545,13 @@ namespace AdvancedKeybinds.Binding
 				{
 					ComboBindingData data = ToData(pair.Key, combo);
 					bool padStripped = KeyboardMousePadIsolationPolicy.TrySanitizeKeyboardMouseBinding(pair.Key, data);
-					bool defaultMouseLeft = KeyboardMousePadIsolationPolicy.IsDefaultVanillaMouseLeft(
-						pair.Key, data.Hold, data.Slot1, data.Slot2, data.Slot3, data.AlternateGamePadToken);
-					if (padStripped || defaultMouseLeft)
+					bool defaultVanillaMouse = KeyboardMousePadIsolationPolicy.TryGetDefaultVanillaMouseToken(
+						pair.Key, data.Hold, data.Slot1, data.Slot2, data.Slot3, data.AlternateGamePadToken,
+						out _);
+					if (padStripped || defaultVanillaMouse)
 					{
 						changed = true;
-						if (data.IsEmpty || defaultMouseLeft)
+						if (data.IsEmpty || defaultVanillaMouse)
 						{
 							removeKeys ??= new List<string>();
 							removeKeys.Add(pair.Key);
@@ -557,15 +570,13 @@ namespace AdvancedKeybinds.Binding
 				{
 					string removeId = removeKeys[i];
 					Combos.Remove(removeId);
-					if (string.Equals(
-						removeId,
-						KeyboardMousePadIsolationPolicy.MouseLeftAction,
-						StringComparison.Ordinal))
+					if (KeyboardMousePadIsolationPolicy.TryMapMouseActionToDefaultToken(
+						    removeId, out string defaultMouseToken))
 					{
 						VanillaRebindHelper.AssignVanillaBinding(
 							ControlsEditTargetPolicy.ToTriggerActionId(removeId),
-							KeyboardMousePadIsolationPolicy.DefaultMouseLeftToken,
-							"sanitize-default-mouseleft");
+							defaultMouseToken,
+							"sanitize-default-vanilla-mouse");
 					}
 				}
 			}
@@ -904,6 +915,10 @@ namespace AdvancedKeybinds.Binding
 				return;
 			}
 
+			// Inventory/MenuInquiry + AdditionalOr: drop leftover Hold so Escape stays in KeyStatus.
+			BindingRestrictions.ClearUnsupportedHoldFlags(combo);
+			NormalizeSharedUiBackAdditionalOrInPlace(actionId, combo);
+
 			if (gamePadStorage)
 			{
 				if (ControlsEditTargetPolicy.IsVanillaOwnedGamePadOrPair(
@@ -981,15 +996,16 @@ namespace AdvancedKeybinds.Binding
 				return;
 			}
 
-			// MouseLeft + sole Mouse1: vanilla must own Mouse1. AKAdv markers cannot fire on title
-			// (BindingInputEngine returns early when Main.gameMenu).
-			if (KeyboardMousePadIsolationPolicy.IsDefaultVanillaMouseLeft(
-				trigger, combo.Hold, combo.Slot1, combo.Slot2, combo.Slot3, combo.AlternateGamePadToken))
+			// Default sole mouse binds (MouseLeft=Mouse1, MouseRight=Mouse2, …): vanilla must own
+			// the Keys name. AKAdv markers break Main.mouseRight / UI OnRightClick (Magic Storage).
+			if (KeyboardMousePadIsolationPolicy.TryGetDefaultVanillaMouseToken(
+				trigger, combo.Hold, combo.Slot1, combo.Slot2, combo.Slot3, combo.AlternateGamePadToken,
+				out string defaultMouseToken))
 			{
 				AssignKeyboardPlain(
 					trigger,
-					KeyboardMousePadIsolationPolicy.DefaultMouseLeftToken,
-					reason ?? "sync-default-mouseleft-vanilla",
+					defaultMouseToken,
+					reason ?? "sync-default-vanilla-mouse",
 					syncKind,
 					modes);
 				return;
@@ -997,18 +1013,40 @@ namespace AdvancedKeybinds.Binding
 
 			if (combo.RequiresAdvancedStorage())
 			{
+				// Inventory/MenuInquiry + plain Escape AND + AdditionalOr:
+				// write vanilla OR KeyStatus (Escape, Tab) on Keyboard and KeyboardUI.
+				// Title Back = JustPressed.Inventory (must keep Escape on KeyboardUI).
+				if (KeyboardAdditionalOrPolicy.TryBuildVanillaOrKeyStatusEntries(
+					    actionId, combo.Hold, combo.Keys, combo.AdditionalOrToken,
+					    AdditionalOrVanillaOrScratch))
+				{
+					AssignKeyboardPlainKeys(
+						trigger,
+						AdditionalOrVanillaOrScratch,
+						reason ?? "sync-additional-or-vanilla-or-list",
+						syncKind,
+						modes);
+					return;
+				}
+
+				var markerKeys = new List<string>(combo.Keys);
+				if (combo.HasAdditionalOr)
+					markerKeys.Add(combo.AdditionalOrToken);
+				if (markerKeys.Count == 0 && combo.HasAdditionalOr)
+					markerKeys.Add(combo.AdditionalOrToken);
+
 				if (syncKind == ControlsGameUiSeparationPolicy.SyncModeKind.KeyboardBoth)
 				{
 					VanillaRebindHelper.AssignAdvancedOwnershipMarkers(
 						trigger,
-						combo.Keys,
+						markerKeys,
 						reason ?? "sync-advanced-markers");
 				}
 				else
 				{
 					VanillaRebindHelper.AssignAdvancedOwnershipMarkersForInputModes(
 						trigger,
-						combo.Keys,
+						markerKeys,
 						reason ?? "sync-advanced-markers-mode",
 						modes);
 				}
@@ -1060,6 +1098,34 @@ namespace AdvancedKeybinds.Binding
 				VanillaRebindHelper.AssignVanillaBindingForInputModes(trigger, key, reason, modes);
 		}
 
+		private static void AssignKeyboardPlainKeys(
+			string trigger,
+			IReadOnlyList<string> keys,
+			string reason,
+			ControlsGameUiSeparationPolicy.SyncModeKind kind,
+			InputMode[] modes)
+		{
+			if (keys == null || keys.Count == 0)
+			{
+				ClearForSync(trigger, reason ?? "sync-empty-additional-or", kind, modes);
+				return;
+			}
+
+			if (keys.Count == 1)
+			{
+				AssignKeyboardPlain(trigger, keys[0], reason, kind, modes);
+				return;
+			}
+
+			if (kind == ControlsGameUiSeparationPolicy.SyncModeKind.KeyboardBoth)
+				VanillaRebindHelper.RestoreAssignedKeys(trigger, keys, reason);
+			else
+			{
+				for (int i = 0; i < modes.Length; i++)
+					VanillaRebindHelper.RestoreAssignedKeysForInputMode(trigger, keys, modes[i], reason);
+			}
+		}
+
 		private static void SyncAllGamePadTwoKeyTerrariaOrRecords(string reason)
 		{
 			foreach (KeyValuePair<string, ComboBinding> pair in Combos)
@@ -1070,10 +1136,32 @@ namespace AdvancedKeybinds.Binding
 			}
 		}
 
+		private static readonly List<string> AdditionalOrVanillaOrScratch = new(2);
+
 		private static bool OwnershipMatchesForStorageKey(string storageKey, ComboBinding combo)
 		{
 			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(storageKey);
 			var kind = ControlsGameUiSeparationPolicy.ResolveSyncKind(storageKey, out int singleOrdinal);
+
+			if (KeyboardAdditionalOrPolicy.ShouldPreserveVanillaAndKeyWithAdditionalOr(
+				    storageKey, combo.Hold, combo.Keys, combo.AdditionalOrToken))
+			{
+				if (kind == ControlsGameUiSeparationPolicy.SyncModeKind.KeyboardBoth)
+				{
+					return AdditionalOrVanillaOrMatchesMode(storageKey, trigger, InputMode.Keyboard, combo)
+						&& AdditionalOrVanillaOrMatchesMode(storageKey, trigger, InputMode.KeyboardUI, combo);
+				}
+
+				if (kind == ControlsGameUiSeparationPolicy.SyncModeKind.GamePadBoth)
+					return false;
+
+				InputMode mode = (InputMode)singleOrdinal;
+				if (mode == InputMode.Keyboard || mode == InputMode.KeyboardUI)
+					return AdditionalOrVanillaOrMatchesMode(storageKey, trigger, mode, combo);
+
+				return false;
+			}
+
 			if (kind == ControlsGameUiSeparationPolicy.SyncModeKind.KeyboardBoth)
 			{
 				return VanillaRebindHelper.AssignedOwnershipMatchesSlots(
@@ -1086,14 +1174,35 @@ namespace AdvancedKeybinds.Binding
 					&& GamePadOwnershipMatchesMode(trigger, InputMode.XBoxGamepadUI, combo);
 			}
 
-			InputMode mode = (InputMode)singleOrdinal;
-			if (mode == InputMode.Keyboard || mode == InputMode.KeyboardUI)
+			InputMode singleMode = (InputMode)singleOrdinal;
+			if (singleMode == InputMode.Keyboard || singleMode == InputMode.KeyboardUI)
 			{
 				return VanillaRebindHelper.AssignedOwnershipMatchesSlotsForInputMode(
-					trigger, mode, combo.Hold, combo.Slot1, combo.Slot2, combo.Slot3);
+					trigger, singleMode, combo.Hold, combo.Slot1, combo.Slot2, combo.Slot3);
 			}
 
-			return GamePadOwnershipMatchesMode(trigger, mode, combo);
+			return GamePadOwnershipMatchesMode(trigger, singleMode, combo);
+		}
+
+		private static bool AdditionalOrVanillaOrMatchesMode(
+			string storageKey,
+			string trigger,
+			InputMode mode,
+			ComboBinding combo)
+		{
+			PlayerInputProfile profile = PlayerInput.CurrentProfile;
+			if (profile?.InputModes == null || !profile.InputModes.ContainsKey(mode))
+				return true;
+
+			if (!KeyboardAdditionalOrPolicy.TryBuildVanillaOrKeyStatusEntries(
+				    storageKey, combo.Hold, combo.Keys, combo.AdditionalOrToken,
+				    AdditionalOrVanillaOrScratch, (int)mode))
+				return false;
+
+			IReadOnlyList<string> assigned =
+				VanillaRebindHelper.GetAssignedKeysForInputMode(trigger, mode);
+			return BindingVanillaOwnershipSync.MatchesExpectedKeyStatus(
+				assigned, AdditionalOrVanillaOrScratch);
 		}
 
 		private static bool GamePadOwnershipMatchesMode(string trigger, InputMode mode, ComboBinding combo)
@@ -1717,6 +1826,7 @@ namespace AdvancedKeybinds.Binding
 				Slot2Display = data.Slot2Display,
 				Slot3Display = data.Slot3Display,
 				AlternateGamePadToken = data.AlternateGamePadToken,
+				AdditionalOrToken = data.AdditionalOrToken,
 				PersistAsEmptyRecord = data.PersistAsEmptyRecord,
 				UseTerrariaKeyStatusOr = data.UseTerrariaKeyStatusOr,
 				Hold = data.Hold,
@@ -1738,12 +1848,40 @@ namespace AdvancedKeybinds.Binding
 				Slot2Display = combo.Slot2Display,
 				Slot3Display = combo.Slot3Display,
 				AlternateGamePadToken = combo.AlternateGamePadToken,
+				AdditionalOrToken = combo.AdditionalOrToken,
 				PersistAsEmptyRecord = combo.PersistAsEmptyRecord,
 				UseTerrariaKeyStatusOr = combo.UseTerrariaKeyStatusOr,
 				Hold = combo.Hold,
 				HoldOnRelease = combo.HoldOnRelease,
 				HoldMs = combo.HoldMs
 			}, storageKey);
+		}
+
+		/// <summary>
+		/// Inventory/MenuInquiry + AdditionalOr: rewrite VK:0x1B / SC:0x0F into Escape / Tab
+		/// on the live ComboBinding before KeyStatus sync (matches JSON sanitize).
+		/// </summary>
+		private static void NormalizeSharedUiBackAdditionalOrInPlace(string storageOrTriggerId, ComboBinding combo)
+		{
+			if (combo == null || !combo.HasAdditionalOr)
+				return;
+
+			var data = new ComboBindingData {
+				Slot1 = combo.Slot1,
+				Slot2 = combo.Slot2,
+				Slot3 = combo.Slot3,
+				AdditionalOrToken = combo.AdditionalOrToken,
+				Hold = combo.Hold,
+				HoldOnRelease = combo.HoldOnRelease,
+				HoldMs = combo.HoldMs
+			};
+			KeyboardAdditionalOrPolicy.NormalizeSharedUiBackAdditionalOr(storageOrTriggerId, data);
+			combo.Slot1 = data.Slot1;
+			combo.Slot2 = data.Slot2;
+			combo.Slot3 = data.Slot3;
+			combo.AdditionalOrToken = data.AdditionalOrToken;
+			combo.Hold = data.Hold;
+			combo.HoldOnRelease = data.HoldOnRelease;
 		}
 
 		private static void TryDeleteFile()

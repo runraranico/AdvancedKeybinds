@@ -84,6 +84,10 @@ namespace AdvancedKeybinds.Binding
 			if (binding == null)
 				return false;
 
+			// AdditionalOr tab locks Hold in UI; leftover Hold on Inventory must not survive save.
+			if (binding.HasAdditionalOr)
+				return false;
+
 			List<string> keys = binding.Keys;
 			if (keys.Count != 1)
 				return false;

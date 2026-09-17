@@ -220,7 +220,11 @@ namespace AdvancedKeybinds.Patches
 		private static long _pendingKanaCaptureTick;
 		private static long _lastKanaEdgeMs;
 		private static readonly HashSet<string> _gameplayKanaEdges = new(StringComparer.OrdinalIgnoreCase);
-		private const int KanaEdgeCoalesceMs = 100;
+		/// <summary>
+		/// Duplicate-source guard. 0 = same as normal rising-edge keys (physical-down / wasDown already
+		/// suppress autorepeat). Was 100ms and made Kana feel sluggish vs ordinary keys.
+		/// </summary>
+		private const int KanaEdgeCoalesceMs = 0;
 		/// <summary>WndProc KEYDOWN for VK-aligned Keys that FNA KeyboardState misses (e.g. Oem8 / VK_OEM_8).</summary>
 		private static volatile string _pendingWin32KeysCaptureToken;
 		private static long _pendingWin32KeysCaptureTick;
@@ -297,7 +301,8 @@ namespace AdvancedKeybinds.Patches
 		private static long _pendingHankakuCaptureTick;
 		private static long _lastHankakuBindEdgeMs;
 		private static readonly HashSet<string> _gameplayHankakuEdges = new(StringComparer.OrdinalIgnoreCase);
-		private const int HankakuBindEdgeCoalesceMs = 100;
+		/// <summary>Same policy as <see cref="KanaEdgeCoalesceMs"/> (was 100ms).</summary>
+		private const int HankakuBindEdgeCoalesceMs = 0;
 
 		// JIS/ISO scans: under US layout Windows often never raises the JP OEM/IME VKs, so VK polling
 		// alone misses ¥ / ろ (and 変換／無変換). Track held state + KEYDOWN latch from make/break.
@@ -312,7 +317,8 @@ namespace AdvancedKeybinds.Patches
 		private static long _pendingJisIntlCaptureTick;
 		private static long _lastJisIntlScanEdgeMs;
 		private static readonly HashSet<string> _gameplayJisIntlEdges = new(StringComparer.OrdinalIgnoreCase);
-		private const int JisIntlScanEdgeCoalesceMs = 100;
+		/// <summary>Same policy as <see cref="KanaEdgeCoalesceMs"/> (was 100ms). Rising edge already gated by wasDown.</summary>
+		private const int JisIntlScanEdgeCoalesceMs = 0;
 
 		// Physical-key edge detection during slot capture (high bit / hook state; not LED latch).
 		private static bool _prevCapsHighBit;
@@ -772,6 +778,13 @@ namespace AdvancedKeybinds.Patches
 
 			return (GetAsyncKeyState((int)vkCode) & 0x8000) != 0;
 		}
+
+		/// <summary>
+		/// Win32 GetAsyncKeyState for Escape. FNA Keyboard.GetState can briefly report UP while
+		/// the key is still held; SharedUi latch must not clear on that flicker.
+		/// </summary>
+		public static bool IsEscapePhysicallyDownAsync()
+			=> IsPhysicalKeyDown(VK_ESCAPE);
 
 		public static void SetModalWindowsKeySuppress(bool enabled)
 		{
@@ -1477,9 +1490,12 @@ namespace AdvancedKeybinds.Patches
 				return;
 			}
 
+			// Rising edge only — same as Kana / JisIntl. Autorepeat KEYDOWN must not re-queue gameplay edges.
+			bool rising = !_hankakuZenkakuPhysicallyDown;
 			_hankakuZenkakuPhysicallyDown = true;
-			_hankakuPhysicalDownSinceMs = Environment.TickCount64;
-			if (IsGameForegroundCore())
+			if (rising)
+				_hankakuPhysicalDownSinceMs = Environment.TickCount64;
+			if (rising && IsGameForegroundCore())
 				NoteHankakuZenkakuEdge(source);
 		}
 

@@ -159,7 +159,9 @@ namespace AdvancedKeybinds.Core
 			else
 			{
 				_bindings[actionId] = Clone(combo);
-				ApplyKeyStatus(actionId, BindingVanillaOwnershipSync.BuildKeyStatusEntries(_bindings[actionId]));
+				ApplyKeyStatus(
+					actionId,
+					BindingVanillaOwnershipSync.BuildKeyStatusEntries(actionId, _bindings[actionId]));
 			}
 
 			InvalidateCompiled();
@@ -206,7 +208,9 @@ namespace AdvancedKeybinds.Core
 					if (pair.Value == null || pair.Value.IsEmpty)
 						continue;
 					_bindings[pair.Key] = Clone(pair.Value);
-					ApplyKeyStatus(pair.Key, BindingVanillaOwnershipSync.BuildKeyStatusEntries(_bindings[pair.Key]));
+					ApplyKeyStatus(
+						pair.Key,
+						BindingVanillaOwnershipSync.BuildKeyStatusEntries(pair.Key, _bindings[pair.Key]));
 				}
 			}
 
@@ -275,11 +279,10 @@ namespace AdvancedKeybinds.Core
 					continue;
 
 				List<string> current = GetVanillaAssigned(pair.Key);
-				if (BindingVanillaOwnershipSync.MatchesOwnershipFromSlots(
-					current, combo.Hold, combo.Slot1, combo.Slot2, combo.Slot3))
+				if (BindingVanillaOwnershipSync.MatchesExpectedKeyStatus(current, pair.Key, combo))
 					continue;
 
-				ApplyKeyStatus(pair.Key, BindingVanillaOwnershipSync.BuildKeyStatusEntries(combo));
+				ApplyKeyStatus(pair.Key, BindingVanillaOwnershipSync.BuildKeyStatusEntries(pair.Key, combo));
 				repaired++;
 			}
 
@@ -414,12 +417,35 @@ namespace AdvancedKeybinds.Core
 			_current.Clear();
 
 			BindingPhysicalHeldMatch.BeginFrame(Environment.TickCount);
+			BindingPhysicalHeldMatch.CollapsePhysicalAliasesInPlace(pressedNow);
+
+			// Vanilla KeyStatus OR (Escape / Tab for Inventory): fire when a KeyStatus entry is pressed.
+			SimulateVanillaKeyStatusOrEdges(pressedNow);
 
 			for (int i = 0; i < _compiledIds.Length; i++)
 			{
 				string actionId = _compiledIds[i];
 				ComboBindingData combo = _bindings[actionId];
 				List<string> keys = combo.Keys;
+
+				// Inventory Escape+plain Tab: vanilla KeyStatus OR owns fire (not FakeSession AK).
+				if (KeyboardAdditionalOrPolicy.VanillaKeyStatusOwnsAdditionalOr(
+					    actionId, combo.Hold, keys, combo.AdditionalOrToken))
+					continue;
+
+				bool orDown = combo.HasAdditionalOr
+					&& BindingPhysicalHeldMatch.IsHeld(combo.AdditionalOrToken, pressedNow);
+				bool orJust = orDown
+					&& !BindingPhysicalHeldMatch.IsHeld(combo.AdditionalOrToken, _previousPressed);
+				if (orJust)
+					_justPressed[actionId] = true;
+				if (orDown)
+					_current[actionId] = true;
+
+				// Exotic AdditionalOr on Inventory: AND Escape is vanilla — FakeSession only OR-fires.
+				if (KeyboardAdditionalOrPolicy.ShouldPreserveVanillaAndKeyWithAdditionalOr(
+					    actionId, combo.Hold, keys, combo.AdditionalOrToken))
+					continue;
 
 				if (combo.Hold && keys.Count == 1 && !combo.HoldOnRelease)
 				{
@@ -447,6 +473,9 @@ namespace AdvancedKeybinds.Core
 					continue;
 				}
 
+				if (keys.Count == 0)
+					continue;
+
 				BindingComboTapEvaluator.FrameResult r = BindingComboTapEvaluator.EvaluateNonHold(
 					combo.Hold, keys, pressedNow, _previousPressed);
 
@@ -469,6 +498,50 @@ namespace AdvancedKeybinds.Core
 			=> _current.TryGetValue(actionId, out bool v) && v;
 
 		/// <summary>
+		/// Mirrors Terraria PlayerInput for Inventory/MenuInquiry AdditionalOr vanilla OR lists only
+		/// (Escape + Tab). Does not arm plain single-tap bindings — those stay vanilla-only outside
+		/// FakeSession (existing ownership tests assert FakeSession does not fire them).
+		/// </summary>
+		private void SimulateVanillaKeyStatusOrEdges(HashSet<string> pressedNow)
+		{
+			foreach (KeyValuePair<string, List<string>> pair in _vanillaKeyStatus)
+			{
+				if (!_bindings.TryGetValue(pair.Key, out ComboBindingData combo) || combo == null)
+					continue;
+
+				if (!KeyboardAdditionalOrPolicy.VanillaKeyStatusOwnsAdditionalOr(
+					    pair.Key, combo.Hold, combo.Keys, combo.AdditionalOrToken))
+					continue;
+
+				List<string> entries = pair.Value;
+				if (entries == null || entries.Count == 0)
+					continue;
+
+				bool anyDown = false;
+				bool anyJust = false;
+				for (int i = 0; i < entries.Count; i++)
+				{
+					string entry = entries[i];
+					if (string.IsNullOrEmpty(entry) || AdvancedVanillaOwnershipMarker.IsMarker(entry))
+						continue;
+
+					bool down = BindingPhysicalHeldMatch.IsHeld(entry, pressedNow);
+					if (!down)
+						continue;
+
+					anyDown = true;
+					if (!BindingPhysicalHeldMatch.IsHeld(entry, _previousPressed))
+						anyJust = true;
+				}
+
+				if (anyJust)
+					_justPressed[pair.Key] = true;
+				if (anyDown)
+					_current[pair.Key] = true;
+			}
+		}
+
+		/// <summary>
 		/// Simulates ModKeybind consumer: require visible KeyStatus binding, then AK JustPressed.
 		/// </summary>
 		public bool ConsumerJustPressed(string actionId)
@@ -487,9 +560,13 @@ namespace AdvancedKeybinds.Core
 				Slot1Display = src.Slot1Display,
 				Slot2Display = src.Slot2Display,
 				Slot3Display = src.Slot3Display,
+				AlternateGamePadToken = src.AlternateGamePadToken,
+				AdditionalOrToken = src.AdditionalOrToken,
 				Hold = src.Hold,
 				HoldOnRelease = src.HoldOnRelease,
-				HoldMs = src.HoldMs
+				HoldMs = src.HoldMs,
+				PersistAsEmptyRecord = src.PersistAsEmptyRecord,
+				UseTerrariaKeyStatusOr = src.UseTerrariaKeyStatusOr
 			};
 		}
 	}

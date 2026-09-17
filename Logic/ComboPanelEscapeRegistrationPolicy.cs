@@ -193,6 +193,47 @@ namespace AdvancedKeybinds.Core
 				&& !keyboardEscapeDown;
 
 		/// <summary>
+		/// Display-name edit ended without Escape held: drop the dismiss key-up gate.
+		/// Per-frame gate arming while typing must not leave sticky same-press residue
+		/// that kills Controls ESC after mouse Save/Cancel back to 操作設定.
+		/// </summary>
+		public static bool ShouldClearDismissGateAfterNameEditEnds(bool keyboardEscapeDown)
+			=> !keyboardEscapeDown;
+
+		/// <summary>
+		/// Panel Close (mouse Save/Cancel or ForceClose) must clear grace + protect frames
+		/// together with the key-up gate. Clearing only the gate left EscDismissGrace armed
+		/// so the next Escape on Controls looked like same-press and Inventory stayed dead.
+		/// Idle ESC dismiss re-arms grace via BeginEscDismissGrace after Close.
+		/// </summary>
+		public static bool ShouldClearEscDismissGraceOnPanelClose()
+			=> true;
+
+		/// <summary>
+		/// After display-name edit ends, the next Idle ESC panel dismiss must still arm the
+		/// key-up gate (same press must not FancyUI.Close), but must NOT arm timed EscDismissGrace.
+		/// Timed grace made Controls ESC feel dead around rename → panel ESC → settings ESC.
+		/// Normal Idle ESC (no pending name-edit session) keeps timed grace.
+		/// </summary>
+		public static bool ShouldArmTimedEscDismissGraceAfterIdleClose(bool pendingAfterNameEditSession)
+			=> !pendingAfterNameEditSession;
+
+		/// <summary>
+		/// While Idle-ESC release-protect is armed, always suppress parent Inventory / FancyUI
+		/// close — including on Escape key-up (LIVE: FANCY_CLOSE_ALLOWED with kbEsc=0).
+		/// </summary>
+		public static bool ShouldSuppressParentDuringEscDismissReleaseProtect(bool protectFramesActive)
+			=> protectFramesActive;
+
+		/// <summary>
+		/// LIVE 2026-09-16: protect=3 frames expired in ~33ms while SharedUi latch + ApplyAdvanced
+		/// still re-injected Inventory JP → FancyUI.Close. Keep protect for this many Escape-up
+		/// game updates after Idle ESC panel dismiss (new Escape press clears early).
+		/// Inventory / MenuInquiry only — must not clear Jump/Throw gameplay Triggers.
+		/// </summary>
+		public const int IdleEscParentProtectRequiredEscapeUpUpdates = 12;
+
+		/// <summary>
 		/// Pad back / close-consume gates must not run Inventory suppress outside Controls/Combo context.
 		/// </summary>
 		public static bool ShouldApplyPadParentInventorySuppress(

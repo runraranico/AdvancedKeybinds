@@ -55,6 +55,16 @@ namespace AdvancedKeybinds
 		[CustomModConfigItem(typeof(WindowsOnlyBoolElement))]
 		public bool SuppressWindowsKey { get; set; } = false;
 
+		/// <summary>
+		/// When Input Method Fixer is present and IME is ON, temporarily Disable IME during ComboPanel
+		/// key capture so letter keys can bind (Steam "无法绑定"). Restores IME after capture.
+		/// Does not modify IMF. Default ON (safe: no-op when IMF absent or IME already off).
+		/// </summary>
+		[LabelKey("$Mods.AdvancedKeybinds.Config.WindowsKey.SuppressImeDuringKeyCapture.Label")]
+		[TooltipKey("$Mods.AdvancedKeybinds.Config.WindowsKey.SuppressImeDuringKeyCapture.Tooltip")]
+		[DefaultValue(true)]
+		public bool SuppressImeDuringKeyCapture { get; set; } = true;
+
 		// Cursor-confine section: hidden from ModConfig UI for now (logic + prefs + Ctrl+Shift+Alt+M remain).
 		// To show again: restore [Header] below and add [ShowDespiteJsonIgnore] on both properties.
 		// [Header("$Mods.AdvancedKeybinds.Config.Guide.NotesHeader")]

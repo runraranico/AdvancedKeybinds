@@ -72,6 +72,11 @@ Config: {
 			Label: Блокировать горячие клавиши отладочного UI Terraria
 			Tooltip: Не даёт открываться специальному UI Terraria по F7, F8, F10 и F11. Клавиши по-прежнему можно использовать для привязок и действий мода.
 		}
+
+		SuppressImeDuringKeyCapture: {
+			Label: Приостановить IME при назначении клавиш
+			Tooltip: Если установлен Input Method Fixer и IME включён, временно отключает IME только во время регистрации клавиши на панели комбо, затем восстанавливает.
+		}
 	}
 
 	Guide: {
@@ -213,6 +218,20 @@ UI: {
 		MouseWheelDown: Wheel Down
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
+	}
+
+	AdditionalOr: {
+		TabAnd: Комбо (AND)
+		TabOr: Доп. клавиша (OR)
+		TabAndTooltipTitle: Комбо (AND)
+		TabAndTooltipBody: Срабатывает, когда все зарегистрированные клавиши нажаты вместе
+		TabOrTooltipTitle: Доп. клавиша (OR)
+		TabOrTooltipBody: Увеличивает доступные клавиши
+		CenterLabel: Настройка доп. клавиши
+		SlotEmpty: Доп. клавиша
+		HintLine1: ЛКМ по правому слоту, чтобы зарегистрировать доп. клавишу
+		HintLine2: Доп. клавиши нельзя использовать в комбо
+		HintLine3: ПКМ по слоту доп. клавиши, чтобы снять назначение
 	}
 
 	TwoKeySetup: {

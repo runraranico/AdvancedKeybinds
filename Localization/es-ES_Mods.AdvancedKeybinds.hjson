@@ -72,6 +72,11 @@ Config: {
 			Label: Suprimir atajos de UI de depuración de Terraria
 			Tooltip: Impide que se abra la UI especial de Terraria con F7, F8, F10 y F11. Las teclas siguen disponibles para vinculaciones y acciones del mod.
 		}
+
+		SuppressImeDuringKeyCapture: {
+			Label: Pausar IME al asignar teclas
+			Tooltip: Cuando Input Method Fixer está instalado y el IME está activo, desactiva temporalmente el IME solo mientras asignas una tecla en el panel de combos y luego lo restaura.
+		}
 	}
 
 	Guide: {
@@ -213,6 +218,20 @@ UI: {
 		MouseWheelDown: Wheel Down
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
+	}
+
+	AdditionalOr: {
+		TabAnd: Combo (AND)
+		TabOr: Tecla extra (OR)
+		TabAndTooltipTitle: Combo (AND)
+		TabAndTooltipBody: Se activa al pulsar todas las teclas registradas a la vez
+		TabOrTooltipTitle: Tecla extra (OR)
+		TabOrTooltipBody: Aumenta las teclas disponibles
+		CenterLabel: Configuración de tecla extra
+		SlotEmpty: Tecla extra
+		HintLine1: Clic izquierdo en la casilla derecha para registrar una tecla extra
+		HintLine2: Las teclas extra no se pueden usar en combos
+		HintLine3: Clic derecho en la casilla de tecla extra para quitarla
 	}
 
 	TwoKeySetup: {

@@ -40,6 +40,12 @@ namespace AdvancedKeybinds.Binding
 		public string AlternateGamePadToken;
 
 		/// <summary>
+		/// Keyboard/Mouse additional OR key for allowlisted vanilla actions.
+		/// Fires independently of AND slots (no Hold). Distinct from <see cref="AlternateGamePadToken"/>.
+		/// </summary>
+		public string AdditionalOrToken;
+
+		/// <summary>
 		/// Explicit empty GamePad two-key Terraria-OR record must stay in Combos/JSON.
 		/// </summary>
 		public bool PersistAsEmptyRecord;
@@ -67,7 +73,8 @@ namespace AdvancedKeybinds.Binding
 		[JsonIgnore]
 		public bool IsEmpty => string.IsNullOrEmpty(Slot1)
 			&& string.IsNullOrEmpty(Slot2)
-			&& string.IsNullOrEmpty(Slot3);
+			&& string.IsNullOrEmpty(Slot3)
+			&& string.IsNullOrEmpty(AdditionalOrToken);
 
 		/// <summary>The hold duration to actually use, clamped to the valid range with a default fallback.</summary>
 		[JsonIgnore]
@@ -99,7 +106,8 @@ namespace AdvancedKeybinds.Binding
 		/// </summary>
 		[JsonIgnore]
 		public bool IsPlainSingleTap
-			=> PlainSingleTapPolicy.IsPlainSingleTap(Hold, Keys);
+			=> PlainSingleTapPolicy.IsPlainSingleTap(Hold, Keys)
+				&& !KeyboardAdditionalOrPolicy.HasToken(AdditionalOrToken);
 
 		/// <summary>
 		/// True when this combo must drive input through our engine (multi-key, hold, mouse,
@@ -111,12 +119,17 @@ namespace AdvancedKeybinds.Binding
 				return false;
 			return PlainSingleTapPolicy.RequiresAdvancedStorage(Hold, Keys, IsEmpty)
 				|| AlternateGamePadBindingPolicy.RequiresAdvancedOwnershipForAlternate(
-					Hold, AlternateGamePadToken, FilledSlotCount);
+					Hold, AlternateGamePadToken, FilledSlotCount)
+				|| KeyboardAdditionalOrPolicy.RequiresAdvancedOwnership(AdditionalOrToken);
 		}
 
 		[JsonIgnore]
 		public bool HasAlternateGamePad
 			=> AlternateGamePadBindingPolicy.HasAlternate(AlternateGamePadToken);
+
+		[JsonIgnore]
+		public bool HasAdditionalOr
+			=> KeyboardAdditionalOrPolicy.HasToken(AdditionalOrToken);
 
 		public string GetSlot(int index) => index switch {
 			1 => Slot1,
@@ -189,6 +202,7 @@ namespace AdvancedKeybinds.Binding
 			Slot2Display = Slot2Display,
 			Slot3Display = Slot3Display,
 			AlternateGamePadToken = AlternateGamePadToken,
+			AdditionalOrToken = AdditionalOrToken,
 			PersistAsEmptyRecord = PersistAsEmptyRecord,
 			UseTerrariaKeyStatusOr = UseTerrariaKeyStatusOr,
 			Hold = Hold,
@@ -211,6 +225,7 @@ namespace AdvancedKeybinds.Binding
 				&& string.Equals(a.Slot2Display, b.Slot2Display, StringComparison.Ordinal)
 				&& string.Equals(a.Slot3Display, b.Slot3Display, StringComparison.Ordinal)
 				&& string.Equals(a.AlternateGamePadToken, b.AlternateGamePadToken, StringComparison.Ordinal)
+				&& string.Equals(a.AdditionalOrToken, b.AdditionalOrToken, StringComparison.Ordinal)
 				&& a.Hold == b.Hold
 				&& a.HoldOnRelease == b.HoldOnRelease
 				&& a.HoldMs == b.HoldMs

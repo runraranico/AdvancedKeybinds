@@ -377,6 +377,10 @@ namespace AdvancedKeybinds.Patches
 						// Reused ManageControlsMenu keeps OnGameplay=false after Menu Controls close.
 						// Force Gameplay (剣) before AssembleBindPanels/FillList inside OnActivate.
 						ControlsManageOpenGameplayTab.ForceGameplayTabBeforeActivate(self);
+						// Steam Deck: force controller device tab (OnKeyboard=false) so open matches pad UX.
+						ControlsManageOpenGamepadDeviceTab.ForceGamepadDeviceTabBeforeActivate(
+							self,
+							AkPlatform.IsSteamDeck);
 						orig(self);
 					}
 					finally

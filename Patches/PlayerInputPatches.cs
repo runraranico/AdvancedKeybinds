@@ -14,9 +14,13 @@ namespace AdvancedKeybinds.Patches
 	internal static class PlayerInputPatches
 	{
 		private delegate void orig_Void();
+		private delegate void OrigToggleInv(Player self);
+		private static bool _toggleInvOneShotHookInstalled;
 
 		public static void Apply()
 		{
+			TryHookToggleInvWorldOneShot();
+
 			MethodInfo updateInput = typeof(PlayerInput).GetMethod("UpdateInput", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
 				?? typeof(PlayerInput).GetMethod("Update", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 
@@ -123,6 +127,7 @@ namespace AdvancedKeybinds.Patches
 					ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.beforeOrig");
 #endif
 					orig();
+					InventoryEscLiveVerifySystem.NoteInventoryJpPhase("afterVanilla");
 #if AK_DIAGNOSTICS
 					ComboPanelEscPathDiag.Note("PlayerInput.afterOrig");
 					ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.afterOrig");
@@ -147,6 +152,12 @@ namespace AdvancedKeybinds.Patches
 #endif
 
 					ComboPanel.SuppressEscapeAfterVanillaInputRebuild();
+					// Settings menus: Tab AdditionalOr must not ToggleInv-close (Escape only).
+					// World / inventory gameplay: leave Tab Inventory alone.
+					ComboPanel.SuppressTabInventoryOnSettingsMenusIfNeeded();
+					// After settings Escape leave: keep Inventory dead until Escape key-up.
+					ComboPanel.PollSettingsEscapeLeaveInventoryGate();
+					ComboPanel.PollWorldEscapeInventoryOneShotGate();
 #if AK_DIAGNOSTICS
 					AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterSuppressEscape");
 #endif
@@ -198,6 +209,26 @@ namespace AdvancedKeybinds.Patches
 #endif
 
 				ApplyAdvancedBindingsToTriggers();
+					InventoryEscLiveVerifySystem.NoteInventoryJpPhase("afterApply");
+					// Advanced OR may re-arm Inventory from Tab after vanilla suppress — clear again on menus.
+					ComboPanel.SuppressTabInventoryOnSettingsMenusIfNeeded();
+					// Same Escape press after settings leave must not re-open inventory.
+					ComboPanel.PollSettingsEscapeLeaveInventoryGate();
+					ComboPanel.PollWorldEscapeInventoryOneShotGate();
+					// Settings / title Escape leave safety net (KeyStatus owns Escape but AK cleared edge).
+					// Product path — not diagnostics (title BackButtonInUse needs Inventory JP).
+					InventoryEscapeRearm.ApplyAfterAkSuppress();
+					InventoryEscLiveVerifySystem.NoteInventoryJpPhase("afterRearm");
+					// B1: releaseInventory stuck false after ComboPanel dismiss → Controls ESC dead.
+					ComboPanel.TryRestoreReleaseInventoryForSettingsEscapeLeave();
+					InventoryEscLiveVerifySystem.TickFromGameLoop("PlayerInput.afterRearm");
+					ComboPanel.PollSettingsEscapeLeaveInventoryGate();
+					ComboPanel.PollWorldEscapeInventoryOneShotGate();
+					ComboPanel.TryRestoreReleaseInventoryForSettingsEscapeLeave();
+					// LIVE: ApplyAdvanced may re-inject Inventory JP after Idle-ESC suppress — re-clear.
+					ComboPanel.PollIdleEscParentReleaseProtectAfterAdvanced();
+					// After Advanced apply: typed Jump/Throw/QuickMount etc. from display-name edit.
+					ComboPanel.PollPostTextEditGameplaySettle();
 #if AK_DIAGNOSTICS
 				AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterApplyAdvancedBindings");
 				PadFaceMappingAutoDiagnosticSystem.ObserveAfterApplyAdvanced();
@@ -227,6 +258,63 @@ namespace AdvancedKeybinds.Patches
 				AdvancedKeybinds.Instance?.Logger.Warn("Advanced Keybinds could not find PlayerInput update method; advanced bindings may be limited.");
 			}
 		}
+
+		/// <summary>
+		/// Product: single Player.ToggleInv detour — same-frame coalesce + world Escape one-shot + LIVE note.
+		/// </summary>
+		private static void TryHookToggleInvWorldOneShot()
+		{
+			if (_toggleInvOneShotHookInstalled)
+				return;
+			try
+			{
+				MethodInfo mi = typeof(Player).GetMethod(
+					"ToggleInv",
+					BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+				if (mi == null)
+				{
+					AdvancedKeybinds.Instance?.Logger.Warn(
+						"Advanced Keybinds could not hook Player.ToggleInv; world Escape coalesce unavailable.");
+					return;
+				}
+
+				ModDetours.Apply(mi, (OrigToggleInv orig, Player self) => {
+					int gameUpdate = 0;
+					try { gameUpdate = unchecked((int)Main.GameUpdateCount); }
+					catch { gameUpdate = 0; }
+
+					if (!ToggleInvSameFrameCoalescePolicy.ShouldInvokeOrig(
+						gameUpdate,
+						ref _toggleInvLastGameUpdate,
+						ref _toggleInvInvokedThisUpdate))
+					{
+						return;
+					}
+
+					bool before = false;
+					try { before = Main.playerInventory; }
+					catch { before = false; }
+
+					orig(self);
+
+					bool after = false;
+					try { after = Main.playerInventory; }
+					catch { after = false; }
+
+					ComboPanel.TryArmWorldEscapeInventoryOneShotAfterToggleInv();
+					InventoryEscLiveVerifySystem.NoteToggleInvCall(self, before, after);
+				});
+				_toggleInvOneShotHookInstalled = true;
+			}
+			catch (System.Exception ex)
+			{
+				AdvancedKeybinds.Instance?.Logger.Warn(
+					"Advanced Keybinds ToggleInv coalesce hook failed: " + ex.GetType().Name);
+			}
+		}
+
+		private static int _toggleInvLastGameUpdate = int.MinValue;
+		private static bool _toggleInvInvokedThisUpdate;
 
 		private static void ApplyAdvancedBindingsToTriggers()
 		{

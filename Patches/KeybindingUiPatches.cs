@@ -283,6 +283,9 @@ namespace AdvancedKeybinds.Patches
 			bool isGamePadRow = TryGetRowInputMode(self, out InputMode rowMode)
 				&& ControlsGamePadGlyphDisplayPolicy.IsTargetControlsGamePadMode(rowMode.ToString());
 			string modeName = isGamePadRow ? rowMode.ToString() : null;
+			GamePadControllerFamily padFamily = isGamePadRow
+				? GamePadControllerFamilySnapshot.Current
+				: GamePadControllerFamily.Unknown;
 
 			List<string> mapped = null;
 			for (int i = 0; i < list.Count; i++)
@@ -308,9 +311,12 @@ namespace AdvancedKeybinds.Patches
 							modeName,
 							BindingDisplayText.UnwrapOwnershipMarkerForDisplay(token),
 							alias,
+							padFamily,
 							out string resolved);
+					// GlyphButtonsName → Xbox [g:N]; FallbackText → PS plain labels (×○□△ …).
 					if (path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.GlyphButtonsName
-						|| path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.UserAlias)
+						|| path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.UserAlias
+						|| path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.FallbackText)
 					{
 						if (!string.Equals(resolved, token, StringComparison.Ordinal))
 						{
@@ -393,11 +399,15 @@ namespace AdvancedKeybinds.Patches
 				    GamePadToken.IsPadToken(alternate)))
 				return false;
 
+			GamePadControllerFamily padFamily = GamePadControllerFamilySnapshot.Current;
 			if (!AlternateGamePadControlsGlyphPolicy.TryBuildGenInputPair(
 				    primary,
 				    alternate,
-				    pad => ControlsGamePadGlyphDisplayPolicy.TryResolveGlyphButtonsName(pad, out string b) ? b : null,
-				    GamePadToken.FormatForDisplay,
+				    pad => ControlsGamePadGlyphDisplayPolicy.TryResolveGlyphButtonsNameForFamily(
+					    padFamily, pad, out string b)
+					    ? b
+					    : null,
+				    pad => ControlsGamePadGlyphDisplayPolicy.FormatControlsFallbackForFamily(padFamily, pad),
 				    out AlternateGamePadControlsGlyphPolicy.DisplayEntry left,
 				    out AlternateGamePadControlsGlyphPolicy.DisplayEntry right))
 				return false;
@@ -438,55 +448,108 @@ namespace AdvancedKeybinds.Patches
 		/// first press arms a mouse-following confirm tip; second press on the same row clears
 		/// the binding. Leaving the armed row cancels the confirm (tip disappears). Edge is
 		/// sampled once per input tick and consumed on use. Ignored while the left button is
-		/// held (scroll/drag). Does not use UI OnRightClick / 対話・動作.
+		/// held (scroll/drag). Does not use UI OnRightClick.
+		/// Hooked on both the keybind list item and CreatePanel (full Mod Controls row including
+		/// Reset) so hover over the Reset half still works — same coverage as middle-click.
 		/// </summary>
 		private static void HookRowRightClickClear(UIElement row, string bind, InputMode mode)
 		{
 			row.OnUpdate += _ => {
-				if (ComboPanel.IsOpen)
-					return;
-
-				// Cancel when the cursor leaves the armed row (including moving onto another row).
-				if (IsPendingUnsetConfirm(bind))
-				{
-					if (!row.IsMouseHovering)
-					{
-						ClearPendingUnsetConfirm();
-						return;
-					}
-
-					_pendingUnsetConfirmTipLatch = true;
-				}
-
-				if (!row.IsMouseHovering)
-					return;
-
-				// Left-drag / scrollbar drag must never clear rows.
-				if (MouseInputHelper.IsPhysicalLeftDown())
-					return;
-
-				if (!TryConsumePhysicalRightJustPressedForRowClear())
-					return;
-
-				if (IsPendingUnsetConfirm(bind))
-				{
-					ClearPendingUnsetConfirm();
-					ClearRowToUnset(bind, mode);
-					return;
-				}
-
-				// Only arm confirm when the row actually has something to clear.
-				string storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)mode, bind);
-				bool hadAdvanced = BindingStorage.HasRecord(storageKey)
-					|| BindingStorage.HasAdvancedBindings(storageKey);
-				bool hadVanilla = ControlsEditTargetPolicy.IsGamePadModeOrdinal((int)mode)
-					? !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKeyForInputMode(bind, mode))
-					: !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKey(bind));
-				if (!hadAdvanced && !hadVanilla)
-					return;
-
-				ArmPendingUnsetConfirm(bind);
+				TryProcessPhysicalRightClickUnset(row, bind, mode, row.IsMouseHovering);
 			};
+		}
+
+		/// <summary>
+		/// Shared unset edge for list-item and CreatePanel. Returns after consume so only one
+		/// handler per press acts. Prefer live <see cref="TryGetRowInputMode"/> when available.
+		/// </summary>
+		private static void TryProcessPhysicalRightClickUnset(
+			UIElement hoverSource,
+			string bind,
+			InputMode constructedMode,
+			bool isHovering)
+		{
+			if (ComboPanel.IsOpen || string.IsNullOrEmpty(bind))
+				return;
+
+			InputMode mode = constructedMode;
+			if (hoverSource != null && TryGetRowInputMode(hoverSource, out InputMode live))
+				mode = live;
+
+			// Cancel when the cursor leaves the armed row. Inner list-item must not cancel while the
+			// parent CreatePanel (Reset half) is still hovered — same full-row coverage as middle-click.
+			if (IsPendingUnsetConfirm(bind))
+			{
+				if (!isHovering)
+				{
+					if (IsAncestorMouseHovering(hoverSource))
+						return;
+					ClearPendingUnsetConfirm();
+					return;
+				}
+
+				_pendingUnsetConfirmTipLatch = true;
+			}
+
+			if (!isHovering)
+				return;
+
+			// Left-drag / scrollbar drag must never clear rows.
+			if (MouseInputHelper.IsPhysicalLeftDown())
+				return;
+
+			if (!TryConsumePhysicalRightJustPressedForRowClear())
+				return;
+
+			if (IsPendingUnsetConfirm(bind))
+			{
+				ClearPendingUnsetConfirm();
+				ClearRowToUnset(bind, mode);
+				return;
+			}
+
+			if (!RowHasAssignableBindingForUnset(bind, mode))
+				return;
+
+			ArmPendingUnsetConfirm(bind);
+		}
+
+		/// <summary>True when a parent UIElement still reports mouse hover (CreatePanel over Reset).</summary>
+		private static bool IsAncestorMouseHovering(UIElement element)
+		{
+			for (UIElement p = element?.Parent; p != null; p = p.Parent)
+			{
+				if (p.IsMouseHovering)
+					return true;
+			}
+
+			return false;
+		}
+
+		/// <summary>
+		/// True when AK storage and/or vanilla KeyStatus (row mode + Keyboard sibling) has a binding.
+		/// </summary>
+		private static bool RowHasAssignableBindingForUnset(string bind, InputMode mode)
+		{
+			string storageKey = ControlsGameUiSeparationPolicy.ResolveStorageKey((int)mode, bind);
+			bool hadAdvanced = BindingStorage.HasRecord(storageKey)
+				|| BindingStorage.HasAdvancedBindings(storageKey);
+			bool hadVanilla = !string.IsNullOrEmpty(
+				VanillaRebindHelper.GetAssignedKeyForInputMode(bind, mode));
+			if (!hadVanilla
+				&& ControlsRowUnsetArmPolicy.IncludeKeyboardSiblingMode((int)mode))
+			{
+				InputMode sibling = mode == InputMode.Keyboard
+					? InputMode.KeyboardUI
+					: InputMode.Keyboard;
+				hadVanilla = !string.IsNullOrEmpty(
+					VanillaRebindHelper.GetAssignedKeyForInputMode(bind, sibling));
+			}
+
+			if (!hadVanilla && !ControlsEditTargetPolicy.IsGamePadModeOrdinal((int)mode))
+				hadVanilla = !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKey(bind));
+
+			return ControlsRowUnsetArmPolicy.ShouldArmConfirm(hadAdvanced, hadVanilla);
 		}
 
 		/// <summary>
@@ -834,12 +897,7 @@ namespace AdvancedKeybinds.Patches
 			bool twoKeyTerrariaOr = GamePadTwoKeyTerrariaOrPolicy.IsTarget((int)mode, actionId);
 			bool modKeybind = ControlsGameUiSeparationPolicy.IsModKeybindActionId(actionId);
 
-			bool hadAdvanced = BindingStorage.HasRecord(storageKey)
-				|| BindingStorage.HasAdvancedBindings(storageKey);
-			bool hadVanilla = gamePad
-				? !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKeyForInputMode(actionId, mode))
-				: !string.IsNullOrEmpty(VanillaRebindHelper.GetAssignedKeyForInputMode(actionId, mode));
-			if (!hadAdvanced && !hadVanilla)
+			if (!RowHasAssignableBindingForUnset(actionId, mode))
 				return;
 
 			ControlsBindingUndo.Snapshot undo = ControlsBindingUndo.Capture(storageKey);
@@ -1063,10 +1121,16 @@ namespace AdvancedKeybinds.Patches
 				ResetRowToDefault(bind, mode);
 			};
 
-			// Middle-click anywhere on the CreatePanel row (key slot or Reset label) restores default.
+			// Middle-click / right-click unset: whole CreatePanel row (key slot + Reset label).
 			panel.OnUpdate += _ => {
 				if (ComboPanel.IsOpen || !panel.IsMouseHovering)
+				{
+					// Still run unset cancel path when leaving the full panel.
+					TryProcessPhysicalRightClickUnset(panel, bind, mode, panel.IsMouseHovering);
 					return;
+				}
+
+				TryProcessPhysicalRightClickUnset(panel, bind, mode, isHovering: true);
 
 				if (MouseInputHelper.IsPhysicalLeftDown() || MouseInputHelper.IsPhysicalRightDown())
 					return;
@@ -1811,6 +1875,7 @@ namespace AdvancedKeybinds.Patches
 			if (!ControlsGamePadGlyphDisplayPolicy.IsTargetControlsGamePadMode(modeName))
 				return BindingDisplayResolver.FormatComboDisplayLabel(combo);
 
+			GamePadControllerFamily padFamily = GamePadControllerFamilySnapshot.Current;
 			if (combo.HasAlternateGamePad
 				&& combo.FilledSlotCount == 1
 				&& GamePadToken.IsPadToken(combo.Keys[0])
@@ -1818,8 +1883,11 @@ namespace AdvancedKeybinds.Patches
 				&& AlternateGamePadControlsGlyphPolicy.TryBuildGenInputPair(
 					combo.Keys[0],
 					combo.AlternateGamePadToken,
-					pad => ControlsGamePadGlyphDisplayPolicy.TryResolveGlyphButtonsName(pad, out string b) ? b : null,
-					GamePadToken.FormatForDisplay,
+					pad => ControlsGamePadGlyphDisplayPolicy.TryResolveGlyphButtonsNameForFamily(
+						padFamily, pad, out string b)
+						? b
+						: null,
+					pad => ControlsGamePadGlyphDisplayPolicy.FormatControlsFallbackForFamily(padFamily, pad),
 					out AlternateGamePadControlsGlyphPolicy.DisplayEntry left,
 					out AlternateGamePadControlsGlyphPolicy.DisplayEntry right))
 			{
@@ -1830,7 +1898,7 @@ namespace AdvancedKeybinds.Patches
 				return ApplyControlsHoldPrefix(joined, combo);
 			}
 
-			if (TryBuildControlsGamePadGlyphJoinedLabel(combo, modeName, out string glyphJoined))
+			if (TryBuildControlsGamePadGlyphJoinedLabel(combo, modeName, padFamily, out string glyphJoined))
 				return ApplyControlsHoldPrefix(glyphJoined, combo);
 
 			return BindingDisplayResolver.FormatComboDisplayLabel(combo);
@@ -1856,20 +1924,21 @@ namespace AdvancedKeybinds.Patches
 		private static bool TryBuildControlsGamePadGlyphJoinedLabel(
 			ComboBinding combo,
 			string modeName,
+			GamePadControllerFamily family,
 			out string joined)
 		{
 			joined = null;
 			if (combo == null || combo.IsEmpty)
 				return false;
 
-			bool anyGlyph = false;
+			bool anyResolved = false;
 			var parts = new List<string>(4);
 
 			if (combo.HasAlternateGamePad && combo.FilledSlotCount == 1)
 			{
 				AppendToken(combo.AlternateGamePadToken, null);
 				AppendToken(combo.Keys[0], combo.GetSlotDisplay(1));
-				if (!anyGlyph || parts.Count == 0)
+				if (!anyResolved || parts.Count == 0)
 					return false;
 				joined = string.Join(AlternateGamePadControlsGlyphPolicy.VanillaGenInputSeparator, parts);
 				return true;
@@ -1878,7 +1947,7 @@ namespace AdvancedKeybinds.Patches
 			AppendToken(combo.Slot1, combo.Slot1Display);
 			AppendToken(combo.Slot2, combo.Slot2Display);
 			AppendToken(combo.Slot3, combo.Slot3Display);
-			if (!anyGlyph || parts.Count == 0)
+			if (!anyResolved || parts.Count == 0)
 				return false;
 			joined = string.Join("+", parts);
 			return true;
@@ -1899,11 +1968,18 @@ namespace AdvancedKeybinds.Patches
 					alias = slotDisplayOverride.Trim();
 
 				ControlsGamePadGlyphDisplayPolicy.DisplayPath path =
-					ControlsGamePadGlyphDisplayPolicy.ResolveDisplay(modeName, raw, alias, out string value);
+					ControlsGamePadGlyphDisplayPolicy.ResolveDisplay(
+						modeName, raw, alias, family, out string value);
 				if (path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.GlyphButtonsName)
 				{
-					anyGlyph = true;
+					anyResolved = true;
 					parts.Add(GlyphTagHandler.GenerateTag(value));
+				}
+				else if (path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.FallbackText
+					|| path == ControlsGamePadGlyphDisplayPolicy.DisplayPath.UserAlias)
+				{
+					anyResolved = true;
+					parts.Add(value);
 				}
 				else
 					parts.Add(value);

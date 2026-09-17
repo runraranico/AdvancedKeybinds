@@ -148,13 +148,25 @@ namespace AdvancedKeybinds.Patches
 				KeybindingUiPatches.EnsureControlsUndoButton(self);
 				ControlsPadBHoldCancelFocus.BeforeManageControlsUpdate();
 				ComboPanelCloseInputConsumeGate.PollAndSuppress();
-				ComboPanel.PrepareParentMenuForEscape();
-				ComboPanel.PollPadBackCloseGateAndSuppressParent();
-				ComboPanel.GuardModalInput();
+				// Only while ComboPanel owns Escape / same-press swallow — idle Controls must leave
+				// Inventory for Escape/Tab → ToggleInv → IngameFancyUI.Close.
+				if (ComboPanel.IsOpen || ComboPanel.ShouldSwallowMenuEscape())
+				{
+					ComboPanel.PrepareParentMenuForEscape();
+					ComboPanel.PollPadBackCloseGateAndSuppressParent();
+					ComboPanel.GuardModalInput();
+				}
+				else
+					ComboPanel.PollPadBackCloseGateAndSuppressParent();
 				orig(self, gameTime);
-				ComboPanel.PrepareParentMenuForEscape();
-				ComboPanel.PollPadBackCloseGateAndSuppressParent();
-				ComboPanel.GuardModalInput();
+				if (ComboPanel.IsOpen || ComboPanel.ShouldSwallowMenuEscape())
+				{
+					ComboPanel.PrepareParentMenuForEscape();
+					ComboPanel.PollPadBackCloseGateAndSuppressParent();
+					ComboPanel.GuardModalInput();
+				}
+				else
+					ComboPanel.PollPadBackCloseGateAndSuppressParent();
 				ComboPanelCloseInputConsumeGate.PollAndSuppress();
 				ControlsPadBHoldCancelFocus.BeforeManageControlsUpdate();
 #if AK_DIAGNOSTICS
@@ -179,24 +191,45 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			ModDetours.Apply(close, (orig_FancyClose orig) => {
-				if (!ComboPanel.ShouldBlockFancyUiClose()
-					&& !ComboPanelCloseInputConsumeGate.ShouldBlockParentBack())
+				// Keyboard Escape leave: pad close-consume must not block (Esc-only menu back).
+				bool keyboardEscapeDown = false;
+				try
+				{
+					keyboardEscapeDown = Microsoft.Xna.Framework.Input.Keyboard.GetState()
+						.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Escape);
+				}
+				catch
+				{
+					keyboardEscapeDown = false;
+				}
+
+				bool padConsumeBlocks = !keyboardEscapeDown
+					&& ComboPanelCloseInputConsumeGate.ShouldBlockParentBack();
+
+				if (!ComboPanel.ShouldBlockFancyUiClose() && !padConsumeBlocks)
 				{
 #if AK_DIAGNOSTICS
 					ComboPanelEscPathDiag.NoteStack("IngameFancyUI.Close.ALLOWED");
 					ComboPanelIdleEscPathDiag.Note("FancyUI.Close.ALLOWED");
 #endif
+					InventoryEscLiveVerifySystem.NoteFancyUiClose(
+						allowed: true,
+						padConsumeBlocked: false,
+						samePress: ComboPanel.IsEscapeSamePressActivePublic(),
+						keyboardEscapeDown: keyboardEscapeDown);
 					// Pad:B held after panel close without gate ⇒ parent Controls would close (leak).
 					if (!ComboPanel.IsOpen
 						&& FnaGamePadProvider.IsDown(GamePadToken.B))
 						GamePadProbeSystem.LogControlsCloseLeak("FancyUI.Close.PadBHeld");
+					bool inventoryOpenBeforeClose = Main.playerInventory;
 					orig();
-					// Vanilla Close sets playerInventory=true; undo before the next draw when we opened via shortcut.
-					KeybindShortcutSystem.SuppressVanillaInventoryOpenAfterShortcutUiClose();
+					// Vanilla Close sets playerInventory=true; undo so Esc back never flashes inventory.
+					KeybindShortcutSystem.SuppressVanillaInventoryOpenAfterSettingsUiClose(inventoryOpenBeforeClose);
+					ComboPanel.ArmSettingsEscapeLeaveInventoryGate();
 					return;
 				}
 
-				if (ComboPanelCloseInputConsumeGate.ShouldBlockParentBack())
+				if (padConsumeBlocks)
 				{
 					ComboPanelCloseInputConsumeGate.LogDuplicateBackBlocked(
 						"CloseComboPanel",
@@ -207,6 +240,11 @@ namespace AdvancedKeybinds.Patches
 				ComboPanelEscPathDiag.NoteStack("IngameFancyUI.Close.BLOCKED");
 				ComboPanelIdleEscPathDiag.Note("FancyUI.Close.BLOCKED");
 #endif
+				InventoryEscLiveVerifySystem.NoteFancyUiClose(
+					allowed: false,
+					padConsumeBlocked: padConsumeBlocks,
+					samePress: ComboPanel.IsEscapeSamePressActivePublic(),
+					keyboardEscapeDown: keyboardEscapeDown);
 				if (AkDiag.Enabled) AkDiag.Log("Blocked IngameFancyUI.Close while combo panel is open.");
 			});
 		}
@@ -226,8 +264,10 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			ModDetours.Apply(close, (orig_FancyClose orig) => {
+				bool inventoryOpenBeforeClose = Main.playerInventory;
 				orig();
-				KeybindShortcutSystem.SuppressVanillaInventoryOpenAfterShortcutUiClose();
+				KeybindShortcutSystem.SuppressVanillaInventoryOpenAfterSettingsUiClose(inventoryOpenBeforeClose);
+				ComboPanel.ArmSettingsEscapeLeaveInventoryGate();
 			});
 		}
 	}

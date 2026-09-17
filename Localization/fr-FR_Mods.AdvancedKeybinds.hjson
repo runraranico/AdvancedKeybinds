@@ -72,6 +72,11 @@ Config: {
 			Label: Supprimer les raccourcis UI de débogage de Terraria
 			Tooltip: Empêche l'ouverture de l'UI spéciale de Terraria avec F7, F8, F10 et F11. Les touches restent utilisables pour les liaisons et actions du mod.
 		}
+
+		SuppressImeDuringKeyCapture: {
+			Label: Mettre l'IME en pause pendant l'assignation
+			Tooltip: Lorsque Input Method Fixer est installé et que l'IME est activé, désactive temporairement l'IME uniquement pendant l'enregistrement d'une touche dans le panneau combo, puis le rétablit.
+		}
 	}
 
 	Guide: {
@@ -213,6 +218,20 @@ UI: {
 		MouseWheelDown: Wheel Down
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
+	}
+
+	AdditionalOr: {
+		TabAnd: Combo (AND)
+		TabOr: Touche extra (OR)
+		TabAndTooltipTitle: Combo (AND)
+		TabAndTooltipBody: S'active lorsque toutes les touches enregistrées sont pressées ensemble
+		TabOrTooltipTitle: Touche extra (OR)
+		TabOrTooltipBody: Augmente les touches utilisables
+		CenterLabel: Configuration de touche extra
+		SlotEmpty: Touche extra
+		HintLine1: Clic gauche sur la case de droite pour enregistrer une touche extra
+		HintLine2: Les touches extra ne peuvent pas être utilisées dans les combos
+		HintLine3: Clic droit sur la case de touche extra pour l'effacer
 	}
 
 	TwoKeySetup: {

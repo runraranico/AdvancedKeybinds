@@ -17,6 +17,9 @@ Click a key binding to open the combo panel.
  - Custom display names for individual keys
  - Undo / Clear / Save functions inside the combo panel
 
+## Additional Keys
+You can now assign “Additional Keys” to 9 keybinds, ranging from Hook and Auto-Select to Inventory.
+
 ## Notes
  - Hold actions are available only for single-key bindings.
  - Assigning Left Click by itself requires confirmation (save again to confirm).

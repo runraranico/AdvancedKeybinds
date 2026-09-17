@@ -83,15 +83,10 @@ namespace AdvancedKeybinds.Patches
 					return bindingDisplay;
 				}
 
-				var resolved = new List<string>(assigned.Count);
-				for (int i = 0; i < assigned.Count; i++)
-				{
-					string display = BindingDisplayResolver.ResolveDisplayName(assigned[i]);
-					if (!string.IsNullOrEmpty(display))
-						resolved.Add(display);
-				}
-
-				return resolved.Count > 0 ? string.Join(" / ", resolved) : orig(keybind);
+				string joined = BindingDisplayText.JoinAssignedKeyDisplays(
+					assigned,
+					BindingDisplayResolver.ResolveDisplayName);
+				return !string.IsNullOrEmpty(joined) ? joined : orig(keybind);
 			}
 			catch (Exception ex)
 			{

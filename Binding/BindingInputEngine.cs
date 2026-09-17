@@ -28,6 +28,16 @@ namespace AdvancedKeybinds.Binding
 		private static readonly Dictionary<string, HoldTracker> HoldTrackers = new();
 		/// <summary>Previous-frame logical OR held for AlternateGamePad bindings (HOLD/OR edges).</summary>
 		private static readonly Dictionary<string, bool> AlternateOrHeldPrevious = new(StringComparer.Ordinal);
+		/// <summary>Previous-frame held for keyboard AdditionalOrToken (instant OR, independent of AND Hold).</summary>
+		private static readonly Dictionary<string, bool> AdditionalOrHeldPrevious = new(StringComparer.Ordinal);
+		/// <summary>Previous-frame AND held when Inventory Escape+Tab vanilla OR is mirrored by AK.</summary>
+		private static readonly Dictionary<string, bool> SharedUiBackAndHeldPrevious = new(StringComparer.Ordinal);
+
+		/// <summary>
+		/// Escape hold already armed Inventory (vanilla JP or AK AND mirror) — block second AND edge
+		/// until Escape is physically up (no long settle: that blocked rapid re-taps).
+		/// </summary>
+		private static readonly HashSet<string> SharedUiEscapeHoldLatch = new(StringComparer.Ordinal);
 
 		private static HashSet<string> _previousPressed = new(StringComparer.OrdinalIgnoreCase);
 		private static readonly HashSet<string> _pressedScratch = new(StringComparer.OrdinalIgnoreCase);
@@ -51,6 +61,9 @@ namespace AdvancedKeybinds.Binding
 		{
 			HoldTrackers.Clear();
 			AlternateOrHeldPrevious.Clear();
+			AdditionalOrHeldPrevious.Clear();
+			SharedUiBackAndHeldPrevious.Clear();
+			SharedUiEscapeHoldLatch.Clear();
 			JustPressedActions.Clear();
 			CurrentActions.Clear();
 			MarkCompiledDirty();
@@ -167,6 +180,10 @@ namespace AdvancedKeybinds.Binding
 			// Release-to-fire holds are resolved before trackers are cleared for the released key.
 			ProcessHoldReleases(pressed);
 
+			// Same physical key may appear as Keys + SC (or Spain 0x040A/0x0C0A detection aliases).
+			// Collapse before AND so one physical press satisfies one binding condition only.
+			BindingPhysicalHeldMatch.CollapsePhysicalAliasesInPlace(pressed);
+
 			EvaluateAllCompiledBindings(pressed, toggleEdges, winEdges);
 
 			PruneHoldTrackers(pressed);
@@ -253,34 +270,38 @@ namespace AdvancedKeybinds.Binding
 			{
 				string[] keys = compiled[c].Keys;
 				for (int i = 0; i < keys.Length; i++)
-				{
-					string token = keys[i];
-					if (string.IsNullOrEmpty(token) || pressed.Contains(token))
-						continue;
+					TrySupplementFallbackToken(pressed, keys[i]);
 
-					if (PhysicalKeyToken.TryParseVk(token, out uint vk))
-					{
-						if (WindowsKeySuppressor.IsFallbackVkHeld(vk)
-							|| IsCorrespondingKeysNamePressed(pressed, vk))
-							pressed.Add(PhysicalKeyToken.FormatVk(vk));
-						continue;
-					}
+				TrySupplementFallbackToken(pressed, compiled[c].AdditionalOrToken);
+			}
+		}
 
-					if (PhysicalKeyToken.TryParseScan(token, out _, out _)
-						&& WindowsKeySuppressor.IsGenericScanTokenDown(token))
-					{
-						pressed.Add(token);
-						continue;
-					}
+		private static void TrySupplementFallbackToken(HashSet<string> pressed, string token)
+		{
+			if (string.IsNullOrEmpty(token) || pressed.Contains(token))
+				return;
 
-					// Keys-name binding: keep down while Win32 make/break still holds the VK.
-					if (KeyToken.TryParse(token, out Keys key, out bool isMouse, out _)
-						&& !isMouse
-						&& WindowsKeySuppressor.IsFallbackVkHeld((uint)key))
-					{
-						pressed.Add(token);
-					}
-				}
+			if (PhysicalKeyToken.TryParseVk(token, out uint vk))
+			{
+				if (WindowsKeySuppressor.IsFallbackVkHeld(vk)
+					|| IsCorrespondingKeysNamePressed(pressed, vk))
+					pressed.Add(PhysicalKeyToken.FormatVk(vk));
+				return;
+			}
+
+			if (PhysicalKeyToken.TryParseScan(token, out _, out _)
+				&& WindowsKeySuppressor.IsGenericScanTokenDown(token))
+			{
+				pressed.Add(token);
+				return;
+			}
+
+			// Keys-name binding: keep down while Win32 make/break still holds the VK.
+			if (KeyToken.TryParse(token, out Keys key, out bool isMouse, out _)
+				&& !isMouse
+				&& WindowsKeySuppressor.IsFallbackVkHeld((uint)key))
+			{
+				pressed.Add(token);
 			}
 		}
 
@@ -431,7 +452,8 @@ namespace AdvancedKeybinds.Binding
 		private static void EvaluateCombo(string actionId, ComboBinding combo, HashSet<string> pressed, HashSet<string> toggleEdges, HashSet<string> winEdges)
 		{
 			List<string> keys = combo.Keys;
-			if (keys.Count == 0)
+			bool hasAdditionalOr = combo.HasAdditionalOr;
+			if (keys.Count == 0 && !hasAdditionalOr)
 				return;
 
 			if (BindingRestrictions.UsesToggleLockHold(combo))
@@ -439,74 +461,146 @@ namespace AdvancedKeybinds.Binding
 				return;
 			}
 
-			bool useAlternateOr = combo.HasAlternateGamePad
+			bool usePadAlternateOr = combo.HasAlternateGamePad
 				&& keys.Count == 1
 				&& AlternateGamePadBindingPolicy.ShouldEvaluateRuntime(
 					FnaGamePadProvider.IsSubsystemActive, combo.AlternateGamePadToken);
 
-			bool allDown;
-			bool orJustPressed = false;
-			bool orJustReleased = false;
-			if (useAlternateOr)
+			if (usePadAlternateOr)
 			{
-				bool primaryDown = IsBindingKeyDown(keys[0], pressed, combo);
-				bool altDown = IsBindingKeyDown(combo.AlternateGamePadToken, pressed, combo);
-				AlternateOrHeldPrevious.TryGetValue(actionId, out bool prevOr);
-				var edges = AlternateGamePadBindingPolicy.EvaluateOrEdges(primaryDown, altDown, prevOr);
-				allDown = edges.Held;
-				orJustPressed = edges.JustPressed;
-				orJustReleased = edges.JustReleased;
-				AlternateOrHeldPrevious[actionId] = edges.Held;
-				if (!allDown && orJustReleased)
-				{
-					HoldTrackers.Remove(actionId);
-					return;
-				}
-			}
-			else
-			{
-				allDown = ComboAndGatePolicy.AllRequiredDown(
-					keys,
-					key => IsBindingKeyDown(key, pressed, combo));
-
-				if (!allDown)
-				{
-					HoldTrackers.Remove(actionId);
-					AlternateOrHeldPrevious.Remove(actionId);
-					return;
-				}
-			}
-
-			if (!allDown)
-			{
-				HoldTrackers.Remove(actionId);
+				EvaluatePadAlternateOrCombo(actionId, combo, keys, pressed, toggleEdges, winEdges);
 				return;
 			}
 
-			// While every slot key is held, claim those tokens so a plain vanilla single-key binding
-			// on the same physical key does not also fire (e.g. "I" alone vs "Ctrl+Alt+I").
-			for (int i = 0; i < keys.Count; i++)
+			bool andDown = keys.Count > 0
+				&& ComboAndGatePolicy.AllRequiredDown(
+					keys,
+					key => IsBindingKeyDown(key, pressed, combo));
+
+			bool preserveVanillaAnd = hasAdditionalOr
+				&& KeyboardAdditionalOrPolicy.ShouldPreserveVanillaAndKeyWithAdditionalOr(
+					actionId, combo.Hold, keys, combo.AdditionalOrToken);
+
+			// Inventory+KU:Inventory share one Escape/OR edge state (LIVE: separate keys → dual rise).
+			string sharedUiStateId = preserveVanillaAnd
+				? SharedUiBackEscapeEdgePolicy.SharedUiEdgeStateId(actionId)
+				: actionId;
+
+			bool andIsEscapeEquivalent = keys.Count == 1
+				&& PlainSingleTapPolicy.IsEscapeEquivalentToken(keys[0]);
+			bool physicalEscapeDown = andIsEscapeEquivalent && IsPhysicalEscapeDownForSharedUi();
+			bool andHeldForSharedUi = preserveVanillaAnd
+				? SharedUiBackEscapeEdgePolicy.StabilizeEscapeAndHeld(
+					andDown, andIsEscapeEquivalent, physicalEscapeDown)
+				: andDown;
+
+			bool orDown = hasAdditionalOr
+				&& IsBindingKeyDown(combo.AdditionalOrToken, pressed, combo);
+			AdditionalOrHeldPrevious.TryGetValue(sharedUiStateId, out bool prevAdditionalOr);
+			bool additionalOrJustPressed = orDown && !prevAdditionalOr;
+			if (hasAdditionalOr)
+				AdditionalOrHeldPrevious[sharedUiStateId] = orDown;
+			else
+				AdditionalOrHeldPrevious.Remove(sharedUiStateId);
+
+			if (!andHeldForSharedUi)
 			{
-				string key = keys[i];
-				SuppressedComboTokens.Add(key);
-				// VK:0xDF bindings must also suppress the Keys-name sibling (Oem8) used by vanilla.
-				if (PhysicalKeyToken.TryParseVk(key, out uint vk)
-					&& Enum.IsDefined(typeof(Keys), (int)vk)
-					&& (Keys)vk != Keys.None)
+				HoldTrackers.Remove(actionId);
+				SharedUiBackAndHeldPrevious.Remove(sharedUiStateId);
+				// SharedUiEscapeHoldLatch: do not clear here — Escape-up settle must keep it
+				// (LIVE flicker UP then DOWN otherwise re-mirrors Inventory).
+			}
+
+			if (!andHeldForSharedUi && !orDown)
+			{
+				// Still advance Escape latch settle when only Escape dropped (Tab may be up too).
+				if (preserveVanillaAnd && andIsEscapeEquivalent)
+					UpdateSharedUiEscapeLatchSettle(sharedUiStateId, physicalEscapeDown, andPathEdge: false);
+				AlternateOrHeldPrevious.Remove(actionId);
+				return;
+			}
+
+			// Shared UI back (Inventory): vanilla KeyStatus OR lists Escape+Tab.
+			// Escape AND: AK-mirror once per physical hold (latch + vanillaAlready + key-up settle).
+			// LIVE 2026-09-16: disabling Escape mirror forced REARM_WORLD → multi ToggleInv on flicker.
+			// World REARM is disabled; Tab AdditionalOr rising still mirrored separately.
+			if (preserveVanillaAnd)
+			{
+				string preserveTriggerId = sharedUiStateId;
+				SharedUiBackAndHeldPrevious.TryGetValue(sharedUiStateId, out bool prevAndHeld);
+				bool andRising = andHeldForSharedUi && !prevAndHeld;
+				if (andHeldForSharedUi)
+					SharedUiBackAndHeldPrevious[sharedUiStateId] = true;
+
+				bool latchActive = SharedUiEscapeHoldLatch.Contains(sharedUiStateId);
+				bool vanillaInventoryAlready =
+					TryReadTriggerJustPressed(preserveTriggerId);
+
+				if (KeyboardAdditionalOrPolicy.VanillaKeyStatusOwnsAdditionalOr(
+					    actionId, combo.Hold, keys, combo.AdditionalOrToken))
 				{
-					SuppressedComboTokens.Add(((Keys)vk).ToString());
+					bool mirrorEscapeAnd =
+						andIsEscapeEquivalent
+						&& SharedUiBackEscapeEdgePolicy.ShouldMirrorFireEscapeAndWhenVanillaOwnsKeyStatus()
+						&& SharedUiBackEscapeEdgePolicy.ShouldMirrorFireAndRising(
+							andRising, latchActive, vanillaInventoryAlready);
+
+					if (mirrorEscapeAnd)
+						JustPressedActions[preserveTriggerId] = true;
+					if (additionalOrJustPressed)
+						JustPressedActions[preserveTriggerId] = true;
+					if (andHeldForSharedUi || orDown)
+						CurrentActions[preserveTriggerId] = true;
+
+					bool andPathEdge = mirrorEscapeAnd
+						|| (vanillaInventoryAlready && physicalEscapeDown);
+					UpdateSharedUiEscapeLatchSettle(sharedUiStateId, physicalEscapeDown, andPathEdge);
+					return;
+				}
+
+				if (orDown)
+					SuppressedComboTokens.Add(combo.AdditionalOrToken);
+
+				if (additionalOrJustPressed)
+					JustPressedActions[preserveTriggerId] = true;
+				if (orDown)
+					CurrentActions[preserveTriggerId] = true;
+				return;
+			}
+
+			if (andDown)
+			{
+				for (int i = 0; i < keys.Count; i++)
+				{
+					string key = keys[i];
+					SuppressedComboTokens.Add(key);
+					if (PhysicalKeyToken.TryParseVk(key, out uint vk)
+						&& Enum.IsDefined(typeof(Keys), (int)vk)
+						&& (Keys)vk != Keys.None)
+					{
+						SuppressedComboTokens.Add(((Keys)vk).ToString());
+					}
 				}
 			}
-			if (useAlternateOr)
-				SuppressedComboTokens.Add(combo.AlternateGamePadToken);
 
+			if (orDown)
+				SuppressedComboTokens.Add(combo.AdditionalOrToken);
+
+			string triggerId = ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId);
 			bool isHold = combo.Hold && keys.Count == 1;
+
+			if (additionalOrJustPressed)
+				JustPressedActions[triggerId] = true;
+			if (orDown)
+				CurrentActions[triggerId] = true;
 
 			if (isHold)
 			{
+				if (!andDown)
+					return;
+
 				if (combo.HoldOnRelease)
 				{
-					// Latest (highest-ms) while-held on this key already fired → stop on-release charge.
 					if (LatestWhileHeldOnKeyAlreadyFired(keys[0]))
 						return;
 
@@ -518,31 +612,30 @@ namespace AdvancedKeybinds.Binding
 				return;
 			}
 
-			bool justPressed;
-			if (useAlternateOr)
+			if (!andDown)
+				return;
+
+			bool andJustPressed;
+			if (keys.Count == 1)
 			{
-				justPressed = orJustPressed;
-			}
-			else if (keys.Count == 1)
-			{
-				justPressed = IsBindingJustPressed(keys[0], pressed, toggleEdges, winEdges);
+				andJustPressed = IsBindingJustPressed(keys[0], pressed, toggleEdges, winEdges);
 			}
 			else
 			{
-				justPressed = false;
+				andJustPressed = false;
 				for (int i = 0; i < keys.Count; i++)
 				{
 					if (!WasBindingKeyDown(keys[i]))
 					{
-						justPressed = true;
+						andJustPressed = true;
 						break;
 					}
 				}
 			}
 
-			if (justPressed)
+			if (andJustPressed)
 			{
-				JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
+				JustPressedActions[triggerId] = true;
 				if (keys.Count == 1 && JisOemInGameDiagnostic.IsSessionActive)
 					JisOemInGameDiagnostic.NoteActivation(keys[0], pressed, wouldFire: true);
 
@@ -555,6 +648,76 @@ namespace AdvancedKeybinds.Binding
 							WindowsKeySuppressor.ReleaseToggleLockComboState(key);
 					}
 				}
+			}
+
+			CurrentActions[triggerId] = true;
+		}
+
+		/// <summary>Existing GamePad AlternateGamePadToken OR path (unchanged contract).</summary>
+		private static void EvaluatePadAlternateOrCombo(
+			string actionId,
+			ComboBinding combo,
+			List<string> keys,
+			HashSet<string> pressed,
+			HashSet<string> toggleEdges,
+			HashSet<string> winEdges)
+		{
+			bool primaryDown = IsBindingKeyDown(keys[0], pressed, combo);
+			bool altDown = IsBindingKeyDown(combo.AlternateGamePadToken, pressed, combo);
+			AlternateOrHeldPrevious.TryGetValue(actionId, out bool prevOr);
+			var edges = AlternateGamePadBindingPolicy.EvaluateOrEdges(primaryDown, altDown, prevOr);
+			bool allDown = edges.Held;
+			bool orJustPressed = edges.JustPressed;
+			bool orJustReleased = edges.JustReleased;
+			AlternateOrHeldPrevious[actionId] = edges.Held;
+			if (!allDown && orJustReleased)
+			{
+				HoldTrackers.Remove(actionId);
+				return;
+			}
+
+			if (!allDown)
+			{
+				HoldTrackers.Remove(actionId);
+				return;
+			}
+
+			for (int i = 0; i < keys.Count; i++)
+			{
+				string key = keys[i];
+				SuppressedComboTokens.Add(key);
+				if (PhysicalKeyToken.TryParseVk(key, out uint vk)
+					&& Enum.IsDefined(typeof(Keys), (int)vk)
+					&& (Keys)vk != Keys.None)
+				{
+					SuppressedComboTokens.Add(((Keys)vk).ToString());
+				}
+			}
+
+			SuppressedComboTokens.Add(combo.AlternateGamePadToken);
+
+			bool isHold = combo.Hold && keys.Count == 1;
+
+			if (isHold)
+			{
+				if (combo.HoldOnRelease)
+				{
+					if (LatestWhileHeldOnKeyAlreadyFired(keys[0]))
+						return;
+
+					EvaluateHoldCharge(actionId);
+				}
+				else
+					EvaluateHoldWhileHeld(actionId, combo);
+
+				return;
+			}
+
+			if (orJustPressed)
+			{
+				JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
+				if (keys.Count == 1 && JisOemInGameDiagnostic.IsSessionActive)
+					JisOemInGameDiagnostic.NoteActivation(keys[0], pressed, wouldFire: true);
 			}
 
 			CurrentActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
@@ -600,6 +763,76 @@ namespace AdvancedKeybinds.Binding
 					if (anySiblingHeld)
 						WindowsKeySuppressor.LatchToggleTokenForCombo(toggleToken);
 				}
+			}
+		}
+
+		/// <summary>
+		/// Advance SharedUi Escape hold latch. Clears immediately on physical Escape up
+		/// so rapid re-taps work. Mid-hold FNA flicker must not look like up —
+		/// <see cref="IsPhysicalEscapeDownForSharedUi"/> ORs GetAsyncKeyState.
+		/// </summary>
+		private static void UpdateSharedUiEscapeLatchSettle(
+			string sharedUiStateId,
+			bool physicalEscapeDown,
+			bool andPathEdge)
+		{
+			bool latchActive = SharedUiEscapeHoldLatch.Contains(sharedUiStateId);
+			if (SharedUiBackEscapeEdgePolicy.NextEscapeHoldLatch(
+				    latchActive, physicalEscapeDown, andPathEdge, keyUpSettleActive: false))
+				SharedUiEscapeHoldLatch.Add(sharedUiStateId);
+			else
+				SharedUiEscapeHoldLatch.Remove(sharedUiStateId);
+		}
+
+		/// <summary>
+		/// True while shared UI-back Escape hold latch is armed for this action
+		/// (Inventory already edged this Escape press).
+		/// </summary>
+		public static bool IsSharedUiEscapeHoldLatchActive(string actionId)
+		{
+			if (string.IsNullOrEmpty(actionId))
+				return false;
+			string sharedId = SharedUiBackEscapeEdgePolicy.SharedUiEdgeStateId(actionId);
+			return SharedUiEscapeHoldLatch.Contains(sharedId)
+				|| SharedUiEscapeHoldLatch.Contains(actionId);
+		}
+
+		private static bool IsPhysicalEscapeDownForSharedUi()
+		{
+			// FNA Keyboard.GetState can briefly report Escape UP while still held (LIVE flicker).
+			// Main.keyState can be stripped by ComboPanel.ConsumeEscape.
+			// Win32 GetAsyncKeyState is the hold-stable bit for latch clear.
+			bool keyboardGetStateDown = false;
+			try { keyboardGetStateDown = Keyboard.GetState().IsKeyDown(Keys.Escape); }
+			catch { /* ignore */ }
+
+			bool mainKeyStateDown = false;
+			try { mainKeyStateDown = Main.keyState.IsKeyDown(Keys.Escape); }
+			catch { /* ignore */ }
+
+			bool asyncDown = false;
+			try { asyncDown = WindowsKeySuppressor.IsEscapePhysicallyDownAsync(); }
+			catch { /* ignore */ }
+
+			if (SharedUiBackEscapeEdgePolicy.IsHardwareEscapeDown(keyboardGetStateDown, mainKeyStateDown))
+				return true;
+			if (asyncDown)
+				return true;
+			return KeyToken.IsDown("Escape");
+		}
+
+		private static bool TryReadTriggerJustPressed(string triggerId)
+		{
+			try
+			{
+				TriggersSet jp = PlayerInput.Triggers?.JustPressed;
+				if (jp?.KeyStatus == null || string.IsNullOrEmpty(triggerId))
+					return false;
+				return jp.KeyStatus.TryGetValue(triggerId, out bool v) && v;
+			}
+			catch
+			{
+				return false;
 			}
 		}
 

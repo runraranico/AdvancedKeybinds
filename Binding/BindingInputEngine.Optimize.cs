@@ -13,6 +13,7 @@ namespace AdvancedKeybinds.Binding
 		{
 			public string ActionId;
 			public string[] Keys;
+			public string AdditionalOrToken;
 			public bool IsPlainSingleTap;
 			public bool RequiresAdvancedStorage;
 			public bool IsHookManagedTap;
@@ -65,6 +66,7 @@ namespace AdvancedKeybinds.Binding
 					{
 						ActionId = pair.Key,
 						Keys = Array.Empty<string>(),
+						AdditionalOrToken = null,
 						IsPlainSingleTap = true,
 						RequiresAdvancedStorage = false,
 						IsHookManagedTap = false,
@@ -100,6 +102,7 @@ namespace AdvancedKeybinds.Binding
 				{
 					ActionId = pair.Key,
 					Keys = keyArr,
+					AdditionalOrToken = combo.AdditionalOrToken,
 					IsPlainSingleTap = combo.IsPlainSingleTap,
 					RequiresAdvancedStorage = combo.RequiresAdvancedStorage(),
 					IsHookManagedTap = hookTap,

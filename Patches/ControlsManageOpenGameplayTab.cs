@@ -42,9 +42,12 @@ namespace AdvancedKeybinds.Patches
 				bool current = (bool)_onGameplay.GetValue(manageControls);
 				_onGameplay.SetValue(manageControls, true);
 
-				// Same frames as UIManageControls.VsGameplayButtonClick (Asset Frame via Utils).
-				if (_gameplayVsUiTexture.GetValue(manageControls) is Asset<Texture2D> tex && tex.IsLoaded)
+				// Same frames as UIManageControls.VsGameplayButtonClick (Frame is on Texture2D, not Asset).
+				if (_gameplayVsUiTexture.GetValue(manageControls) is Asset<Texture2D> asset
+					&& asset.IsLoaded
+					&& asset.Value != null)
 				{
+					Texture2D tex = asset.Value;
 					var btn1 = _buttonVs1.GetValue(manageControls) as UIImageFramed;
 					var btn2 = _buttonVs2.GetValue(manageControls) as UIImageFramed;
 					if (btn1 != null)

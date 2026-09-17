@@ -72,6 +72,11 @@ Config: {
 			Label: Suppress Terraria Debug UI Hotkeys
 			Tooltip: Prevents Terraria's special UI from opening with F7, F8, F10, and F11. The keys can still be used for keybinds and mod actions.
 		}
+
+		SuppressImeDuringKeyCapture: {
+			Label: Pause IME while binding keys
+			Tooltip: When Input Method Fixer is installed and IME is on, temporarily turn IME off only while you bind a key in the combo panel, then restore it.
+		}
 	}
 
 	Guide: {
@@ -213,6 +218,20 @@ UI: {
 		MouseWheelDown: Wheel Down
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
+	}
+
+	AdditionalOr: {
+		TabAnd: Combo (AND)
+		TabOr: Extra Key (OR)
+		TabAndTooltipTitle: Combo (AND)
+		TabAndTooltipBody: Fires when all registered keys are pressed together
+		TabOrTooltipTitle: Extra Key (OR)
+		TabOrTooltipBody: Increases the keys you can use
+		CenterLabel: Extra key setup
+		SlotEmpty: Extra Key
+		HintLine1: Left-click the right slot to register an extra key
+		HintLine2: Extra keys cannot be used in combos
+		HintLine3: Right-click the extra-key slot to clear it
 	}
 
 	TwoKeySetup: {

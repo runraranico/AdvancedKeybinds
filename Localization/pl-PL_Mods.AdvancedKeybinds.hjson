@@ -72,6 +72,11 @@ Config: {
 			Label: Blokuj skróty UI debugowania Terrarii
 			Tooltip: Zapobiega otwieraniu specjalnego UI Terrarii klawiszami F7, F8, F10 i F11. Klawisze nadal można używać do przypisań i akcji moda.
 		}
+
+		SuppressImeDuringKeyCapture: {
+			Label: Wstrzymaj IME podczas przypisywania klawiszy
+			Tooltip: Gdy Input Method Fixer jest zainstalowany i IME jest włączone, tymczasowo wyłącza IME tylko podczas rejestracji klawisza w panelu combo, a potem je przywraca.
+		}
 	}
 
 	Guide: {
@@ -213,6 +218,20 @@ UI: {
 		MouseWheelDown: Wheel Down
 		MouseWheelLeft: Wheel Left
 		MouseWheelRight: Wheel Right
+	}
+
+	AdditionalOr: {
+		TabAnd: Kombo (AND)
+		TabOr: Extra klawisz (OR)
+		TabAndTooltipTitle: Kombo (AND)
+		TabAndTooltipBody: Działa, gdy wszystkie zarejestrowane klawisze są wciśnięte jednocześnie
+		TabOrTooltipTitle: Extra klawisz (OR)
+		TabOrTooltipBody: Zwiększa liczbę dostępnych klawiszy
+		CenterLabel: Ustawienie extra klawisza
+		SlotEmpty: Extra klawisz
+		HintLine1: Kliknij LPM prawy slot, aby zarejestrować extra klawisz
+		HintLine2: Extra klawiszy nie można używać w kombach
+		HintLine3: PPM na slot extra klawisza, aby go usunąć
 	}
 
 	TwoKeySetup: {

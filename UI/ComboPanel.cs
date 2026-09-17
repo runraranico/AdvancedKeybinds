@@ -25,7 +25,7 @@ namespace AdvancedKeybinds.UI
 	/// plus a Hold toggle. Each slot is set by clicking it and pressing a key or mouse button. The
 	/// combination fires the action when every filled slot is held together.
 	/// </summary>
-	internal static class ComboPanel
+	internal static partial class ComboPanel
 	{
 		public static bool IsOpen { get; private set; }
 
@@ -187,11 +187,25 @@ namespace AdvancedKeybinds.UI
 
 		/// <summary>
 		/// After idle ESC dismiss: when Escape is released, Inventory (vanilla Escape bind) would
-		/// close parent Controls. Keep blocking FancyUI / Inventory for a few ticks past key-up.
+		/// close parent Controls. Keep blocking FancyUI / Inventory until Escape-up settle completes
+		/// (LIVE: 3-frame protect expired while ApplyAdvanced still re-injected Inventory JP).
 		/// </summary>
-		private static int _escDismissProtectParentReleaseFrames;
+		private static bool _escDismissProtectArmed;
+		private static int _escDismissProtectEscapeUpUpdates;
+		private static int _escDismissProtectSettleLastGameUpdate = int.MinValue;
 
-		private const int EscDismissProtectParentReleaseFrames = 3;
+		/// <summary>
+		/// After display-name typing ends: briefly clear gameplay Triggers edged from typed keys
+		/// (LIVE: Throw=T / Jump=Space / QuickMount=R). Only armed from name-edit end — never from
+		/// settings ESC leave (that blocked Jump for a long time after returning to gameplay).
+		/// </summary>
+		private static int _postTextEditGameplaySettleFrames;
+		/// <summary>
+		/// After display-name edit ends: keep clearing gameplay Triggers while ComboPanel stays open
+		/// (ApplyAdvanced can re-inject Jump/Throw from scan-held ghosts after BackgroundInputBlock).
+		/// Cleared when the panel closes — must not arm on settings ESC leave.
+		/// </summary>
+		private static bool _postTextEditGameplaySettleWhilePanelOpen;
 
 		/// <summary>
 		/// Same-input-tick flags: registration wait clears immediately after Escape is saved, but parent /
@@ -207,6 +221,32 @@ namespace AdvancedKeybinds.UI
 
 		private const int EscDismissGraceMs = 450;
 
+		/// <summary>
+		/// Set when display-name edit ends. Consumed by the next Idle ESC <see cref="BeginEscDismissGrace"/>
+		/// so timed grace is skipped (key-up gate only). Cleared on other panel closes so it cannot leak.
+		/// </summary>
+		private static bool _pendingKeyUpOnlyEscDismissAfterNameEdit;
+
+		/// <summary>
+		/// After Escape closes Controls / ModConfig / IngameOptions: block Inventory until Escape key-up
+		/// so the same press cannot flash inventory on the way back to character control.
+		/// </summary>
+		private static bool _settingsEscapeLeaveBlockInventoryUntilKeyUp;
+		/// <summary>
+		/// Escape-up updates counted after settings leave (Main.GameUpdateCount based).
+		/// First Escape-up update must still suppress Inventory (LIVE dual ToggleInv on ESC_UP).
+		/// </summary>
+		private static int _settingsEscapeLeaveEscapeUpUpdates;
+		private static int _settingsEscapeLeaveSettleLastGameUpdate = int.MinValue;
+
+		/// <summary>
+		/// World Escape Inventory one-shot: after first ToggleInv while Escape down, strip Inventory
+		/// JP until Escape key-up settle (LIVE: REARM_WORLD spam while latch stayed 0).
+		/// </summary>
+		private static bool _worldEscapeInventoryOneShotArmed;
+		private static int _worldEscapeInventoryOneShotUpUpdates;
+		private static int _worldEscapeInventoryOneShotSettleLastGameUpdate = int.MinValue;
+
 		// Diag mirrors (path tracer / KeybindEscapeDiagSystem).
 		internal static bool DiagRegistrationWaitActive => IsRegistrationWaitActive();
 		internal static int DiagCapturingSlot => _capturingSlot;
@@ -214,7 +254,28 @@ namespace AdvancedKeybinds.UI
 		internal static bool DiagEscapeConsumedThisFrame => _escapeConsumedThisTick;
 		internal static bool DiagEscapeDismissBlockedUntilKeyUp => _escapeDismissBlockedUntilKeyUp;
 		internal static bool DiagWithinEscDismissGrace => IsWithinEscDismissGrace();
-		internal static bool DiagEscDismissProtectParentRelease => _escDismissProtectParentReleaseFrames > 0;
+		internal static bool DiagEscDismissProtectParentRelease => _escDismissProtectArmed;
+
+		/// <summary>Live verify / rearm: settings 3-menu intervention context.</summary>
+		public static bool IsSettingsMenuBackContextPublic()
+			=> IsControlsOrFancyBackContext();
+
+		/// <summary>Post-settings Escape leave: Inventory blocked until Escape key-up.</summary>
+		public static bool IsSettingsEscapeLeaveInventoryGateArmedPublic()
+			=> _settingsEscapeLeaveBlockInventoryUntilKeyUp;
+
+		/// <summary>World Escape Inventory one-shot gate (character-control double ToggleInv).</summary>
+		public static bool IsWorldEscapeInventoryOneShotArmedPublic()
+			=> _worldEscapeInventoryOneShotArmed;
+
+		/// <summary>Live verify / rearm: ComboPanel Escape same-press gates (flags only).</summary>
+		public static bool IsEscapeSamePressActivePublic()
+			=> ControlsInventoryBackPolicy.IsEscapeSamePressActive(
+				_escapeRegisteredThisTick,
+				_escapeConsumedThisTick,
+				_escapeDismissBlockedUntilKeyUp,
+				IsWithinEscDismissGrace(),
+				_escDismissProtectArmed);
 		internal static bool DiagAwaitingSlotKey => _awaitingSlotKey;
 		internal static bool DiagAwaitingKeyInfoPick => _awaitingKeyInfoPick;
 		internal static bool DiagKeyInfoNameEditing => _keyInfoNameEditing;
@@ -235,6 +296,7 @@ namespace AdvancedKeybinds.UI
 			_editInputMode = InputMode.Keyboard;
 			_sectionSemantic = null;
 			_twoKeySetupEligible = false;
+			ResetKeyboardAdditionalOrSession();
 			_actionLabel = null;
 			_openSource = ComboPanelOpenSource.None;
 			ClearParentRestoreContext();
@@ -246,16 +308,27 @@ namespace AdvancedKeybinds.UI
 			_dirty = false;
 			_escapeDismissBlockedUntilKeyUp = false;
 			_escDismissGraceUntilMs = 0;
-			_escDismissProtectParentReleaseFrames = 0;
+			ClearEscDismissParentReleaseProtect();
+			_postTextEditGameplaySettleFrames = 0;
+			_postTextEditGameplaySettleWhilePanelOpen = false;
 			_escapeRegisteredThisTick = false;
 			_escapeConsumedThisTick = false;
 			_escapeCaptureInputTick = 0;
+			_settingsEscapeLeaveBlockInventoryUntilKeyUp = false;
+			_settingsEscapeLeaveEscapeUpUpdates = 0;
+			_settingsEscapeLeaveSettleLastGameUpdate = int.MinValue;
+			_worldEscapeInventoryOneShotArmed = false;
+			_worldEscapeInventoryOneShotUpUpdates = 0;
+			_worldEscapeInventoryOneShotSettleLastGameUpdate = int.MinValue;
 			_awaitingSlotKey = false;
 			_awaitingKeyInfoPick = false;
 			_keyInfoRenameSession = false;
 			_holdTyping = false;
 			_draggingHold = false;
 			CancelKeyInfoNameEdit(commit: false);
+			_pendingKeyUpOnlyEscDismissAfterNameEdit = false;
+			_postTextEditGameplaySettleFrames = 0;
+			_postTextEditGameplaySettleWhilePanelOpen = false;
 			_keyInfoToken = null;
 			_keyInfoNameSwallowNextClick = false;
 			PlayerInput.WritingText = false;
@@ -423,10 +496,11 @@ namespace AdvancedKeybinds.UI
 		/// arrives as a mouse click. Steam Deck is resolved once at load, not polled here.
 		/// </summary>
 		internal static bool IsDisplayNameChangeEnabled
-			=> SteamDeckDetectionPolicy.IsDisplayNameChangeAllowed(
-				IsOpen,
-				_openSource == ComboPanelOpenSource.GamePad,
-				AkPlatform.IsSteamDeck);
+			=> !IsKeyboardAdditionalOrTab
+				&& SteamDeckDetectionPolicy.IsDisplayNameChangeAllowed(
+					IsOpen,
+					_openSource == ComboPanelOpenSource.GamePad,
+					AkPlatform.IsSteamDeck);
 
 		public static void Open(
 			string actionId,
@@ -478,6 +552,7 @@ namespace AdvancedKeybinds.UI
 				sectionSemantic,
 				isModKeybind,
 				_actionId);
+			InitKeyboardAdditionalOrOnOpen(isModKeybind);
 			bool twoKeyTerrariaOr = _twoKeySetupEligible
 				&& GamePadTwoKeyTerrariaOrPolicy.IsTarget((int)editInputMode, _actionId);
 			_actionLabel = string.IsNullOrEmpty(label) ? _actionId : label;
@@ -647,7 +722,9 @@ namespace AdvancedKeybinds.UI
 			ComboPanelBackgroundInputBlock.NotifyPanelOpened(openHost);
 			_escapeDismissBlockedUntilKeyUp = false;
 			_escDismissGraceUntilMs = 0;
-			_escDismissProtectParentReleaseFrames = 0;
+			ClearEscDismissParentReleaseProtect();
+			_postTextEditGameplaySettleFrames = 0;
+			_postTextEditGameplaySettleWhilePanelOpen = false;
 			_escapeRegisteredThisTick = false;
 			_escapeConsumedThisTick = false;
 			_awaitingSlotKey = false;
@@ -657,6 +734,9 @@ namespace AdvancedKeybinds.UI
 			_draggingHold = false;
 			_holdBuffer = _working.EffectiveHoldMs.ToString();
 			CancelKeyInfoNameEdit(commit: false);
+			_pendingKeyUpOnlyEscDismissAfterNameEdit = false;
+			_postTextEditGameplaySettleFrames = 0;
+			_postTextEditGameplaySettleWhilePanelOpen = false;
 			_keyInfoToken = null;
 			_keyInfoNameSwallowNextClick = false;
 			_prevKeyState = Main.keyState;
@@ -1074,10 +1154,21 @@ namespace AdvancedKeybinds.UI
 			_editInputMode = InputMode.Keyboard;
 			_sectionSemantic = null;
 			_twoKeySetupEligible = false;
+			ResetKeyboardAdditionalOrSession();
 			_actionLabel = null;
 			_capturingSlot = 0;
 			_dirty = false;
 			_escapeDismissBlockedUntilKeyUp = false;
+			// Mouse Save/Cancel must not leave EscDismissGrace / release-protect armed.
+			// Idle ESC dismiss re-arms via BeginEscDismissGrace after CloseComboPanel.
+			if (ComboPanelEscapeRegistrationPolicy.ShouldClearEscDismissGraceOnPanelClose())
+			{
+				_escDismissGraceUntilMs = 0;
+				ClearEscDismissParentReleaseProtect();
+			}
+			// Mouse / ForceClose: drop name-edit key-up-only pending so it cannot affect a later
+			// unrelated Idle ESC. HandleEscape snapshots the flag before calling Close.
+			_pendingKeyUpOnlyEscDismissAfterNameEdit = false;
 			_awaitingSlotKey = false;
 			_awaitingKeyInfoPick = false;
 			_keyInfoRenameSession = false;
@@ -1430,7 +1521,7 @@ namespace AdvancedKeybinds.UI
 			_escapeRegisteredThisTick = false;
 			_escapeConsumedThisTick = false;
 			_escDismissGraceUntilMs = 0;
-			_escDismissProtectParentReleaseFrames = 0;
+			ClearEscDismissParentReleaseProtect();
 			// Discard without Commit — restore snapshot so Working cannot leak into a later path.
 			if (IsOpen)
 				RestoreOpenedSnapshot();
@@ -2149,6 +2240,11 @@ namespace AdvancedKeybinds.UI
 					ArmEscDismissParentReleaseProtect("DismissKeyUpGate.release");
 
 				_escapeDismissBlockedUntilKeyUp = false;
+				// Drop dismiss grace on Escape key-up. Leaving grace armed for ~450ms after release
+				// made a *new* Escape press look like same-press and cleared Inventory — ESC dead on
+				// Controls / ModConfig / Settings until grace expired. Release-protect frames cover
+				// the release edge; Tab AdditionalOr and the next Escape must reach ToggleInv.
+				_escDismissGraceUntilMs = 0;
 				if (!IsOpen && !keyboardEscapeDown)
 					WindowsKeySuppressor.ClearShellBlockedEscapeDown();
 #if AK_DIAGNOSTICS
@@ -2156,11 +2252,12 @@ namespace AdvancedKeybinds.UI
 #endif
 			}
 
-			if (_escDismissProtectParentReleaseFrames > 0)
-			{
-				SuppressParentControlsCloseFromEscapeRelease("EscDismissProtect.releaseFrames");
-				_escDismissProtectParentReleaseFrames--;
-			}
+			if (_escDismissProtectArmed)
+				PollIdleEscParentReleaseProtect("BeginInputTick");
+
+			// After Idle ESC dismiss protect / suppress, releaseInventory can stay false on Controls
+			// (LIVE: EDGE_OK + relInv=0 + no FANCY_CLOSE). Restore when leave is allowed.
+			TryRestoreReleaseInventoryForSettingsEscapeLeave();
 
 			// Outside ComboPanel / Controls / options: hard-clear ALL cancel residue every tick.
 			// Sticky FancyUI / key-up / Pad gates must never kill world ESC / Start / Pad →.
@@ -2177,7 +2274,7 @@ namespace AdvancedKeybinds.UI
 					_awaitingKeyInfoPick = false;
 					_escapeDismissBlockedUntilKeyUp = false;
 					_escDismissGraceUntilMs = 0;
-					_escDismissProtectParentReleaseFrames = 0;
+					ClearEscDismissParentReleaseProtect();
 					_padBackCloseGateActive = false;
 					_padBackCloseGateToken = null;
 					ComboPanelCloseInputConsumeGate.ClearRuntimeState();
@@ -2267,18 +2364,22 @@ namespace AdvancedKeybinds.UI
 			bool escapeJustPressed = mainEscapeJustPressed || physicalEscapeJustPressed;
 
 			// Display-name text entry: ESC cancels typing only — keep ComboPanel open (Image4).
-			// Arm key-up gate: ConsumeEscape strips Escape from keyState, so the next tick would
-			// otherwise see a fresh Escape edge and CloseComboPanel (NG → Keybindings).
+			// Arm key-up gate only on the Escape cancel edge (or while that gate is still held).
+			// Arming every editing tick left a sticky gate after Enter/commit that, combined with
+			// leftover EscDismissGrace, made Controls ESC look dead after returning from rename.
 			if (_keyInfoNameEditing)
 			{
 				if (escapeJustPressed)
 				{
 					CancelKeyInfoNameEdit(commit: false);
 					SoundEngine.PlaySound(SoundID.MenuClose);
+					_escapeDismissBlockedUntilKeyUp = true;
+					SuppressEscapeDerivedTriggers("HandleEscape.keyInfoNameEdit");
 				}
-
-				_escapeDismissBlockedUntilKeyUp = true;
-				SuppressEscapeDerivedTriggers("HandleEscape.keyInfoNameEdit");
+				else if (_escapeDismissBlockedUntilKeyUp && IsPhysicalEscapeDown())
+				{
+					SuppressEscapeDerivedTriggers("HandleEscape.keyInfoNameEdit.gate");
+				}
 #if AK_DIAGNOSTICS
 				ComboPanelIdleEscPathDiag.Note("HandleEscape.return", "reason=keyInfoNameEditing escJP=" + (escapeJustPressed ? 1 : 0));
 #endif
@@ -2366,11 +2467,18 @@ namespace AdvancedKeybinds.UI
 				ComboPanelIdleEscPathDiag.Note("CloseComboPanel.before", "from=HandleEscape");
 #endif
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel Escape dismiss (idle).");
+				// Snapshot before Close() clears the pending flag (mouse-close path also clears it).
+				bool pendingAfterNameEdit = _pendingKeyUpOnlyEscDismissAfterNameEdit;
+				_pendingKeyUpOnlyEscDismissAfterNameEdit = false;
 				CloseComboPanel(save: true, userInitiated: true);
 #if AK_DIAGNOSTICS
 				ComboPanelIdleEscPathDiag.Note("CloseComboPanel.after", "open=" + (IsOpen ? 1 : 0));
 #endif
-				BeginEscDismissGrace();
+				BeginEscDismissGrace(
+					ComboPanelEscapeRegistrationPolicy.ShouldArmTimedEscDismissGraceAfterIdleClose(
+						pendingAfterNameEdit));
+				// Name-edit key residue is cleared only at CancelKeyInfoNameEdit (short settle).
+				// Do not re-arm gameplay Trigger clears here — that disabled Jump after Controls leave.
 			}
 
 			ConsumeEscape();
@@ -2864,9 +2972,9 @@ namespace AdvancedKeybinds.UI
 			ApplyGamePadParentUiTriggerSuppress("GuardModalInput.gamePad");
 			ComboPanelBackgroundInputBlock.ApplyWhilePanelOpen("GuardModalInput");
 
-			if (_escDismissProtectParentReleaseFrames > 0)
+			if (_escDismissProtectArmed)
 			{
-				SuppressParentControlsCloseFromEscapeRelease("GuardModalInput.releaseProtect");
+				PollIdleEscParentReleaseProtect("GuardModalInput");
 #if AK_DIAGNOSTICS
 				ComboPanelIdleEscPathDiag.Note("GuardModalInput.exit", "reason=releaseProtect");
 #endif
@@ -2895,13 +3003,26 @@ namespace AdvancedKeybinds.UI
 
 		/// <summary>
 		/// Keyboard Escape swallow for PrepareParent / ConsumeEscape only.
-		/// Does NOT include Pad:B close gates — those must not clear Inventory game-wide
-		/// (that killed GamePad Start and keyboard Escape together).
+		/// Does NOT include Pad:B close gates — those must not clear Inventory game-wide.
 		/// World / craft / inventory: never swallow.
+		/// Settings menus idle (Controls / ModConfig / IngameOptions): Escape/Tab Inventory must
+		/// reach ToggleInv → IngameOptions.Close or IngameFancyUI.Close.
 		/// </summary>
 		public static bool ShouldSwallowMenuEscape()
 		{
-			if (_escDismissProtectParentReleaseFrames > 0)
+			bool keyboardEscapeDown = IsKeyboardEscapeDownOnly();
+			bool samePress = ControlsInventoryBackPolicy.IsEscapeSamePressActive(
+				_escapeRegisteredThisTick,
+				_escapeConsumedThisTick,
+				_escapeDismissBlockedUntilKeyUp,
+				IsWithinEscDismissGrace(),
+				_escDismissProtectArmed);
+
+			if (ControlsInventoryBackPolicy.ShouldSwallowEscapeOnSettingsMenus(
+				IsOpen,
+				_keyInfoNameEditing,
+				samePress,
+				keyboardEscapeDown))
 				return true;
 
 			return ComboPanelEscapeRegistrationPolicy.ShouldSwallowKeyboardEscapeForParent(
@@ -2912,41 +3033,33 @@ namespace AdvancedKeybinds.UI
 				_escapeConsumedThisTick,
 				_escapeDismissBlockedUntilKeyUp,
 				IsWithinEscDismissGrace(),
-				keyboardEscapeDown: IsKeyboardEscapeDownOnly(),
-				// Same-press after idle ESC dismiss: keep swallowing while gate/grace active so
-				// Inventory/MenuInquiry cannot close parent Controls with that Escape.
-				parentInterventionContext: IsOpen
-					|| IsControlsOrFancyBackContext()
-					|| _escapeDismissBlockedUntilKeyUp
-					|| IsWithinEscDismissGrace());
+				keyboardEscapeDown: keyboardEscapeDown,
+				parentInterventionContext: IsOpen || IsControlsOrFancyBackContext());
 		}
 
 		/// <summary>
-		/// IngameFancyUI.Close only. Pad same-press gates belong here — not in Inventory clearing.
+		/// IngameFancyUI.Close — Player.ToggleInv when Main.inFancyUI (操作設定 / Mod設定).
+		/// IngameOptions.Close is not hooked to block; Escape Inventory must still reach ToggleInv.
+		/// Completion: Escape closes when ComboPanel closed (Tab AdditionalOr does not close menus).
+		/// Pad:B same-press must not block keyboard Escape leave.
 		/// </summary>
 		public static bool ShouldBlockFancyUiClose()
 		{
-			// Escape release after idle combo dismiss: Inventory=Escape would otherwise close Controls.
-			if (_escDismissProtectParentReleaseFrames > 0)
-				return true;
-			if (_escapeDismissBlockedUntilKeyUp || IsWithinEscDismissGrace())
-				return true;
-
-			return ComboPanelEscapeRegistrationPolicy.ShouldBlockParentFancyUiClose(
-				IsOpen,
-				_keyInfoNameEditing,
-				IsRegistrationWaitActive(),
+			bool keyboardEscapeDown = IsKeyboardEscapeDownOnly();
+			bool samePress = ControlsInventoryBackPolicy.IsEscapeSamePressActive(
 				_escapeRegisteredThisTick,
 				_escapeConsumedThisTick,
 				_escapeDismissBlockedUntilKeyUp,
 				IsWithinEscDismissGrace(),
-				physicalEscapeDown: IsKeyboardEscapeDownOnly(),
-				padBackCloseGate: IsPadBackCloseGateActive(),
-				closeInputConsumeGate: ComboPanelCloseInputConsumeGate.ShouldBlockParentBack(),
-				parentInterventionContext: IsOpen
-					|| IsControlsOrFancyBackContext()
-					|| _escapeDismissBlockedUntilKeyUp
-					|| IsWithinEscDismissGrace());
+				_escDismissProtectArmed);
+
+			return !ControlsInventoryBackPolicy.ShouldAllowSettingsMenuBackClose(
+				IsOpen,
+				_keyInfoNameEditing,
+				samePress,
+				keyboardEscapeDown,
+				IsPadBackCloseGateActive(),
+				ComboPanelCloseInputConsumeGate.ShouldBlockParentBack());
 		}
 
 		/// <summary>
@@ -3024,32 +3137,264 @@ namespace AdvancedKeybinds.UI
 		}
 
 		/// <summary>
-		/// Controls / in-game options / ManageControls — NOT bare Main.inFancyUI
-		/// (sticky FancyUI must never keep Pad/Escape gates alive in world).
+		/// Controls / ModConfig / in-game options — NOT bare Main.inFancyUI
+		/// and NOT the sticky KeybindUiWorldInputGuard session.
+		/// ManageControls / ModConfig count only while FancyUI (or title MenuUI) is actually up.
+		/// Stale InGameUI.CurrentState after Close must not keep Escape swallow in world.
 		/// </summary>
 		private static bool IsControlsOrFancyBackContext()
 		{
 			try
 			{
-				if (Main.ingameOptionsWindow)
-					return true;
-				if (ControlsUiHost.IsManageControlsOpen())
-					return true;
-				UIState ingame = Main.InGameUI?.CurrentState;
-				if (ingame != null)
+				bool managePresent = false;
+				bool modConfigPresent = false;
+
+				if (Main.gameMenu)
 				{
-					string n = ingame.GetType().Name;
-					if (n.IndexOf("Controls", StringComparison.OrdinalIgnoreCase) >= 0
-						|| n.IndexOf("Manage", StringComparison.OrdinalIgnoreCase) >= 0)
-						return true;
+					if (ControlsUiHost.TryGetManageControls(out _, out _))
+						managePresent = true;
 				}
+				else if (Main.inFancyUI)
+				{
+					if (ControlsUiHost.TryGetManageControls(out _, out _))
+						managePresent = true;
+					UIState ingame = Main.InGameUI?.CurrentState;
+					if (ingame != null)
+					{
+						string n = ingame.GetType().Name;
+						if (n.IndexOf("ModConfig", StringComparison.OrdinalIgnoreCase) >= 0)
+							modConfigPresent = true;
+					}
+				}
+
+				return ControlsInventoryBackPolicy.IsSettingsMenuBackContext(
+					ingameOptionsWindow: Main.ingameOptionsWindow,
+					inFancyUI: Main.inFancyUI,
+					gameMenu: Main.gameMenu,
+					manageControlsPresent: managePresent,
+					modConfigPresent: modConfigPresent);
 			}
 			catch
 			{
-				// fall through
+				return false;
+			}
+		}
+
+		/// <summary>
+		/// 設定3メニュー上: Tab AdditionalOr の Inventory を消す（閉じるのは Escape のみ）。
+		/// キャラクター操作画面では呼ばない／条件不一致で何もしない — Tab でインベントリ開閉を維持。
+		/// </summary>
+		public static void SuppressTabInventoryOnSettingsMenusIfNeeded()
+		{
+			if (IsOpen)
+				return;
+
+			bool settingsOpen = IsControlsOrFancyBackContext();
+			bool escapeDown = IsKeyboardEscapeDownOnly();
+			bool tabDown = false;
+			try
+			{
+				tabDown = Keyboard.GetState().IsKeyDown(Keys.Tab);
+			}
+			catch
+			{
+				tabDown = false;
 			}
 
-			return false;
+			if (!ControlsInventoryBackPolicy.ShouldSuppressTabInventoryOnSettingsMenus(
+				settingsOpen, escapeDown, tabDown))
+				return;
+
+			ClearTrigger(PlayerInput.Triggers.JustPressed);
+			ClearTrigger(PlayerInput.Triggers.Current);
+			if (Main.LocalPlayer != null)
+				Main.LocalPlayer.releaseInventory = false;
+		}
+
+		/// <summary>
+		/// LIVE B3 / product: restore stuck releaseInventory on settings so Escape can leave.
+		/// </summary>
+		public static void TryRestoreReleaseInventoryForSettingsEscapeLeave()
+		{
+			if (Main.LocalPlayer == null)
+				return;
+
+			bool samePress = ControlsInventoryBackPolicy.IsEscapeSamePressActive(
+				_escapeRegisteredThisTick,
+				_escapeConsumedThisTick,
+				_escapeDismissBlockedUntilKeyUp,
+				IsWithinEscDismissGrace(),
+				_escDismissProtectArmed);
+
+			if (!ControlsInventoryBackPolicy.ShouldRestoreReleaseInventoryForSettingsEscapeLeave(
+				settingsMenusOpen: IsControlsOrFancyBackContext(),
+				comboPanelOpen: IsOpen,
+				escapeSamePressActive: samePress,
+				settingsLeaveInventoryGateArmed: _settingsEscapeLeaveBlockInventoryUntilKeyUp,
+				releaseInventoryAlreadyTrue: Main.LocalPlayer.releaseInventory))
+				return;
+
+			Main.LocalPlayer.releaseInventory = true;
+		}
+
+		/// <summary>
+		/// Call from IngameFancyUI.Close / IngameOptions.Close after vanilla forces inventory open.
+		/// Arms same-press Inventory suppress until Escape key-up (+ first Escape-up update).
+		/// </summary>
+		public static void ArmSettingsEscapeLeaveInventoryGate()
+		{
+			bool escapeDown = IsKeyboardEscapeDownOnly();
+			if (!escapeDown)
+			{
+				_settingsEscapeLeaveBlockInventoryUntilKeyUp = false;
+				_settingsEscapeLeaveEscapeUpUpdates = 0;
+				_settingsEscapeLeaveSettleLastGameUpdate = int.MinValue;
+				return;
+			}
+
+			_settingsEscapeLeaveBlockInventoryUntilKeyUp = true;
+			_settingsEscapeLeaveEscapeUpUpdates = 0;
+			_settingsEscapeLeaveSettleLastGameUpdate = int.MinValue;
+			ClearTrigger(PlayerInput.Triggers.JustPressed);
+			ClearTrigger(PlayerInput.Triggers.Current);
+			Main.playerInventory = false;
+			if (Main.LocalPlayer != null)
+				Main.LocalPlayer.releaseInventory = false;
+		}
+
+		/// <summary>
+		/// After settings leave: strip Inventory while Escape is down, and for the first
+		/// Escape-up game update, so ToggleInv cannot open world inventory on key release.
+		/// </summary>
+		public static void PollSettingsEscapeLeaveInventoryGate()
+		{
+			if (!_settingsEscapeLeaveBlockInventoryUntilKeyUp)
+				return;
+
+			bool escapeDown = IsKeyboardEscapeDownOnly();
+			int gameUpdate = 0;
+			try { gameUpdate = unchecked((int)Main.GameUpdateCount); }
+			catch { gameUpdate = 0; }
+
+			if (escapeDown)
+			{
+				// New Escape press after key-up settle began: release gate so world Inventory works.
+				if (_settingsEscapeLeaveEscapeUpUpdates > 0)
+				{
+					_settingsEscapeLeaveBlockInventoryUntilKeyUp = false;
+					_settingsEscapeLeaveEscapeUpUpdates = 0;
+					_settingsEscapeLeaveSettleLastGameUpdate = int.MinValue;
+					return;
+				}
+
+				_settingsEscapeLeaveEscapeUpUpdates = 0;
+				_settingsEscapeLeaveSettleLastGameUpdate = int.MinValue;
+			}
+			else if (_settingsEscapeLeaveSettleLastGameUpdate != gameUpdate)
+			{
+				_settingsEscapeLeaveSettleLastGameUpdate = gameUpdate;
+				_settingsEscapeLeaveEscapeUpUpdates++;
+			}
+
+			int settleRemaining = ControlsInventoryBackPolicy.ResolveSettingsLeaveKeyUpSettleRemaining(
+				_settingsEscapeLeaveBlockInventoryUntilKeyUp,
+				escapeDown,
+				_settingsEscapeLeaveEscapeUpUpdates,
+				requiredEscapeUpUpdatesBeforeClear: 1);
+
+			if (ControlsInventoryBackPolicy.ShouldSuppressInventoryUntilEscapeKeyUpAfterSettingsLeave(
+				_settingsEscapeLeaveBlockInventoryUntilKeyUp,
+				escapeDown,
+				settleRemaining))
+			{
+				ClearTrigger(PlayerInput.Triggers.JustPressed);
+				ClearTrigger(PlayerInput.Triggers.Current);
+				Main.playerInventory = false;
+				if (Main.LocalPlayer != null)
+					Main.LocalPlayer.releaseInventory = false;
+			}
+
+			if (ControlsInventoryBackPolicy.ShouldClearSettingsLeaveInventoryGate(
+				_settingsEscapeLeaveBlockInventoryUntilKeyUp,
+				escapeDown,
+				settleRemaining))
+			{
+				_settingsEscapeLeaveBlockInventoryUntilKeyUp = false;
+				_settingsEscapeLeaveEscapeUpUpdates = 0;
+				_settingsEscapeLeaveSettleLastGameUpdate = int.MinValue;
+			}
+		}
+
+		/// <summary>
+		/// Call after Player.ToggleInv: one Inventory toggle per Escape press on character control.
+		/// </summary>
+		public static void TryArmWorldEscapeInventoryOneShotAfterToggleInv()
+		{
+			bool escapeDown = IsKeyboardEscapeDownOnly();
+			if (!WorldEscapeInventoryOneShotPolicy.ShouldArmAfterToggleInv(IsOpen, escapeDown))
+				return;
+
+			_worldEscapeInventoryOneShotArmed = true;
+			_worldEscapeInventoryOneShotUpUpdates = 0;
+			_worldEscapeInventoryOneShotSettleLastGameUpdate = int.MinValue;
+			ClearTrigger(PlayerInput.Triggers.JustPressed);
+			ClearTrigger(PlayerInput.Triggers.Current);
+			if (Main.LocalPlayer != null)
+				Main.LocalPlayer.releaseInventory = false;
+		}
+
+		/// <summary>
+		/// While world Escape one-shot is armed, strip Inventory JP/Current only (keep playerInventory).
+		/// </summary>
+		public static void PollWorldEscapeInventoryOneShotGate()
+		{
+			if (!_worldEscapeInventoryOneShotArmed)
+				return;
+
+			bool escapeDown = IsKeyboardEscapeDownOnly();
+			int gameUpdate = 0;
+			try { gameUpdate = unchecked((int)Main.GameUpdateCount); }
+			catch { gameUpdate = 0; }
+
+			if (escapeDown)
+			{
+				// LIVE AddOr Escape+Tab: brief Escape-up then re-down is flicker, not a new press.
+				// Never clear here (ShouldClearGateOnEscapeRedownDuringSettle == false).
+				_worldEscapeInventoryOneShotUpUpdates = 0;
+				_worldEscapeInventoryOneShotSettleLastGameUpdate = int.MinValue;
+			}
+			else if (_worldEscapeInventoryOneShotSettleLastGameUpdate != gameUpdate)
+			{
+				_worldEscapeInventoryOneShotSettleLastGameUpdate = gameUpdate;
+				_worldEscapeInventoryOneShotUpUpdates++;
+			}
+
+			int settleRemaining = WorldEscapeInventoryOneShotPolicy.ResolveKeyUpSettleRemaining(
+				_worldEscapeInventoryOneShotArmed,
+				escapeDown,
+				_worldEscapeInventoryOneShotUpUpdates,
+				WorldEscapeInventoryOneShotPolicy.DefaultRequiredEscapeUpUpdatesBeforeClear);
+
+			if (WorldEscapeInventoryOneShotPolicy.ShouldSuppressInventoryTriggers(
+				_worldEscapeInventoryOneShotArmed,
+				escapeDown,
+				settleRemaining))
+			{
+				ClearTrigger(PlayerInput.Triggers.JustPressed);
+				ClearTrigger(PlayerInput.Triggers.Current);
+				if (Main.LocalPlayer != null)
+					Main.LocalPlayer.releaseInventory = false;
+			}
+
+			if (WorldEscapeInventoryOneShotPolicy.ShouldClearGate(
+				_worldEscapeInventoryOneShotArmed,
+				escapeDown,
+				settleRemaining))
+			{
+				_worldEscapeInventoryOneShotArmed = false;
+				_worldEscapeInventoryOneShotUpUpdates = 0;
+				_worldEscapeInventoryOneShotSettleLastGameUpdate = int.MinValue;
+			}
 		}
 
 		private static void ClearMenuInquiry(TriggersSet set)
@@ -3122,9 +3467,9 @@ namespace AdvancedKeybinds.UI
 		/// </summary>
 		public static void SuppressEscapeAfterVanillaInputRebuild()
 		{
-			if (_escDismissProtectParentReleaseFrames > 0)
+			if (_escDismissProtectArmed)
 			{
-				SuppressParentControlsCloseFromEscapeRelease("AfterVanilla.releaseProtect");
+				PollIdleEscParentReleaseProtect("AfterVanilla");
 				return;
 			}
 
@@ -3137,6 +3482,11 @@ namespace AdvancedKeybinds.UI
 				keyboardEscapeDown))
 			{
 				_escapeDismissBlockedUntilKeyUp = false;
+				if (ComboPanelEscapeRegistrationPolicy.ShouldClearEscDismissGraceOnPanelClose())
+				{
+					_escDismissGraceUntilMs = 0;
+					ClearEscDismissParentReleaseProtect();
+				}
 				WindowsKeySuppressor.ClearShellBlockedEscapeDown();
 			}
 
@@ -3167,25 +3517,101 @@ namespace AdvancedKeybinds.UI
 
 		private static bool IsWithinEscDismissGrace() => Environment.TickCount64 < _escDismissGraceUntilMs;
 
-		private static void BeginEscDismissGrace()
+		private static void BeginEscDismissGrace(bool armTimedGrace = true)
 		{
-			_escDismissGraceUntilMs = Environment.TickCount64 + EscDismissGraceMs;
 			// Close() clears key-up gate — re-arm so the same Escape press cannot FancyUI.Close parent Controls.
 			_escapeDismissBlockedUntilKeyUp = true;
-			_escDismissProtectParentReleaseFrames = 0;
+			ClearEscDismissParentReleaseProtect();
+			if (armTimedGrace)
+				_escDismissGraceUntilMs = Environment.TickCount64 + EscDismissGraceMs;
+			else
+				_escDismissGraceUntilMs = 0;
 			SuppressEscapeDerivedTriggers("BeginEscDismissGrace");
 		}
 
 		/// <summary>
 		/// Escape key-up after idle combo dismiss: keep parent Controls open (vanilla Inventory=Escape).
+		/// Uses Escape-up game-update settle (not a 3-frame countdown) — LIVE FancyUI close on release.
 		/// </summary>
 		private static void ArmEscDismissParentReleaseProtect(string reason)
 		{
-			_escDismissProtectParentReleaseFrames = EscDismissProtectParentReleaseFrames;
-			_escDismissGraceUntilMs = Math.Max(
-				_escDismissGraceUntilMs,
-				Environment.TickCount64 + EscDismissGraceMs);
+			_escDismissProtectArmed = true;
+			_escDismissProtectEscapeUpUpdates = 0;
+			_escDismissProtectSettleLastGameUpdate = int.MinValue;
+			// Do not refresh EscDismissGrace here — that blocked the next Escape for hundreds of ms.
 			SuppressParentControlsCloseFromEscapeRelease(reason);
+		}
+
+		private static void ClearEscDismissParentReleaseProtect()
+		{
+			_escDismissProtectArmed = false;
+			_escDismissProtectEscapeUpUpdates = 0;
+			_escDismissProtectSettleLastGameUpdate = int.MinValue;
+		}
+
+		/// <summary>
+		/// Call after ApplyAdvanced / TryRearm: SharedUi latch may re-inject Inventory JP (jpSrc=ak)
+		/// after earlier Suppress — re-clear while Idle-ESC protect settle is armed.
+		/// </summary>
+		public static void PollIdleEscParentReleaseProtectAfterAdvanced()
+		{
+			if (_escDismissProtectArmed)
+				PollIdleEscParentReleaseProtect("AfterAdvanced");
+		}
+
+		private static void PollIdleEscParentReleaseProtect(string source)
+		{
+			if (!_escDismissProtectArmed)
+				return;
+
+			bool escapeDown = IsKeyboardEscapeDownOnly();
+			int gameUpdate = 0;
+			try { gameUpdate = unchecked((int)Main.GameUpdateCount); }
+			catch { gameUpdate = 0; }
+
+			if (ControlsInventoryBackPolicy.ShouldClearIdleEscParentProtectOnNewEscapePress(
+				_escDismissProtectArmed,
+				escapeDown,
+				_escDismissProtectEscapeUpUpdates))
+			{
+				ClearEscDismissParentReleaseProtect();
+				return;
+			}
+
+			if (escapeDown)
+			{
+				_escDismissProtectEscapeUpUpdates = 0;
+				_escDismissProtectSettleLastGameUpdate = int.MinValue;
+			}
+			else if (_escDismissProtectSettleLastGameUpdate != gameUpdate)
+			{
+				_escDismissProtectSettleLastGameUpdate = gameUpdate;
+				_escDismissProtectEscapeUpUpdates++;
+			}
+
+			int settleRemaining = ControlsInventoryBackPolicy.ResolveIdleEscParentProtectSettleRemaining(
+				_escDismissProtectArmed,
+				escapeDown,
+				_escDismissProtectEscapeUpUpdates,
+				ComboPanelEscapeRegistrationPolicy.IdleEscParentProtectRequiredEscapeUpUpdates);
+
+			if (ComboPanelEscapeRegistrationPolicy.ShouldSuppressParentDuringEscDismissReleaseProtect(
+				    protectFramesActive: settleRemaining > 0)
+				|| ControlsInventoryBackPolicy.ShouldSuppressInventoryUntilEscapeKeyUpAfterSettingsLeave(
+					_escDismissProtectArmed,
+					escapeDown,
+					settleRemaining))
+			{
+				SuppressParentControlsCloseFromEscapeRelease(source ?? "IdleEscProtect");
+			}
+
+			if (ControlsInventoryBackPolicy.ShouldClearSettingsLeaveInventoryGate(
+				_escDismissProtectArmed,
+				escapeDown,
+				settleRemaining))
+			{
+				ClearEscDismissParentReleaseProtect();
+			}
 		}
 
 		private static void SuppressParentControlsCloseFromEscapeRelease(string reason)
@@ -3354,6 +3780,19 @@ namespace AdvancedKeybinds.UI
 		{
 			if (string.IsNullOrEmpty(token))
 				return false;
+
+			if (IsKeyboardAdditionalOrTab)
+			{
+				if (index != 3)
+				{
+					SoundEngine.PlaySound(SoundID.MenuTick);
+					return false;
+				}
+
+				bool ok = TrySetAdditionalOrToken(token);
+				SoundEngine.PlaySound(SoundID.MenuTick);
+				return ok;
+			}
 
 			if (_twoKeySetupEligible && index == 2)
 			{
@@ -3759,6 +4198,7 @@ namespace AdvancedKeybinds.UI
 			RememberPanelMouseUiIfValid();
 
 			Point hover = GetPanelMouseUi();
+			UpdateKeyboardAdditionalOrTabHover(hover);
 			_hoverHoldNumber = HoldEditable && _holdNumberRect.Contains(hover);
 			_hoverHoldSlider = HoldEditable && HoldSliderHit().Contains(hover);
 			_hoverHoldDefaultBtn = HoldEditable && _holdDefaultBtn.Contains(hover);
@@ -4267,10 +4707,26 @@ namespace AdvancedKeybinds.UI
 			if (TryHandleKeyInfoSessionUndoOrReset(mouse, leftJustPressed))
 				return;
 
+			if (leftJustPressed && TryClickKeyboardAdditionalOrTab(mouse))
+			{
+				SoundEngine.PlaySound(SoundID.MenuTick);
+				return;
+			}
+
 			if (rightJustPressed)
 			{
 				if (TryClearKeyInfoDisplayAliasByRightClick(mouse))
 					return;
+
+				if (IsKeyboardAdditionalOrTab)
+				{
+					if (_slotBox[3].Contains(mouse) && !string.IsNullOrEmpty(_working?.AdditionalOrToken))
+					{
+						ClearAdditionalOrToken();
+						SoundEngine.PlaySound(SoundID.MenuTick);
+					}
+					return;
+				}
 
 				// TwoKey Terraria-OR: UI box1→Slot1, box3→Slot2. Hitbox = full slot rect.
 				// Unset that storage slot only; keep AK record (empty Persist on Save).
@@ -4354,6 +4810,10 @@ namespace AdvancedKeybinds.UI
 
 			if (leftJustPressed)
 			{
+				if (IsKeyboardAdditionalOrTab
+					&& (_keyInfoNameBox.Contains(mouse) || IsKeyInfoShellHit(mouse)))
+					return;
+
 				if (_keyInfoNameBox.Contains(mouse))
 				{
 					if (!TryAllowDisplayNameChange("MouseClick"))
@@ -4399,6 +4859,9 @@ namespace AdvancedKeybinds.UI
 						continue;
 
 					if (_twoKeySetupEligible && i == 2)
+						return;
+
+					if (IsKeyboardAdditionalOrTab && i != 3)
 						return;
 
 					#if AK_DIAGNOSTICS
@@ -4577,11 +5040,11 @@ namespace AdvancedKeybinds.UI
 			_keyInfoNameNextBackspaceMs = 0;
 			Main.clrInput();
 			PlayerInput.WritingText = true;
-			if (!Main.blockInput)
-			{
-				Main.blockInput = true;
-				_keyInfoNameOwnedBlockInput = true;
-			}
+			// Always own blockInput for this modal session. If Terraria/IME raised blockInput
+			// after WritingText without our ownership flag, End would leave blockInput stuck
+			// and Controls ESC would die after display-name rename.
+			Main.blockInput = true;
+			_keyInfoNameOwnedBlockInput = true;
 
 			Main.instance.HandleIME();
 			SoundEngine.PlaySound(SoundID.MenuTick);
@@ -4803,6 +5266,86 @@ namespace AdvancedKeybinds.UI
 			_keyInfoNameNextBackspaceMs = 0;
 			_keyInfoNameSwallowNextClick = false;
 			EndKeyInfoNameInputSession();
+
+			// Next Idle ESC panel dismiss: key-up gate only (no timed EscDismissGrace) — A1.
+			_pendingKeyUpOnlyEscDismissAfterNameEdit = true;
+			ArmPostTextEditGameplaySettle();
+
+			// Enter / outside-click commit / discard without Escape held: drop sticky gate from
+			// earlier editing suppress so Controls ESC after mouse close is not same-press dead.
+			if (ComboPanelEscapeRegistrationPolicy.ShouldClearDismissGateAfterNameEditEnds(
+				IsKeyboardEscapeDownOnly()))
+				_escapeDismissBlockedUntilKeyUp = false;
+		}
+
+		private static void ArmPostTextEditGameplaySettle()
+		{
+			if (!DisplayNameEditGameplayResiduePolicy.ShouldArmSettleFromNameEditEnd())
+				return;
+
+			_postTextEditGameplaySettleFrames =
+				DisplayNameEditGameplayResiduePolicy.SettleFramesAfterNameEditEnd;
+			_postTextEditGameplaySettleWhilePanelOpen = true;
+			ClearPostTextEditGameplayTriggers();
+		}
+
+		/// <summary>
+		/// After display-name edit: clear gameplay Triggers after ApplyAdvanced (which can
+		/// re-inject Jump/Throw from scan-held ghosts). Short frame count, and while the
+		/// panel stays open after name edit — never a long gameplay Jump-disable window.
+		/// Contract: <see cref="DisplayNameEditGameplayResiduePolicy"/>.
+		/// </summary>
+		public static void PollPostTextEditGameplaySettle()
+		{
+			bool settleFrames = _postTextEditGameplaySettleFrames > 0;
+			if (!DisplayNameEditGameplayResiduePolicy.ShouldClearGameplayTriggersThisTick(
+				settleFrames,
+				_postTextEditGameplaySettleWhilePanelOpen,
+				IsOpen))
+				return;
+
+			ClearPostTextEditGameplayTriggers();
+			if (settleFrames)
+				_postTextEditGameplaySettleFrames--;
+
+			if (DisplayNameEditGameplayResiduePolicy.ShouldDisarmSettleWhilePanelOpen(
+				_postTextEditGameplaySettleWhilePanelOpen,
+				IsOpen,
+				_postTextEditGameplaySettleFrames > 0))
+				_postTextEditGameplaySettleWhilePanelOpen = false;
+		}
+
+		private static void ClearPostTextEditGameplayTriggers()
+		{
+			TriggersSet jp = PlayerInput.Triggers?.JustPressed;
+			TriggersSet cur = PlayerInput.Triggers?.Current;
+			string[] names = DisplayNameEditGameplayResiduePolicy.GameplayTriggersToClear;
+			for (int i = 0; i < names.Length; i++)
+			{
+				string name = names[i];
+				ClearNamedTrigger(jp, name);
+				ClearNamedTrigger(cur, name);
+			}
+
+			// Only while still in UI / name-edit aftermath — never leave these stuck false across
+			// a long gameplay window (settings leave must not arm this settle).
+			if (Main.LocalPlayer != null && !Main.gameMenu
+				&& (IsOpen || IsControlsOrFancyBackContext() || _keyInfoNameEditing
+					|| _postTextEditGameplaySettleFrames > 0))
+			{
+				Player p = Main.LocalPlayer;
+				p.controlJump = false;
+				p.controlThrow = false;
+				p.controlMount = false;
+			}
+		}
+
+		private static void ClearNamedTrigger(TriggersSet set, string name)
+		{
+			if (set?.KeyStatus == null || string.IsNullOrEmpty(name))
+				return;
+			if (set.KeyStatus.ContainsKey(name))
+				set.KeyStatus[name] = false;
 		}
 
 		private static void TryCommitKeyInfoNameBuffer()
@@ -4836,6 +5379,30 @@ namespace AdvancedKeybinds.UI
 			}
 
 			Main.clrInput();
+			try
+			{
+				// Prevent typed keys from appearing as JustPressed vs a stale empty oldKeyState.
+				Main.oldKeyState = Main.keyState;
+			}
+			catch
+			{
+				/* ignore during unload */
+			}
+
+			// LIVE: typed T/Space/R can leave Win32 scan-held ghosts (IME often misses KEYUP).
+			// ApplyAdvanced then keeps Jump/Throw/QuickMount Current=1 with Keyboard up.
+			// Existing recover API — does not change suppressor contracts.
+			if (DisplayNameEditGameplayResiduePolicy.ShouldClearScanHeldFlagsOnNameEditEnd())
+			{
+				try
+				{
+					WindowsKeySuppressor.ClearUnconfirmedScanHeldFlags("keyInfoNameEditEnd");
+				}
+				catch
+				{
+					/* ignore during unload */
+				}
+			}
 		}
 
 		private static void ComputeLayout()
@@ -4856,6 +5423,9 @@ namespace AdvancedKeybinds.UI
 			int leftContentRight = x + LeftBlockWidth - ContentMargin;
 			int leftContentWidth = leftContentRight - contentLeft;
 
+			const int holdColW = 168;
+			// Folder tabs attach flush on the top-outside edge (Hold-column width each).
+			LayoutKeyboardAdditionalOrTabs(contentLeft, y, holdColW);
 			int titleTop = y + HeaderTopPad;
 			int previewTop = titleTop + HeaderTitleHeight + HeaderLineGap;
 			int holdRowTop = previewTop + HeaderPreviewHeight + PreviewToHoldGap;
@@ -4881,7 +5451,6 @@ namespace AdvancedKeybinds.UI
 			_holdInnerWidth = _holdSliderFrame.Width - 10f;
 
 			const int slotH = 138;
-			int holdColW = 168;
 			_holdColumn = new Rectangle(contentLeft, rowY, holdColW, slotH);
 			int halfH = slotH / 2;
 			_holdWhileHeldBox = new Rectangle(contentLeft, rowY, holdColW, halfH);
@@ -4942,7 +5511,11 @@ namespace AdvancedKeybinds.UI
 		/// <summary>Hold-duration editing is only allowed when this is an active single-key Hold binding.</summary>
 		private static bool SupportsHold => BindingRestrictions.SupportsHold(_working);
 
-		private static bool HoldEditable => _working != null && _working.Hold && SupportsHold;
+		private static bool HoldEditable
+			=> _working != null
+				&& _working.Hold
+				&& SupportsHold
+				&& !IsKeyboardAdditionalOrTab;
 
 		private static Rectangle HoldSliderHit()
 		{
@@ -5194,20 +5767,25 @@ namespace AdvancedKeybinds.UI
 				// Hold mode selectors (top = while held, bottom = on release).
 				DrawHoldModeBoxes(spriteBatch, mouse);
 
+				DrawKeyboardAdditionalOrTabs(spriteBatch);
+
 				// Slots. All three share identical dimensions; no per-slot label is drawn.
 				string slotDisplayHoverTip = null;
 				for (int i = 1; i <= 3; i++)
 				{
 					bool capturing = (_awaitingSlotKey || SlotCapture.IsCapturing) && _capturingSlot == i;
 					bool hover = _slotBox[i].Contains(mouse);
-					bool explanationSlot = _twoKeySetupEligible && i == 2;
+					bool explanationSlot = (_twoKeySetupEligible && i == 2)
+						|| (IsKeyboardAdditionalOrTab && i == 2);
+					bool lockedMirrorSlot = IsKeyboardAdditionalOrTab && i == 1;
+					bool lockedChrome = explanationSlot || lockedMirrorSlot;
 					// Non-clickable explanation uses the same muted colors as disabled
 					// "Reset all display names" (DrawResetDisplaysButton when !enabled).
-					Color fill = explanationSlot
-						? new Color(28, 30, 40)
+					Color fill = lockedChrome
+						? AdditionalOrLockedFill
 						: (capturing ? new Color(96, 54, 150) : new Color(46, 48, 64));
-					Color border = explanationSlot
-						? new Color(60, 60, 78)
+					Color border = lockedChrome
+						? AdditionalOrLockedBorder
 						: (capturing
 							? new Color(220, 170, 255)
 							: (hover ? Color.White : new Color(110, 110, 140)));
@@ -5217,7 +5795,7 @@ namespace AdvancedKeybinds.UI
 						2 => ComboPanelPadFocus.Slot2,
 						_ => ComboPanelPadFocus.Slot3
 					};
-					if (!explanationSlot)
+					if (!lockedChrome)
 					{
 						Color? padBorder = ComboPanelGamePadNavigation.TryGetFocusBorder(
 							slotFocus, new Color(220, 170, 255), capturing);
@@ -5227,7 +5805,7 @@ namespace AdvancedKeybinds.UI
 
 					DrawBox(spriteBatch, _slotBox[i], fill, border);
 
-					if (explanationSlot)
+					if (_twoKeySetupEligible && i == 2 && !IsKeyboardAdditionalOrTab)
 					{
 						DrawTwoKeySetupExplanation(spriteBatch, _slotBox[i]);
 						continue;
@@ -5237,7 +5815,8 @@ namespace AdvancedKeybinds.UI
 						? Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.Press")
 						: SlotDisplay(i);
 
-					if (!capturing && TryGetSlotRenamedDisplay(i, out string usingKey, out string displayName))
+					if (!capturing && !IsKeyboardAdditionalOrTab
+						&& TryGetSlotRenamedDisplay(i, out string usingKey, out string displayName))
 					{
 						// Show the using key only; custom display name is on hover.
 						// Slot text keeps the original (non-fill) size; long labels still shrink to fit.
@@ -5291,6 +5870,14 @@ namespace AdvancedKeybinds.UI
 		private static void DrawKeyInfoColumn(SpriteBatch spriteBatch, Point mouse)
 		{
 			_keyInfoHoverTip = null;
+			if (IsKeyboardAdditionalOrTab)
+			{
+				DrawBox(spriteBatch, _keyInfoColumn, AdditionalOrLockedFill, AdditionalOrLockedBorder);
+				DrawKeyInfoSpliceWave(spriteBatch);
+				DrawDisabledDisplayNameButton(spriteBatch);
+				return;
+			}
+
 			bool displayNameEnabled = IsDisplayNameChangeEnabled;
 			bool slotCaptureActive = _awaitingSlotKey || SlotCapture.IsCapturing;
 			bool hasToken = displayNameEnabled && !string.IsNullOrEmpty(_keyInfoToken) && !slotCaptureActive;
@@ -5594,7 +6181,7 @@ namespace AdvancedKeybinds.UI
 				return AlternateGamePadBindingPolicy.FormatAlternateOverPrimaryDisplay(left, right);
 			}
 
-			if (_working.FilledSlotCount == 0 && !_working.HasAlternateGamePad)
+			if (_working.FilledSlotCount == 0 && !_working.HasAlternateGamePad && !_working.HasAdditionalOr)
 				return Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.Unset");
 
 			return BindingDisplayResolver.FormatComboDisplayLabel(_working);
@@ -5602,6 +6189,18 @@ namespace AdvancedKeybinds.UI
 
 		private static string SlotDisplay(int index)
 		{
+			if (IsKeyboardAdditionalOrTab)
+			{
+				// Locked center slot: blank panel (do not show "(なし)").
+				if (index == 2)
+					return string.Empty;
+
+				string orLabel = ResolveAdditionalOrSlotLabel(index);
+				return string.IsNullOrEmpty(orLabel)
+					? Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.Empty")
+					: orLabel;
+			}
+
 			if (IsTwoKeyTerrariaOrSession())
 			{
 				int storageSlot = index == 1 ? 1 : (index == 3 ? 2 : 0);
@@ -5757,8 +6356,8 @@ namespace AdvancedKeybinds.UI
 
 		private static void DrawHoldModeBoxes(SpriteBatch spriteBatch, Point mouse)
 		{
-			// Controller TwoKey OR panel: HOLD is unavailable (same muted chrome as "2 Key Setup" slot).
-			bool twoKeyHoldLocked = _twoKeySetupEligible;
+			// Controller TwoKey OR panel / Keyboard AdditionalOr tab: HOLD unavailable.
+			bool twoKeyHoldLocked = _twoKeySetupEligible || IsKeyboardAdditionalOrTab;
 			bool holdEnabled = SupportsHold && !twoKeyHoldLocked;
 			bool whileHeldActive = holdEnabled && _working.Hold && !_working.HoldOnRelease;
 			bool onReleaseActive = holdEnabled && _working.Hold && _working.HoldOnRelease;
@@ -5864,15 +6463,24 @@ namespace AdvancedKeybinds.UI
 			"Mods.AdvancedKeybinds.UI.TwoKeySetup.HintLine3",
 		};
 
-		/// <summary>Footer hints: one localized line per row; auto-shrinks to stay inside each slot.</summary>
+		private static readonly string[] FooterHintKeysAdditionalOr = {
+			"Mods.AdvancedKeybinds.UI.AdditionalOr.HintLine1",
+			"Mods.AdvancedKeybinds.UI.AdditionalOr.HintLine2",
+			"Mods.AdvancedKeybinds.UI.AdditionalOr.HintLine3",
+		};
+
+		/// <summary>Footer hints: one localized line per row; shrinks as needed to stay inside each slot.</summary>
 		private static void DrawFooterHints(SpriteBatch spriteBatch, Color hintColor)
 		{
 			if (_footerHintRect.Width <= 0 || _footerHintRect.Height <= 0)
 				return;
 
-			string[] keys = _twoKeySetupEligible ? FooterHintKeysTwoKey : FooterHintKeys;
+			string[] keys = IsKeyboardAdditionalOrTab
+				? FooterHintKeysAdditionalOr
+				: (_twoKeySetupEligible ? FooterHintKeysTwoKey : FooterHintKeys);
 			float slotH = _footerHintRect.Height / (float)FooterHintLineSlots;
-			float minScale = _twoKeySetupEligible ? 0.35f : 0.45f;
+			// AdditionalOr / TwoKey lines can be long in DE/FR/PL — prefer fitting over a high min scale.
+			float minScale = (_twoKeySetupEligible || IsKeyboardAdditionalOrTab) ? 0.18f : 0.35f;
 			for (int i = 0; i < FooterHintLineSlots; i++)
 			{
 				string text = Language.GetTextValue(keys[i]);
@@ -5883,12 +6491,26 @@ namespace AdvancedKeybinds.UI
 					(int)(_footerHintRect.Y + i * slotH),
 					_footerHintRect.Width,
 					Math.Max(1, (int)Math.Ceiling(slotH)));
-				DrawFittedText(spriteBatch, text, slotRect, hintColor, FooterHintMaxScale, minScale);
+				DrawFittedText(
+					spriteBatch,
+					text,
+					slotRect,
+					hintColor,
+					FooterHintMaxScale,
+					minScale,
+					pad: 4f,
+					forceFitInside: true);
 			}
 		}
 
 		/// <summary>Pick the largest scale so text fits inside a box (for localized hint lines).</summary>
-		private static float FitTextScaleToBox(string text, float maxWidth, float maxHeight, float maxScale, float minScale)
+		private static float FitTextScaleToBox(
+			string text,
+			float maxWidth,
+			float maxHeight,
+			float maxScale,
+			float minScale,
+			bool forceFitInside = false)
 		{
 			if (string.IsNullOrEmpty(text) || maxWidth <= 0f || maxHeight <= 0f)
 				return minScale;
@@ -5898,6 +6520,13 @@ namespace AdvancedKeybinds.UI
 				return minScale;
 
 			float scale = Math.Min(maxWidth / raw.X, maxHeight / raw.Y);
+			if (forceFitInside)
+			{
+				// Never exceed max; may go below minScale so long locales stay in-frame.
+				float floor = Math.Min(minScale, 0.12f);
+				return MathHelper.Clamp(scale, floor, maxScale);
+			}
+
 			return MathHelper.Clamp(scale, minScale, maxScale);
 		}
 
@@ -6061,16 +6690,29 @@ namespace AdvancedKeybinds.UI
 			spriteBatch.Draw(pixel, new Rectangle(rect.Right - t, rect.Y, t, rect.Height), border);
 		}
 
-		private static void DrawFittedText(SpriteBatch spriteBatch, string text, Rectangle bounds, Color color, float maxScale, float minScale = 0.45f)
+		private static void DrawFittedText(
+			SpriteBatch spriteBatch,
+			string text,
+			Rectangle bounds,
+			Color color,
+			float maxScale,
+			float minScale = 0.45f,
+			float pad = 0f,
+			bool forceFitInside = false)
 		{
 			if (string.IsNullOrEmpty(text) || bounds.Width <= 0 || bounds.Height <= 0)
 				return;
 			if (text.StartsWith("Mods.", StringComparison.Ordinal))
 				return;
 
-			float scale = FitTextScaleToBox(text, bounds.Width, bounds.Height, maxScale, minScale);
+			// DrawBorderString outline is wider than MeasureString; keep a small safety margin.
+			const float borderFudge = 4f;
+			float innerW = Math.Max(1f, bounds.Width - pad * 2f - borderFudge);
+			float innerH = Math.Max(1f, bounds.Height - pad * 2f);
+			float scale = FitTextScaleToBox(text, innerW, innerH, maxScale, minScale, forceFitInside);
 			var font = FontAssets.MouseText.Value;
 			Vector2 size = font.MeasureString(text) * scale;
+			float x = bounds.X + pad;
 			float y = bounds.Y + (bounds.Height - size.Y) / 2f;
 			int start = 0;
 			while (start <= text.Length)
@@ -6079,7 +6721,7 @@ namespace AdvancedKeybinds.UI
 				string line = nl < 0 ? text.Substring(start) : text.Substring(start, nl - start);
 				if (line.Length > 0)
 				{
-					Utils.DrawBorderString(spriteBatch, line, new Vector2(bounds.X, y), color, scale);
+					Utils.DrawBorderString(spriteBatch, line, new Vector2(x, y), color, scale);
 					y += font.MeasureString(line).Y * scale;
 				}
 				else if (nl >= 0)

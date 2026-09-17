@@ -188,6 +188,7 @@ namespace AdvancedKeybinds.Core
 				}
 
 				copy.AlternateGamePadToken = null;
+				copy.AdditionalOrToken = null;
 				copy.Hold = false;
 				copy.HoldOnRelease = false;
 				copy.UseTerrariaKeyStatusOr = true;
@@ -196,8 +197,8 @@ namespace AdvancedKeybinds.Core
 				return copy;
 			}
 
-			// Alternate is independent of AND slots; sanitize Pad-only and clear when empty/AND-combo.
-			if (copy.IsEmpty || copy.FilledSlotCount > 1)
+			// Pad Alternate is independent of AND slots for count==1 only (existing contract).
+			if (copy.FilledSlotCount != 1)
 			{
 				copy.AlternateGamePadToken = null;
 			}
@@ -210,6 +211,19 @@ namespace AdvancedKeybinds.Core
 				else
 					copy.AlternateGamePadToken = altCanon;
 			}
+
+			// Keyboard additional OR: keep with any AND shape; sanitize vs AND slots.
+			if (!string.IsNullOrEmpty(copy.AdditionalOrToken))
+			{
+				if (!KeyboardAdditionalOrPolicy.TryNormalizeToken(
+					    copy.AdditionalOrToken, copy.Keys, out string orCanon, out _))
+					copy.AdditionalOrToken = null;
+				else
+					copy.AdditionalOrToken = orCanon;
+			}
+
+			// Inventory/MenuInquiry + AdditionalOr: Hold left on AND tab must not survive JSON load.
+			KeyboardAdditionalOrPolicy.NormalizeSharedUiBackAdditionalOr(storageKey, copy);
 
 			return copy;
 		}

@@ -102,6 +102,28 @@ namespace AdvancedKeybinds.Core
 			return false;
 		}
 
+		/// <summary>
+		/// Tab-equivalent capture tokens (Keys name, VK_TAB, SC:0x0F).
+		/// Used only for Inventory/MenuInquiry AdditionalOr → vanilla KeyStatus OR.
+		/// </summary>
+		public static bool IsTabEquivalentToken(string key)
+		{
+			if (string.IsNullOrEmpty(key))
+				return false;
+
+			if (string.Equals(key, "Tab", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (string.Equals(key, "VK:0x09", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (key.Length >= 10
+				&& key.StartsWith("SC:0x0F:", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			return false;
+		}
+
 		/// <summary>Zero-alloc sole-key form (same rules as <see cref="IsPlainSingleTap"/> for one key).</summary>
 		public static bool IsPlainSingleTapSole(bool hold, string key)
 		{
