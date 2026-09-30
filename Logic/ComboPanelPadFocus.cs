@@ -14,6 +14,8 @@ namespace AdvancedKeybinds.Core
 		HoldNumber,
 		Clear,
 		Save,
-		Cancel
+		Cancel,
+		/// <summary>Double Tap mode box (below HoldOnRelease). Appended so existing ordinals stay stable.</summary>
+		DoubleTap
 	}
 }

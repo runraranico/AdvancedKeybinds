@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: 開啟控制
 	OpenModConfigMenu.DisplayName: 開啟模組設定
 	CycleHoldTierHudAnchor.DisplayName: 切換 Hold 量條
+	OpenBindingList.DisplayName: 按鍵設定列表
 }
 
 Configs: {
@@ -160,6 +161,14 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+	}
 	KeybindRow: {
 		OutsideSlotTip: 游標選取操作名時，右鍵設為未設定（需確認），中鍵還原預設
 		ConfirmUnsetHover: 再右鍵一次設為未設定
@@ -173,8 +182,11 @@ UI: {
 		Undo: 復原
 		Save: 保存
 		HintLine1: 左鍵點擊欄位，然後按下按鍵或滑鼠按鈕。
-		HintLine2: Hold 僅限 1 鍵時可用。
+		HintLine2: Hold / DT 僅限 1 鍵時可用。
 		HintLine3: 將游標移到欄位上並右鍵點擊以清除設定。
+		HintLine2DoubleTapForbidden: 該按鍵無法指派給 DT。
+		HintLine2HoldForbidden: 該按鍵無法指派給 Hold。
+		HintLine2HoldDoubleTapForbidden: 該按鍵無法指派給 Hold / DT。
 		HoldDefaultLabel: 預設
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 按住時
@@ -183,6 +195,8 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: 可輸入 10～10000 的數值
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: 快速點按兩次
 		ConfirmLeftClickOnly: 要單獨綁定左鍵嗎？再按一次儲存以確認。
 		ClearConfirmPad: 要清除嗎？
 		RejectOppositeStickDirection: 同一搖桿的相反方向不能同時綁定（例如 上+下）

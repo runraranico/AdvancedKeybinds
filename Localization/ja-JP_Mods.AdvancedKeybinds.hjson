@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: コントロールを開く
 	OpenModConfigMenu.DisplayName: MOD設定を開く
 	CycleHoldTierHudAnchor.DisplayName: Holdゲージを切替
+	OpenBindingList.DisplayName: キー設定一覧
 }
 
 Configs: {
@@ -354,6 +355,18 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: キー
+		ColAction: 動作
+		ColMod: MOD
+		EmptyHint: 「AK ALL KEY」をクリックするかキーを押してください
+		NoMatch: （このキーの設定はありません）
+		SuffixKeyboardUi: " (メニュー)"
+		SuffixGamePadUi: " (Pad UI)"
+		SuffixGamePadGame: " (Pad)"
+		SuffixGamePad: " (Pad)"
+	}
 	KeybindRow: {
 		OutsideSlotTip: カーソルが操作名を選択している時、右クリックで未設定（要確認）、中クリックでデフォルトに戻せます
 		ConfirmUnsetHover: もう一度右クリックで未設定にします
@@ -367,8 +380,11 @@ UI: {
 		Undo: 取消
 		Save: 保存
 		HintLine1: 枠を左クリックして キー/マウス を登録
-		HintLine2: Holdは 1キー の時のみ可
+		HintLine2: Hold / DT は 1キー の時のみ可
 		HintLine3: カーソルを枠に合わせ右クリックで設定解除
+		HintLine2DoubleTapForbidden: そのキーは DT登録不可
+		HintLine2HoldForbidden: そのキーは Hold登録不可
+		HintLine2HoldDoubleTapForbidden: そのキーは Hold / DT 登録不可
 		HoldDefaultLabel: 初期値
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 押し続けて有効
@@ -377,6 +393,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold 
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: 10～10000迄を入力可能
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: 素早く2回押す
+		DoubleTapPreview: DT
+		DoubleTapMsInputTooltip: 250～1000迄を入力可能
 		ConfirmLeftClickOnly: 左クリック単独でよろしいですか？もう一度保存で確定
 		ClearConfirmPad: クリアしますか？
 		RejectOppositeStickDirection: 同じスティックの反対方向は同時に登録できません（例: 上+下）

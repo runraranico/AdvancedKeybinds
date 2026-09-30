@@ -400,9 +400,10 @@ namespace AdvancedKeybinds.Core
 
 		private static List<LegacyGamePadStorageMigrationPolicy.PlanItem> BuildStoragePlan(
 			Dictionary<string, ComboBindingData> combos)
-			=> LegacyGamePadStorageMigrationPolicy.BuildPlan(
+			=> LegacyGamePadMigrationOrchestrator.BuildDtSafeStoragePlan(
 				combos == null ? Array.Empty<string>() : (IEnumerable<string>)combos.Keys,
-				key => combos != null && combos.ContainsKey(key));
+				key => combos != null && combos.ContainsKey(key),
+				key => combos != null && combos.TryGetValue(key, out ComboBindingData data) ? data : null);
 
 		public static Dictionary<string, ComboBindingData> SimulateStoragePlan(
 			Dictionary<string, ComboBindingData> before,

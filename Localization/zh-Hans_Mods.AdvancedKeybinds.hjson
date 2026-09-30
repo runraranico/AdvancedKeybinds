@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: 打开控制
 	OpenModConfigMenu.DisplayName: 打开模组配置
 	CycleHoldTierHudAnchor.DisplayName: 切换 Hold HUD
+	OpenBindingList.DisplayName: 按键设置列表
 }
 
 Configs: {
@@ -160,6 +161,19 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+		// SuffixKeyboardUi: " (Menu)"
+		// SuffixGamePadUi: " (Pad UI)"
+		// SuffixGamePadGame: " (Pad)"
+		// SuffixGamePad: " (Pad)"
+	}
+
 	KeybindRow: {
 		OutsideSlotTip: 光标选中操作名时，右键设为未设置（需确认），中键恢复默认
 		ConfirmUnsetHover: 再右键一次设为未设置
@@ -173,8 +187,11 @@ UI: {
 		Undo: 撤销
 		Save: 保存
 		HintLine1: 左键点击槽位，然后按下按键或鼠标按钮。
-		HintLine2: Hold 仅限 1 键时可用。
+		HintLine2: Hold / DT 仅限 1 键时可用。
 		HintLine3: 将光标移到槽位上并右键点击以清除设置。
+		HintLine2DoubleTapForbidden: 该按键无法分配给 DT。
+		HintLine2HoldForbidden: 该按键无法分配给 Hold。
+		HintLine2HoldDoubleTapForbidden: 该按键无法分配给 Hold / DT。
 		HoldDefaultLabel: 默认
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 按住时
@@ -183,6 +200,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: 可输入 10～10000
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: 快速点按两次
+		// DoubleTapPreview: DT
+		// DoubleTapMsInputTooltip: Enter a value from 250～1000
 		ConfirmLeftClickOnly: 要单独绑定左键吗？再按一次保存以确认。
 		ClearConfirmPad: 要清除吗？
 		RejectOppositeStickDirection: 同一摇杆的相反方向不能同时绑定（例如 上+下）

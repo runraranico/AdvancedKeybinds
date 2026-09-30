@@ -47,8 +47,10 @@ namespace AdvancedKeybinds.Core
 
 			var keys = new List<string>(session.Combos.Keys);
 			List<LegacyGamePadStorageMigrationPolicy.PlanItem> storagePlan =
-				LegacyGamePadStorageMigrationPolicy.BuildPlan(
-					keys, key => session.Combos.ContainsKey(key));
+				LegacyGamePadMigrationOrchestrator.BuildDtSafeStoragePlan(
+					keys,
+					key => session.Combos.ContainsKey(key),
+					key => session.Combos.TryGetValue(key, out ComboBindingData data) ? data : null);
 			Dictionary<string, ComboBindingData> combosAfter =
 				LegacyGamePadMigrationCommitPipeline.SimulateStoragePlan(session.Combos, storagePlan);
 
@@ -152,9 +154,10 @@ namespace AdvancedKeybinds.Core
 				keys.Add(pair.Key);
 
 			List<LegacyGamePadStorageMigrationPolicy.PlanItem> plan =
-				LegacyGamePadStorageMigrationPolicy.BuildPlan(
+				LegacyGamePadMigrationOrchestrator.BuildDtSafeStoragePlan(
 					keys,
-					key => session.Combos.ContainsKey(key));
+					key => session.Combos.ContainsKey(key),
+					key => session.Combos.TryGetValue(key, out ComboBindingData data) ? data : null);
 			bool combosNeedMutation =
 				LegacyGamePadStorageMigrationPolicy.PlanRequiresCombosMutation(plan);
 

@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: Ouvrir les controles
 	OpenModConfigMenu.DisplayName: Ouvrir la configuration des mods
 	CycleHoldTierHudAnchor.DisplayName: Basculer le HUD Hold
+	OpenBindingList.DisplayName: Liste des réglages de touches
 }
 
 Configs: {
@@ -160,6 +161,19 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+		// SuffixKeyboardUi: " (Menu)"
+		// SuffixGamePadUi: " (Pad UI)"
+		// SuffixGamePadGame: " (Pad)"
+		// SuffixGamePad: " (Pad)"
+	}
+
 	KeybindRow: {
 		OutsideSlotTip: Lorsque le curseur sélectionne un nom d'action, clic droit pour désassigner (confirmation), clic molette pour restaurer la valeur par défaut
 		ConfirmUnsetHover: Clic droit encore pour désassigner
@@ -173,8 +187,11 @@ UI: {
 		Undo: Annuler
 		Save: Enregistrer
 		HintLine1: Clic gauche sur une case, puis appuyez sur une touche ou un bouton de souris.
-		HintLine2: Hold uniquement avec 1 touche.
+		HintLine2: Hold / DT uniquement avec 1 touche.
 		HintLine3: Placez le curseur sur une case et clic droit pour effacer la liaison.
+		HintLine2DoubleTapForbidden: Cette touche ne peut pas être assignée à DT.
+		HintLine2HoldForbidden: Cette touche ne peut pas être assignée à Hold.
+		HintLine2HoldDoubleTapForbidden: Cette touche ne peut pas être assignée à Hold / DT.
 		HoldDefaultLabel: Par défaut
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: maintenu
@@ -183,6 +200,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Entrez une valeur de 10～10000
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: Appuyez deux fois vite
+		// DoubleTapPreview: DT
+		// DoubleTapMsInputTooltip: Enter a value from 250～1000
 		ConfirmLeftClickOnly: Lier uniquement le clic gauche ? Enregistrez à nouveau pour confirmer.
 		ClearConfirmPad: Effacer ?
 		RejectOppositeStickDirection: Directions opposées du stick incompatibles (ex. Haut+Bas).

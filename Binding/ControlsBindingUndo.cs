@@ -115,7 +115,7 @@ namespace AdvancedKeybinds.Binding
 				return ok;
 			}
 
-			if (restore.Advanced == null || restore.Advanced.IsEmpty)
+			if (restore.Advanced == null || (restore.Advanced.IsEmpty && !restore.Advanced.DoubleTap))
 			{
 				if (!BindingStorage.ClearBindings(restore.ActionId, "controls-undo"))
 				{
@@ -129,12 +129,15 @@ namespace AdvancedKeybinds.Binding
 				return false;
 			}
 
-			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(restore.ActionId);
-			VanillaRebindHelper.RestoreAssignedKeysForInputMode(
-				trigger,
-				restore.VanillaKeys,
-				restore.KeyStatusMode,
-				"controls-undo");
+			if (restore.Advanced == null || !restore.Advanced.DoubleTap)
+			{
+				string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(restore.ActionId);
+				VanillaRebindHelper.RestoreAssignedKeysForInputMode(
+					trigger,
+					restore.VanillaKeys,
+					restore.KeyStatusMode,
+					"controls-undo");
+			}
 
 			ClientPrefs.OpenKeybindMenuCustomized = restore.OpenKeybindMenuCustomized;
 			ClientPrefs.HoldTierHudHotkeyCustomized = restore.HoldTierHudHotkeyCustomized;
@@ -165,12 +168,24 @@ namespace AdvancedKeybinds.Binding
 
 		private static bool ComboEquals(ComboBinding a, ComboBinding b)
 		{
-			bool aEmpty = a == null || a.IsEmpty;
-			bool bEmpty = b == null || b.IsEmpty;
+			bool aDt = a != null && a.DoubleTap;
+			bool bDt = b != null && b.DoubleTap;
+			if (aDt || bDt)
+			{
+				if (aDt != bDt)
+					return false;
+				if (a.DoubleTapMs != b.DoubleTapMs)
+					return false;
+			}
+
+			bool aEmpty = a == null || (a.IsEmpty && !aDt);
+			bool bEmpty = b == null || (b.IsEmpty && !bDt);
 			if (aEmpty || bEmpty)
 				return aEmpty == bEmpty;
 
 			return string.Equals(a.Slot1, b.Slot1, StringComparison.Ordinal)
+				&& a.DoubleTap == b.DoubleTap
+				&& a.DoubleTapMs == b.DoubleTapMs
 				&& string.Equals(a.Slot2, b.Slot2, StringComparison.Ordinal)
 				&& string.Equals(a.Slot3, b.Slot3, StringComparison.Ordinal)
 				&& string.Equals(a.Slot1Display, b.Slot1Display, StringComparison.Ordinal)

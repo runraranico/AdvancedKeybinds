@@ -98,13 +98,13 @@ namespace AdvancedKeybinds.Core
 
 					bool allowEmptyPersist = pair.Value.PersistAsEmptyRecord
 						&& GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key);
-					if (pair.Value.IsEmpty && !allowEmptyPersist)
+					if (pair.Value.IsEmpty && !pair.Value.DoubleTap && !allowEmptyPersist)
 						continue;
 
 					ComboBindingData sanitized = SanitizeBinding(pair.Value, pair.Key);
 					if (sanitized == null)
 						continue;
-					if (sanitized.IsEmpty
+					if (sanitized.IsEmpty && !sanitized.DoubleTap
 						&& !(sanitized.PersistAsEmptyRecord
 							&& GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key)))
 						continue;
@@ -142,6 +142,10 @@ namespace AdvancedKeybinds.Core
 		{
 			if (source == null)
 				return null;
+
+			// Stage2C: keep invalid/odd DT rows as saved; do not downgrade to plain/hold sanitize.
+			if (source.DoubleTap)
+				return source.Clone();
 
 			var copy = source.Clone();
 			for (int i = 1; i <= 3; i++)

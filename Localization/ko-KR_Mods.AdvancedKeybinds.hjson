@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: 조작 열기
 	OpenModConfigMenu.DisplayName: 모드 설정 열기
 	CycleHoldTierHudAnchor.DisplayName: Hold 게이지 전환
+	OpenBindingList.DisplayName: 키 설정 목록
 }
 
 Configs: {
@@ -160,6 +161,14 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+	}
 	KeybindRow: {
 		OutsideSlotTip: 커서가 조작 이름을 선택하고 있을 때, 오른쪽 클릭으로 미설정(확인 필요), 가운데 클릭으로 기본값으로 되돌립니다
 		ConfirmUnsetHover: 다시 오른쪽 클릭하면 미설정됩니다
@@ -173,8 +182,11 @@ UI: {
 		Undo: 실행 취소
 		Save: 저장
 		HintLine1: 슬롯을 왼쪽 클릭한 뒤 키나 마우스 버튼을 누르세요.
-		HintLine2: Hold는 1키일 때만 가능
+		HintLine2: Hold / DT는 1키일 때만 가능
 		HintLine3: 슬롯에 커서를 올리고 오른쪽 클릭으로 설정 해제
+		HintLine2DoubleTapForbidden: 이 키는 DT에 등록할 수 없습니다
+		HintLine2HoldForbidden: 이 키는 Hold에 등록할 수 없습니다
+		HintLine2HoldDoubleTapForbidden: 이 키는 Hold / DT에 등록할 수 없습니다
 		HoldDefaultLabel: 기본값
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: 누르고 있는 동안
@@ -183,6 +195,8 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: 10～10000 사이 값을 입력할 수 있습니다
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: 빠르게 두 번 누르기
 		ConfirmLeftClickOnly: 왼쪽 클릭만 등록할까요? 확인하려면 저장을 다시 누르세요.
 		ClearConfirmPad: 지울까요?
 		RejectOppositeStickDirection: 같은 스틱의 반대 방향은 함께 등록할 수 없습니다 (예: 위+아래)

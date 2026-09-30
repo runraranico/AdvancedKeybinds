@@ -28,6 +28,12 @@ namespace AdvancedKeybinds.Core
 		public string AcceptedToken { get; private set; }
 		public string LastDiagReason { get; private set; }
 
+		/// <summary>
+		/// Structured outcome of the latest Poll. Waiting/recovery/accept stay None;
+		/// only CaptureTokenResolver Ambiguous/Empty/Unresolved set a reject code.
+		/// </summary>
+		public AkDecisionReason LastPollDecisionReason { get; private set; }
+
 		/// <summary>Ghost tokens cleared by the last recovery (runtime should drop matching held flags).</summary>
 		public IReadOnlyCollection<string> LastRecoveredGhostTokens => _lastRecoveredGhosts;
 
@@ -44,6 +50,7 @@ namespace AdvancedKeybinds.Core
 		public void Begin(IEnumerable<string> heldAtBegin)
 		{
 			Cancel();
+			LastPollDecisionReason = AkDecisionReason.None;
 			AddCanonical(heldAtBegin, _blockedAtBegin);
 			AddCanonical(heldAtBegin, _prevHeld);
 			LastDiagReason = "begin blocked=[" + string.Join(",", _blockedAtBegin) + "]";
@@ -63,6 +70,7 @@ namespace AdvancedKeybinds.Core
 			CurrentPhase = Phase.Inactive;
 			AcceptedToken = null;
 			LastDiagReason = "cancelled";
+			LastPollDecisionReason = AkDecisionReason.None;
 			LastPollRecovered = false;
 			_blockedAtBegin.Clear();
 			_prevHeld.Clear();
@@ -89,6 +97,7 @@ namespace AdvancedKeybinds.Core
 			acceptedToken = null;
 			LastPollRecovered = false;
 			_lastRecoveredGhosts.Clear();
+			LastPollDecisionReason = AkDecisionReason.None;
 
 			if (CurrentPhase == Phase.Inactive || CurrentPhase == Phase.InputAccepted)
 				return false;
@@ -350,6 +359,7 @@ namespace AdvancedKeybinds.Core
 					+ "] collapseAfter=[" + string.Join(",", collapsed)
 					+ "] resolve=Ambiguous:" + resolved.Reason
 					+ " AcceptedToken=(none) reject=ambiguous";
+				LastPollDecisionReason = AkDecisionReason.AmbiguousCapture;
 				LogRejectNewcomers(newcomers, LastDiagReason);
 				return false;
 			}
@@ -359,6 +369,7 @@ namespace AdvancedKeybinds.Core
 				LastDiagReason = "collapseBefore=[" + string.Join(",", beforeCollapse)
 					+ "] collapseAfter=[" + string.Join(",", collapsed)
 					+ "] resolve=Empty AcceptedToken=(none) reject=empty-resolve";
+				LastPollDecisionReason = AkDecisionReason.EmptyResolution;
 				LogRejectNewcomers(newcomers, LastDiagReason);
 				return false;
 			}
@@ -367,6 +378,7 @@ namespace AdvancedKeybinds.Core
 				+ "] collapseAfter=[" + string.Join(",", collapsed)
 				+ "] resolve=Unresolved:" + resolved.Reason
 				+ " AcceptedToken=(none) reject=unresolved";
+			LastPollDecisionReason = AkDecisionReason.UnresolvedCapture;
 			LogRejectNewcomers(newcomers, LastDiagReason);
 			return false;
 		}

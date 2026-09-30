@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Diagnostics;
+using AdvancedKeybinds.Features.DoubleTap;
 using AdvancedKeybinds.Patches;
 using Microsoft.Xna.Framework.Input;
 using Terraria;
@@ -26,6 +28,7 @@ namespace AdvancedKeybinds.Binding
 		private static readonly Dictionary<string, bool> CurrentActions = new();
 		private static readonly HashSet<string> SuppressedComboTokens = new(StringComparer.OrdinalIgnoreCase);
 		private static readonly Dictionary<string, HoldTracker> HoldTrackers = new();
+		private static readonly AkDecisionFrameGate DecisionFrameGate = new();
 		/// <summary>Previous-frame logical OR held for AlternateGamePad bindings (HOLD/OR edges).</summary>
 		private static readonly Dictionary<string, bool> AlternateOrHeldPrevious = new(StringComparer.Ordinal);
 		/// <summary>Previous-frame held for keyboard AdditionalOrToken (instant OR, independent of AND Hold).</summary>
@@ -66,6 +69,7 @@ namespace AdvancedKeybinds.Binding
 			SharedUiEscapeHoldLatch.Clear();
 			JustPressedActions.Clear();
 			CurrentActions.Clear();
+			ResetAllDoubleTapRuntimes();
 			MarkCompiledDirty();
 			_lastUpdateGameFrame = ulong.MaxValue;
 			_updatedThisGameFrame = false;
@@ -90,6 +94,10 @@ namespace AdvancedKeybinds.Binding
 		{
 			// Update once / read many: same GameUpdateCount skips re-evaluation.
 			ulong frame = Main.GameUpdateCount;
+			// Cancellation is observable even on a read-many call in this update.
+			// Do not re-evaluate or drain normal input a second time.
+			if (_activeDoubleTapCount > 0 && IsDoubleTapEnvironmentBlocked())
+				ResetAllDoubleTapRuntimes();
 			if (frame == _lastUpdateGameFrame && _updatedThisGameFrame)
 				return;
 
@@ -104,6 +112,7 @@ namespace AdvancedKeybinds.Binding
 				_lastUpdateGameFrame = frame;
 				_updatedThisGameFrame = true;
 				_lastEvalBindCount = 0;
+				ResetAllDoubleTapRuntimes();
 				return;
 			}
 
@@ -138,6 +147,7 @@ namespace AdvancedKeybinds.Binding
 			JustPressedActions.Clear();
 			CurrentActions.Clear();
 			SuppressedComboTokens.Clear();
+			ClearDoubleTapFrameScratches();
 
 			WindowsKeySuppressor.PollGameplayToggleLockEdges();
 
@@ -153,20 +163,50 @@ namespace AdvancedKeybinds.Binding
 
 			HashSet<string> pressed = _pressedScratch;
 			KeyToken.FillSnapshotPressedTokens(pressed, includeUnconfirmedScanHeld: true);
+			// Raw DT snapshot before latch / edge mix-in. Skip entirely when no active DT rows.
+			bool captureDt = _activeDoubleTapCount > 0;
+			if (captureDt)
+				CaptureDoubleTapRawSnapshot(pressed);
 			WindowsKeySuppressor.ReconcileGenericScanHeldGhosts();
 			foreach (string edge in toggleEdges)
+			{
 				pressed.Add(edge);
+				if (captureDt)
+					AddDoubleTapEdge(edge);
+			}
 			foreach (string edge in winEdges)
+			{
 				pressed.Add(edge);
+				if (captureDt)
+					AddDoubleTapEdge(edge);
+			}
 			foreach (string edge in WindowsKeySuppressor.DrainGameplayKanaEdges())
+			{
 				pressed.Add(edge);
+				if (captureDt)
+					AddDoubleTapEdge(edge);
+			}
 			foreach (string edge in WindowsKeySuppressor.DrainGameplayHankakuZenkakuEdges())
+			{
 				pressed.Add(edge);
+				if (captureDt)
+					AddDoubleTapEdge(edge);
+			}
 			foreach (string edge in WindowsKeySuppressor.DrainGameplayJisIntlEdges())
+			{
 				pressed.Add(edge);
+				if (captureDt)
+					AddDoubleTapEdge(edge);
+			}
 			foreach (string edge in WindowsKeySuppressor.DrainGameplayPhysicalEdges())
+			{
 				pressed.Add(edge);
+				if (captureDt)
+					AddDoubleTapEdge(edge);
+			}
 			MouseInputHelper.AppendFrameWheelEdges(pressed);
+			if (captureDt)
+				CaptureDoubleTapWheelEdgesFromPressed(pressed);
 			SupplementActiveBindingFallbackTokens(pressed);
 
 			SustainToggleLatchesForPartialCombos(pressed);
@@ -186,6 +226,16 @@ namespace AdvancedKeybinds.Binding
 
 			EvaluateAllCompiledBindings(pressed, toggleEdges, winEdges);
 
+			if (captureDt)
+			{
+				double nowMs = Stopwatch.GetTimestamp() * (1000.0 / Stopwatch.Frequency);
+				EvaluateDoubleTapUpdatePass(
+					frame,
+					nowMs,
+					_dtRawSnapshotScratch,
+					_dtEdgeScratch);
+			}
+
 			PruneHoldTrackers(pressed);
 
 			WindowsKeySuppressor.EndToggleComboLatchFrame(latchedToggles);
@@ -204,6 +254,16 @@ namespace AdvancedKeybinds.Binding
 				CompiledBinding cb = compiled[i];
 				if (cb.IsPlainSingleTap)
 					continue;
+
+				if (cb.IsDoubleTap)
+				{
+					if (cb.OwnsDoubleTapInput && cb.InactiveDoubleTapView != null)
+					{
+						eval++;
+						EvaluateCombo(cb.ActionId, cb.InactiveDoubleTapView, pressed, toggleEdges, winEdges);
+					}
+					continue;
+				}
 
 				ComboBinding combo = BindingStorage.Get(cb.ActionId);
 				if (combo == null)
@@ -343,7 +403,7 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, ComboBinding> pair in BindingStorage.AllBindings)
 			{
 				ComboBinding combo = pair.Value;
-				if (!combo.Hold || !combo.HoldOnRelease)
+				if (combo.DoubleTap || !combo.Hold || !combo.HoldOnRelease)
 					continue;
 
 				List<string> keys = combo.Keys;
@@ -394,7 +454,7 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, HoldTracker> pair in HoldTrackers)
 			{
 				ComboBinding combo = BindingStorage.Get(pair.Key);
-				if (combo == null || !combo.Hold || combo.HoldOnRelease)
+				if (combo == null || combo.DoubleTap || !combo.Hold || combo.HoldOnRelease)
 					continue;
 
 				List<string> keys = combo.Keys;
@@ -418,7 +478,7 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, ComboBinding> pair in BindingStorage.AllBindings)
 			{
 				ComboBinding combo = pair.Value;
-				if (!combo.Hold || !combo.HoldOnRelease)
+				if (combo.DoubleTap || !combo.Hold || !combo.HoldOnRelease)
 					continue;
 
 				List<string> keys = combo.Keys;
@@ -438,6 +498,8 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, HoldTracker> pair in HoldTrackers)
 			{
 				ComboBinding combo = BindingStorage.Get(pair.Key);
+				if (combo?.DoubleTap == true)
+					continue;
 				if (combo?.Hold == true && combo.HoldOnRelease && combo.Keys.Count == 1
 					&& string.Equals(combo.Keys[0], keyToken, StringComparison.OrdinalIgnoreCase))
 				{
@@ -451,6 +513,9 @@ namespace AdvancedKeybinds.Binding
 
 		private static void EvaluateCombo(string actionId, ComboBinding combo, HashSet<string> pressed, HashSet<string> toggleEdges, HashSet<string> winEdges)
 		{
+			if (combo?.DoubleTap == true)
+				return;
+
 			List<string> keys = combo.Keys;
 			bool hasAdditionalOr = combo.HasAdditionalOr;
 			if (keys.Count == 0 && !hasAdditionalOr)
@@ -936,6 +1001,10 @@ namespace AdvancedKeybinds.Binding
 
 		private static void EvaluateHoldWhileHeld(string actionId, ComboBinding combo)
 		{
+			ComboBinding storedHold = BindingStorage.Get(actionId);
+			if (storedHold?.DoubleTap == true)
+				return;
+
 			if (!HoldTrackers.TryGetValue(actionId, out HoldTracker tracker))
 			{
 				tracker = new HoldTracker();
@@ -979,6 +1048,10 @@ namespace AdvancedKeybinds.Binding
 		/// <summary>Accumulates hold time only; firing happens in <see cref="FireReleaseHoldWinner"/>.</summary>
 		private static void EvaluateHoldCharge(string actionId)
 		{
+			ComboBinding storedHold = BindingStorage.Get(actionId);
+			if (storedHold?.DoubleTap == true)
+				return;
+
 			if (!HoldTrackers.TryGetValue(actionId, out HoldTracker tracker))
 			{
 				tracker = new HoldTracker();
@@ -1012,7 +1085,7 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, HoldTracker> pair in HoldTrackers)
 			{
 				ComboBinding combo = BindingStorage.Get(pair.Key);
-				if (combo == null)
+				if (combo == null || combo.DoubleTap)
 				{
 					_removeScratch.Add(pair.Key);
 					continue;
@@ -1097,6 +1170,22 @@ namespace AdvancedKeybinds.Binding
 		}
 
 		/// <summary>
+		/// Post-apply delayed decision snapshots via <see cref="AkDecisionSnapshotPublisher"/>.
+		/// Not the internal decision instant; does not claim game-action execution.
+		/// </summary>
+		public static void PublishDecisionSnapshotsAfterApply(TriggersSet justPressed)
+		{
+			if (!AkDecisionFeed.HasSubscribers || justPressed == null || justPressed.KeyStatus == null)
+				return;
+
+			AkDecisionSnapshotPublisher.Publish(
+				JustPressedActions,
+				justPressed.KeyStatus,
+				Main.GameUpdateCount,
+				DecisionFrameGate);
+		}
+
+		/// <summary>
 		/// True when Advanced Keybinds owns gameplay input for this action id
 		/// (multi-key / HOLD / mouse / SC|VK / hook-managed — not plain Keys-name single tap, not empty).
 		/// Identification is by action id (ModName/internalName), never by display name.
@@ -1106,15 +1195,38 @@ namespace AdvancedKeybinds.Binding
 			if (string.IsNullOrEmpty(actionId))
 				return false;
 
+			EnsureCompiled();
+
 			ComboBinding combo = BindingStorage.Get(actionId);
-			if (combo != null && combo.RequiresAdvancedStorage())
+			if (combo != null && combo.DoubleTap)
+			{
+				// Ineligible DT must not fall into Hold/OR RequiresAdvancedStorage.
+				bool dtIsPad = ControlsEditTargetPolicy.IsGamePadStorageKey(actionId)
+					|| ControlsGameUiSeparationPolicy.IsGamePadLegacySharedStorageKey(actionId);
+				bool currentInputIsGamePad = PlayerInput.CurrentInputMode == InputMode.XBoxGamepad
+					|| PlayerInput.CurrentInputMode == InputMode.XBoxGamepadUI;
+
+				if (dtIsPad)
+					return currentInputIsGamePad && EligibleDoubleTapStorageKeys.Contains(actionId);
+
+				// bare eligible DT on Keyboard/UI owns; on GamePad do not false-exit — check GP sibling.
+				if (!currentInputIsGamePad && EligibleDoubleTapStorageKeys.Contains(actionId))
+					return true;
+			}
+			else if (combo != null && combo.RequiresAdvancedStorage())
 				return true;
 
+			// Non-DT (and bare DT under GamePad): sibling lookup matches review-base
+			// (no current-mode gate / no GP-storage early false).
 			string gpKey = ControlsEditTargetPolicy.ToStorageKey(
 				ControlsEditTargetPolicy.DeviceKind.GamePad, actionId);
 			ComboBinding gp = BindingStorage.Get(gpKey);
 			if (gp == null)
 				return false;
+			if (gp.DoubleTap)
+				return EligibleDoubleTapStorageKeys.Contains(gpKey)
+					&& (PlayerInput.CurrentInputMode == InputMode.XBoxGamepad
+						|| PlayerInput.CurrentInputMode == InputMode.XBoxGamepadUI);
 			if (ControlsEditTargetPolicy.IsVanillaOwnedGamePadOrPair(
 				    gp.Hold, gp.Keys, gp.AlternateGamePadToken))
 				return false;
@@ -1149,11 +1261,27 @@ namespace AdvancedKeybinds.Binding
 					continue;
 
 				string actionId = cb.ActionId;
+				bool dtMayReplace = false;
+				if (cb.IsDoubleTap)
+				{
+					if (!cb.OwnsDoubleTapInput)
+						continue;
+					if (DoubleTapTargetPolicy.IsVanillaTarget(actionId) && !CanReplaceVanillaDoubleTap(actionId))
+						continue;
+					bool dtIsPad = ControlsEditTargetPolicy.IsGamePadStorageKey(actionId)
+						|| ControlsGameUiSeparationPolicy.IsGamePadLegacySharedStorageKey(actionId);
+					dtMayReplace = currentInputIsGamePad == dtIsPad;
+					if (!dtMayReplace)
+						continue;
+				}
+
 				ComboBinding combo = BindingStorage.Get(actionId);
-				bool hold = combo != null && combo.Hold;
+				bool hold = combo != null && combo.Hold && !combo.DoubleTap;
 				IReadOnlyList<string> keys = combo != null ? combo.Keys : cb.Keys;
 				string alternate = combo != null ? combo.AlternateGamePadToken : null;
-				if (!BindingOwnershipTriggerPolicy.ShouldApplyOwnershipReplace(
+				// DT eligible rows replace via AK results; do not reuse vanilla GP ownership gate.
+				if (!dtMayReplace
+					&& !BindingOwnershipTriggerPolicy.ShouldApplyOwnershipReplace(
 					    actionId,
 					    requiresAdvancedStorage: true,
 					    hold,
@@ -1212,7 +1340,7 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, HoldTracker> trackerPair in HoldTrackers)
 			{
 				ComboBinding tracked = BindingStorage.Get(trackerPair.Key);
-				if (tracked == null || !tracked.Hold || !tracked.HoldOnRelease)
+				if (tracked == null || tracked.DoubleTap || !tracked.Hold || !tracked.HoldOnRelease)
 					continue;
 
 				List<string> trackedKeys = tracked.Keys;
@@ -1227,7 +1355,7 @@ namespace AdvancedKeybinds.Binding
 				foreach (KeyValuePair<string, ComboBinding> pair in BindingStorage.AllBindings)
 				{
 					ComboBinding combo = pair.Value;
-					if (!combo.Hold || !combo.HoldOnRelease)
+					if (combo.DoubleTap || !combo.Hold || !combo.HoldOnRelease)
 						continue;
 
 					List<string> keys = combo.Keys;

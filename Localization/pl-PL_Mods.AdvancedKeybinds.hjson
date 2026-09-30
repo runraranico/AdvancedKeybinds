@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: Otworz sterowanie
 	OpenModConfigMenu.DisplayName: Otworz konfiguracje modow
 	CycleHoldTierHudAnchor.DisplayName: Przelacz HUD Hold
+	OpenBindingList.DisplayName: Lista ustawień klawiszy
 }
 
 Configs: {
@@ -160,6 +161,19 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+		// SuffixKeyboardUi: " (Menu)"
+		// SuffixGamePadUi: " (Pad UI)"
+		// SuffixGamePadGame: " (Pad)"
+		// SuffixGamePad: " (Pad)"
+	}
+
 	KeybindRow: {
 		OutsideSlotTip: Gdy kursor wybiera nazwę akcji, prawy przycisk — wyczyść (wymaga potwierdzenia), środkowy — przywróć domyślne
 		ConfirmUnsetHover: Kliknij ponownie prawym, aby wyczyścić
@@ -173,8 +187,11 @@ UI: {
 		Undo: Cofnij
 		Save: Zapisz
 		HintLine1: Kliknij lewym przyciskiem pole, a nastepnie nacisnij klawisz lub przycisk myszy.
-		HintLine2: Hold tylko przy 1 klawiszu.
+		HintLine2: Hold / DT tylko przy 1 klawiszu.
 		HintLine3: Najedz kursorem na pole i PPM, aby usunac przypisanie.
+		HintLine2DoubleTapForbidden: Tego klawisza nie można przypisać do DT.
+		HintLine2HoldForbidden: Tego klawisza nie można przypisać do Hold.
+		HintLine2HoldDoubleTapForbidden: Tego klawisza nie można przypisać do Hold / DT.
 		HoldDefaultLabel: Domyślne
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: podczas trzymania
@@ -183,6 +200,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Wpisz wartosc od 10～10000
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: Naciśnij szybko dwa razy
+		// DoubleTapPreview: DT
+		// DoubleTapMsInputTooltip: Enter a value from 250～1000
 		ConfirmLeftClickOnly: Przypisać sam lewy przycisk? Zapisz ponownie, aby potwierdzić.
 		ClearConfirmPad: Wyczyścić?
 		RejectOppositeStickDirection: Przeciwne kierunki sticka nie mogą być łączone (np. Góra+Dół).

@@ -70,6 +70,12 @@ namespace AdvancedKeybinds.Binding
 		/// </summary>
 		public int HoldMs;
 
+		/// <summary>Stage2C: saved Double Tap flag (Judge not connected in this stage).</summary>
+		public bool DoubleTap;
+
+		/// <summary>Stage2C: Double Tap window ms (250–1000). Default 250.</summary>
+		public int DoubleTapMs = 250;
+
 		[JsonIgnore]
 		public bool IsEmpty => string.IsNullOrEmpty(Slot1)
 			&& string.IsNullOrEmpty(Slot2)
@@ -207,7 +213,9 @@ namespace AdvancedKeybinds.Binding
 			UseTerrariaKeyStatusOr = UseTerrariaKeyStatusOr,
 			Hold = Hold,
 			HoldOnRelease = HoldOnRelease,
-			HoldMs = HoldMs
+			HoldMs = HoldMs,
+			DoubleTap = DoubleTap,
+			DoubleTapMs = DoubleTapMs
 		};
 
 		/// <summary>Value equality for panel edit history (slots, displays, hold flags, HoldMs).</summary>
@@ -230,7 +238,9 @@ namespace AdvancedKeybinds.Binding
 				&& a.HoldOnRelease == b.HoldOnRelease
 				&& a.HoldMs == b.HoldMs
 				&& a.PersistAsEmptyRecord == b.PersistAsEmptyRecord
-				&& a.UseTerrariaKeyStatusOr == b.UseTerrariaKeyStatusOr;
+				&& a.UseTerrariaKeyStatusOr == b.UseTerrariaKeyStatusOr
+				&& a.DoubleTap == b.DoubleTap
+				&& a.DoubleTapMs == b.DoubleTapMs;
 		}
 	}
 }

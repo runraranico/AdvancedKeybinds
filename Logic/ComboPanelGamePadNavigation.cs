@@ -308,7 +308,8 @@ namespace AdvancedKeybinds.Core
 			_skipSlot2Focus = twoKeySetupEligible;
 			if (_skipSlot2Focus
 				&& (_focus == ComboPanelPadFocus.HoldWhileHeld
-					|| _focus == ComboPanelPadFocus.HoldOnRelease))
+					|| _focus == ComboPanelPadFocus.HoldOnRelease
+					|| _focus == ComboPanelPadFocus.DoubleTap))
 			{
 				_focus = ComboPanelPadFocus.Slot1;
 			}
@@ -467,8 +468,8 @@ namespace AdvancedKeybinds.Core
 		{
 			blockFocusMove = false;
 			HoldSliderEdit.CurrentMs = host.CurrentHoldMs;
-			HoldSliderEdit.MinMs = ComboBinding.MinHoldMs;
-			HoldSliderEdit.MaxMs = ComboBinding.SliderMaxHoldMs;
+			HoldSliderEdit.MinMs = host.DurationSliderMinMs;
+			HoldSliderEdit.MaxMs = host.DurationSliderMaxMs;
 
 			int hDir = ReadDpadHorizontalWithRepeat();
 			if (hDir == 0)
@@ -503,7 +504,7 @@ namespace AdvancedKeybinds.Core
 				case HoldSliderConfirmEditPolicy.Action.AdjustValue:
 				{
 					int before = host.CurrentHoldMs;
-					host.SetHoldMs(result.NewMs);
+					host.SetSliderMs(result.NewMs);
 					GamePadProbeSystem.LogPanelPadNumberChange(
 						before,
 						host.CurrentHoldMs,
@@ -745,10 +746,19 @@ namespace AdvancedKeybinds.Core
 					if (_skipSlot2Focus)
 						break;
 					if (!ComboPanelHoldPadConfirmPolicy.ShouldApplyHoldModeToggle(
-						    FnaGamePadProvider.InputTickEpoch, _lastHoldModeToggleEpoch))
+					    FnaGamePadProvider.InputTickEpoch, _lastHoldModeToggleEpoch))
 						break;
 					_lastHoldModeToggleEpoch = FnaGamePadProvider.InputTickEpoch;
 					host.ToggleHoldOnRelease();
+					break;
+				case ComboPanelPadFocus.DoubleTap:
+					if (_skipSlot2Focus)
+						break;
+					if (!ComboPanelHoldPadConfirmPolicy.ShouldApplyHoldModeToggle(
+						    FnaGamePadProvider.InputTickEpoch, _lastHoldModeToggleEpoch))
+						break;
+					_lastHoldModeToggleEpoch = FnaGamePadProvider.InputTickEpoch;
+					host.ToggleDoubleTap();
 					break;
 				case ComboPanelPadFocus.HoldDefault:
 					if (holdEditable)
@@ -976,6 +986,7 @@ namespace AdvancedKeybinds.Core
 					ComboPanelPadFocus.Save => ComboPanelPadFocus.Clear,
 					ComboPanelPadFocus.HoldWhileHeld => ComboPanelPadFocus.HoldWhileHeld,
 					ComboPanelPadFocus.HoldOnRelease => ComboPanelPadFocus.HoldOnRelease,
+					ComboPanelPadFocus.DoubleTap => ComboPanelPadFocus.DoubleTap,
 					_ => from
 				};
 			}
@@ -986,6 +997,7 @@ namespace AdvancedKeybinds.Core
 				{
 					ComboPanelPadFocus.HoldWhileHeld => ComboPanelPadFocus.Slot1,
 					ComboPanelPadFocus.HoldOnRelease => ComboPanelPadFocus.Slot1,
+					ComboPanelPadFocus.DoubleTap => ComboPanelPadFocus.Slot1,
 					ComboPanelPadFocus.Slot1 => skipSlot2 ? ComboPanelPadFocus.Slot3 : ComboPanelPadFocus.Slot2,
 					ComboPanelPadFocus.Slot2 => ComboPanelPadFocus.Slot3,
 					ComboPanelPadFocus.Slot3 => holdEditable ? ComboPanelPadFocus.HoldNumber : ComboPanelPadFocus.Save,
@@ -1002,13 +1014,15 @@ namespace AdvancedKeybinds.Core
 				{
 					ComboPanelPadFocus.HoldWhileHeld => ComboPanelPadFocus.HoldDefault,
 					ComboPanelPadFocus.HoldOnRelease => skipHoldMode ? ComboPanelPadFocus.Slot1 : ComboPanelPadFocus.HoldWhileHeld,
+					ComboPanelPadFocus.DoubleTap => skipHoldMode ? ComboPanelPadFocus.Slot1 : ComboPanelPadFocus.HoldOnRelease,
 					ComboPanelPadFocus.Slot1 => ComboPanelPadFocus.HoldSlider,
 					ComboPanelPadFocus.Slot2 => ComboPanelPadFocus.HoldSlider,
 					ComboPanelPadFocus.Slot3 => ComboPanelPadFocus.HoldNumber,
 					ComboPanelPadFocus.HoldDefault => ComboPanelPadFocus.Cancel,
 					ComboPanelPadFocus.HoldSlider => ComboPanelPadFocus.Cancel,
 					ComboPanelPadFocus.HoldNumber => ComboPanelPadFocus.Cancel,
-					ComboPanelPadFocus.Clear => TwoKeyPadHoldFocusPolicy.NeighborUp(from, skipHoldMode),
+					// Bottom of mode column is DoubleTap (not HoldOnRelease). Policy NeighborUp unchanged.
+					ComboPanelPadFocus.Clear => skipHoldMode ? ComboPanelPadFocus.Slot1 : ComboPanelPadFocus.DoubleTap,
 					ComboPanelPadFocus.Save => ComboPanelPadFocus.Slot3,
 					_ => from
 				};
@@ -1023,7 +1037,8 @@ namespace AdvancedKeybinds.Core
 					ComboPanelPadFocus.HoldSlider => skipSlot2 ? ComboPanelPadFocus.Slot1 : ComboPanelPadFocus.Slot2,
 					ComboPanelPadFocus.HoldNumber => ComboPanelPadFocus.Slot3,
 					ComboPanelPadFocus.HoldWhileHeld => skipHoldMode ? ComboPanelPadFocus.Clear : ComboPanelPadFocus.HoldOnRelease,
-					ComboPanelPadFocus.HoldOnRelease => ComboPanelPadFocus.Clear,
+					ComboPanelPadFocus.HoldOnRelease => skipHoldMode ? ComboPanelPadFocus.Clear : ComboPanelPadFocus.DoubleTap,
+					ComboPanelPadFocus.DoubleTap => ComboPanelPadFocus.Clear,
 					ComboPanelPadFocus.Slot1 => ComboPanelPadFocus.Clear,
 					ComboPanelPadFocus.Slot2 => ComboPanelPadFocus.Clear,
 					ComboPanelPadFocus.Slot3 => ComboPanelPadFocus.Save,
@@ -1126,12 +1141,18 @@ namespace AdvancedKeybinds.Core
 	internal interface IComboPanelPadHost
 	{
 		int CurrentHoldMs { get; }
+		/// <summary>Active duration slider minimum (Hold or Double Tap mode).</summary>
+		int DurationSliderMinMs { get; }
+		/// <summary>Active duration slider maximum (Hold or Double Tap mode).</summary>
+		int DurationSliderMaxMs { get; }
 		void StartSlotCapture(int slot);
 		void CancelSlotCaptureKeepFocus();
 		void ToggleHoldWhileHeld();
 		void ToggleHoldOnRelease();
+		void ToggleDoubleTap();
 		void ResetHoldToDefault();
 		void SetHoldMs(int ms);
+		void SetSliderMs(int ms);
 		void AdjustHoldMs(int delta);
 		void ExecuteClear();
 		void PadSaveAndClose();

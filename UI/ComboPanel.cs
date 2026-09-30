@@ -6,6 +6,7 @@ using Microsoft.Xna.Framework.Input;
 using AdvancedKeybinds.Binding;
 using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Diagnostics;
+using AdvancedKeybinds.Features.DoubleTap;
 using AdvancedKeybinds.Patches;
 using ReLogic.Localization.IME;
 using ReLogic.OS;
@@ -379,7 +380,6 @@ namespace AdvancedKeybinds.UI
 		private static Rectangle _closeBtn;
 		private static Rectangle _backBtn;
 
-		private const int PanelButtonW = 120;
 		private const int PanelButtonH = 30;
 
 		// Hold-duration controls. Always shown; editable only while Hold is on. Slider snaps to 10 ms
@@ -409,20 +409,7 @@ namespace AdvancedKeybinds.UI
 		private static readonly Color SlotRenameCompositionColor = new(255, 240, 20);
 
 		// Right-side key info + display-name field (no keyboard figure / no live press tracking).
-		// Left block keeps original geometry; panel grows right for splice + key-info with breathing room.
-		private const int LeftBlockWidth = 600;
-		private const int KeyInfoColW = 170;
 		private const int KeyInfoNameFieldH = 28;
-		private const int KeyInfoPad = 8;
-		/// <summary>Gap between left block (Cancel/Save edge) and key-info box — holds the wavy splice.</summary>
-		private const int KeyInfoSpliceGap = 16;
-		/// <summary>Extra inset so the key-info box sits slightly right of the splice (not glued to the wave).</summary>
-		private const int KeyInfoLeftInset = 22;
-		/// <summary>Padding from key-info box to the panel's right outer edge.</summary>
-		private const int KeyInfoRightPad = 14;
-		private const int SlotRowGap = 10; // Hold / Slot1..3 only
-		private const int PanelWidthTarget =
-			LeftBlockWidth + KeyInfoSpliceGap + KeyInfoLeftInset + KeyInfoColW + KeyInfoRightPad; // ~816
 		private static readonly Color SlotFill = new(46, 48, 64);
 		private static readonly Color SlotBorder = new(110, 110, 140);
 		private static readonly Color SlotHoverFill = new(70, 74, 100);
@@ -458,22 +445,17 @@ namespace AdvancedKeybinds.UI
 		/// <summary>Deferred MouseText for key-info (set during Draw, shown after hover clear).</summary>
 		private static string _keyInfoHoverTip;
 
-		private static string HoldDefaultButtonLabel =>
-			Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldDefaultLabel") + " : 400ms";
-
-		private const int ContentMargin = 18;
 		private const int HeaderTopPad = 18;
 		private const int HeaderTitleHeight = 22;
 		private const int HeaderLineGap = 6;
 		private const int HeaderPreviewHeight = 20;
 		private const int PreviewToHoldGap = 10;
 		private const int HoldToSlotGap = 12;
-		private const int HoldControlBoxW = 112;
 		private const int HoldControlBoxH = 28;
-		private const int HoldControlGap = 10;
 
 		// ~1.5 cm extra at 96 DPI for a 3-line footer hint band (longer locales wrap without shrinking).
 		private const int FooterPanelExtraHeight = 73;
+		/// <summary>Base panel height (451). Extra growth via <see cref="DoubleTapPanelPolicy"/>.</summary>
 		private const int PanelHeight = 378 + FooterPanelExtraHeight;
 		private const int FooterHintTopGap = 12;
 		private const int FooterHintBottomGap = 14;
@@ -732,7 +714,7 @@ namespace AdvancedKeybinds.UI
 			_keyInfoRenameSession = false;
 			_holdTyping = false;
 			_draggingHold = false;
-			_holdBuffer = _working.EffectiveHoldMs.ToString();
+			SyncDurationBufferFromWorking();
 			CancelKeyInfoNameEdit(commit: false);
 			_pendingKeyUpOnlyEscDismissAfterNameEdit = false;
 			_postTextEditGameplaySettleFrames = 0;
@@ -1450,7 +1432,7 @@ namespace AdvancedKeybinds.UI
 			ClearDisplayRestoredTip();
 
 			_working = _openedSnapshot != null ? _openedSnapshot.Clone() : new ComboBinding();
-			_holdBuffer = _working.EffectiveHoldMs.ToString();
+			SyncDurationBufferFromWorking();
 			_dirty = false;
 
 			// Restore a display name cleared by right-click on the key-info panel (if any).
@@ -1482,7 +1464,7 @@ namespace AdvancedKeybinds.UI
 			_resetDisplaysConfirmPending = false;
 
 			_working = restored.Clone();
-			_holdBuffer = _working.EffectiveHoldMs.ToString();
+			SyncDurationBufferFromWorking();
 			_dirty = _openedSnapshot == null || !ComboBinding.ContentEquals(_working, _openedSnapshot);
 			SoundEngine.PlaySound(SoundID.MenuOpen);
 		}
@@ -2818,7 +2800,8 @@ namespace AdvancedKeybinds.UI
 			}
 			int slot = _capturingSlot;
 			string before = FormatWorkingComboForDiag();
-			bool accepted = TrySetSlot(slot, token);
+			AkDecisionReason bindReason;
+			bool accepted = TrySetSlot(slot, token, out bindReason);
 			GamePadProbeSystem.LogCaptureTokenDiag(
 				GamePadToken.IsPadToken(token) ? "GamePad" : "Other",
 				token,
@@ -2863,6 +2846,7 @@ namespace AdvancedKeybinds.UI
 					"ComboPanel rejected capture; staying on press-a-key."
 					+ (wheel ? " wheel=rejected token=" + token : string.Empty));
 				}
+				PublishBindingDecision(accepted: false, bindReason, slot, token);
 				return;
 			}
 
@@ -2960,6 +2944,30 @@ namespace AdvancedKeybinds.UI
 				SuppressEscapeDerivedTriggers("CompleteSlotCapture.Escape");
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel bound Escape during slot capture (FinishKeyCapture only).");
 			}
+
+			PublishBindingDecision(accepted: true, AkDecisionReason.None, completedSlot, token);
+		}
+
+		/// <summary>
+		/// BindingAccepted/Rejected publisher for CompleteSlotCapture only (not TrySet*).
+		/// CaptureAccepted/Rejected remain owned by SlotCapture.
+		/// </summary>
+		private static void PublishBindingDecision(
+			bool accepted,
+			AkDecisionReason reason,
+			int slot,
+			string token)
+		{
+			int frame = Main.GameUpdateCount == 0
+				? -1
+				: unchecked((int)Main.GameUpdateCount);
+			AkDecisionFeed.Publish(new AkDecisionEvent(
+				accepted ? AkDecisionKind.BindingAccepted : AkDecisionKind.BindingRejected,
+				accepted ? AkDecisionReason.None : reason,
+				_actionId,
+				slot,
+				token,
+				frame));
 		}
 
 		/// <summary>While the modal combo panel is open, strip MenuInquiry/Inventory before UIManageControls.Update runs.</summary>
@@ -3689,8 +3697,15 @@ namespace AdvancedKeybinds.UI
 
 		private static void Commit()
 		{
+			int decisionFrame = Main.GameUpdateCount == 0
+				? -1
+				: unchecked((int)Main.GameUpdateCount);
+
 			if (_working == null)
+			{
+				AkCommitDecisionPublisher.PublishMissingWorkingBinding(_actionId, decisionFrame);
 				return;
+			}
 
 			string combo = FormatWorkingComboForDiag();
 			GamePadProbeSystem.LogCommitBeginDiag(combo);
@@ -3698,6 +3713,8 @@ namespace AdvancedKeybinds.UI
 			if (BindingRestrictions.RejectsBinding(_actionId, _working))
 			{
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel commit rejected unsupported binding.");
+				AkCommitDecisionPublisher.PublishPolicyRejected(
+					_actionId, AkDecisionReason.UnsupportedBinding, decisionFrame);
 				return;
 			}
 
@@ -3705,6 +3722,8 @@ namespace AdvancedKeybinds.UI
 				_working.Slot1, _working.Slot2, _working.Slot3))
 			{
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel commit rejected opposite stick directions.");
+				AkCommitDecisionPublisher.PublishPolicyRejected(
+					_actionId, AkDecisionReason.OppositeStick, decisionFrame);
 				return;
 			}
 
@@ -3716,7 +3735,8 @@ namespace AdvancedKeybinds.UI
 			string storageKey = _storageKey
 				?? ControlsGameUiSeparationPolicy.ResolveStorageKey((int)_editInputMode, _actionId);
 
-			if (_terrariaKeyStatusOrView && !_working.Hold)
+			// DT must not take the direct vanilla KeyStatus OR write path.
+			if (_terrariaKeyStatusOrView && !_working.Hold && !_working.DoubleTap)
 			{
 				var orTokens = new List<string>(3);
 				for (int slot = 1; slot <= 3; slot++)
@@ -3729,9 +3749,11 @@ namespace AdvancedKeybinds.UI
 					_actionId, orTokens, _editInputMode);
 				ControlsBindingUndo.RememberIfChanged(undo, "combo-panel-commit-terraria-keystatus-or");
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel commit Terraria KeyStatus OR count=" + orTokens.Count);
+				AkCommitDecisionPublisher.PublishVanillaOrWriteAttempted(_actionId, decisionFrame);
 				return;
 			}
 
+			bool persistReportedOk;
 			if (GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(storageKey))
 			{
 				// Keep Slot3 / Slot3Display as shown (no discard, no move to Slot1).
@@ -3744,8 +3766,11 @@ namespace AdvancedKeybinds.UI
 					    storageKey, _working, "combo-panel-commit-two-key-terraria-or"))
 				{
 					if (AkDiag.Enabled) AkDiag.Log("ComboPanel commit aborted: two-key save failed.");
+					AkCommitDecisionPublisher.PublishPersistReported(
+						_actionId, ok: false, decisionFrame);
 					return;
 				}
+				persistReportedOk = true;
 			}
 			else
 			{
@@ -3753,7 +3778,7 @@ namespace AdvancedKeybinds.UI
 				string reason = _working.RequiresAdvancedStorage()
 					? "combo-panel-commit-advanced"
 					: "combo-panel-commit-plain-or-empty";
-				BindingStorage.Set(storageKey, _working, reason);
+				persistReportedOk = BindingStorage.Set(storageKey, _working, reason);
 			}
 
 			GamePadProbeSystem.LogSaveBindingDiag(storageKey, combo);
@@ -3770,32 +3795,42 @@ namespace AdvancedKeybinds.UI
 				DisplayResolveDiag.LogBindingSnapshot("commit", _actionId, _working);
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel commit latency " + SlotCapture.LatencyClock.FormatSummary());
 			}
+
+			AkCommitDecisionPublisher.PublishPersistReported(
+				_actionId, persistReportedOk, decisionFrame);
 		}
 
 		private static bool IsTwoKeyTerrariaOrSession()
 			=> _twoKeySetupEligible
 				&& GamePadTwoKeyTerrariaOrPolicy.IsTarget((int)_editInputMode, _actionId);
 
-		private static bool TrySetSlot(int index, string token)
+		private static bool TrySetSlot(int index, string token, out AkDecisionReason reason)
 		{
+			reason = AkDecisionReason.None;
+
 			if (string.IsNullOrEmpty(token))
+			{
+				reason = AkDecisionReason.EmptyToken;
 				return false;
+			}
 
 			if (IsKeyboardAdditionalOrTab)
 			{
 				if (index != 3)
 				{
+					reason = AkDecisionReason.InvalidSlot;
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					return false;
 				}
 
-				bool ok = TrySetAdditionalOrToken(token);
+				bool ok = TrySetAdditionalOrToken(token, out reason);
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				return ok;
 			}
 
 			if (_twoKeySetupEligible && index == 2)
 			{
+				reason = AkDecisionReason.InvalidSlot;
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				return false;
 			}
@@ -3804,19 +3839,21 @@ namespace AdvancedKeybinds.UI
 			{
 				// Slot1 = left UI (index 1), Slot2 = right UI (index 3). OR via Terraria KeyStatus.
 				if (index == 1)
-					return TrySetTerrariaOrSlot(1, token);
+					return TrySetTerrariaOrSlot(1, token, out reason);
 				if (index == 3)
-					return TrySetTerrariaOrSlot(2, token);
+					return TrySetTerrariaOrSlot(2, token, out reason);
+				reason = AkDecisionReason.InvalidSlot;
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				return false;
 			}
 
 			if (_twoKeySetupEligible && index == 1)
-				return TrySetAlternateGamePadToken(token);
+				return TrySetAlternateGamePadToken(token, out reason);
 
 			// Never persist UI display labels (LeftClick / L-Ctrl / MB4 / …).
 			if (StableKeyToken.IsDisplayAlias(token))
 			{
+				reason = AkDecisionReason.DisplayAlias;
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				if (AkDiag.Enabled) AkDiag.Log($"ComboPanel display-alias rejected token={token}");
 				return false;
@@ -3829,6 +3866,7 @@ namespace AdvancedKeybinds.UI
 				&& !BindingRestrictions.IsHankakuZenkakuToken(token)
 				&& !BindingRestrictions.IsToggleLockToken(token))
 			{
+				reason = AkDecisionReason.UnknownToken;
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				if (AkDiag.Enabled) AkDiag.Log($"ComboPanel unknown token rejected token={token}");
 				return false;
@@ -3836,6 +3874,7 @@ namespace AdvancedKeybinds.UI
 
 			if (BindingRestrictions.IsF11Token(token))
 			{
+				reason = AkDecisionReason.DebugHotkeyBlocked;
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				if (AkDiag.Enabled) AkDiag.Log($"ComboPanel F11 rejected token={token}");
 				return false;
@@ -3844,6 +3883,7 @@ namespace AdvancedKeybinds.UI
 			if (GamePadStickOppositeDirectionRules.ConflictsWithOtherSlots(
 				_working.Slot1, _working.Slot2, _working.Slot3, index, token))
 			{
+				reason = AkDecisionReason.OppositeStick;
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				ArmStickOppositeDirectionTip();
 				if (AkDiag.Enabled) AkDiag.Log($"ComboPanel opposite stick direction rejected token={token}");
@@ -3888,6 +3928,7 @@ namespace AdvancedKeybinds.UI
 						result: "RejectedDuplicate",
 						reason: tokensEqual ? "tokens-equal" : "same-physical-id");
 #endif
+					reason = AkDecisionReason.DuplicateToken;
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					if (AkDiag.Enabled) AkDiag.Log($"ComboPanel duplicate rejected token={token} conflicts-with-slot={i} existing={existing}");
 					return false;
@@ -3942,6 +3983,7 @@ namespace AdvancedKeybinds.UI
 			BindingRestrictions.ClearUnsupportedHoldFlags(trial);
 			if (BindingRestrictions.RejectsBinding(_actionId, trial))
 			{
+				reason = AkDecisionReason.UnsupportedBinding;
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel rejected unsupported binding.");
 				return false;
@@ -3968,6 +4010,8 @@ namespace AdvancedKeybinds.UI
 			{
 				BindingRestrictions.ClearUnsupportedHoldFlags(_working);
 			}
+			ApplyDoubleTapAfterSlotsEdited();
+			SyncDurationBufferFromWorking();
 
 			// Any edit invalidates a pending Save-time LeftClick confirm.
 			ClearLeftClickConfirmPrompt();
@@ -3978,13 +4022,27 @@ namespace AdvancedKeybinds.UI
 			return true;
 		}
 
-		private static bool TrySetTerrariaOrSlot(int slotIndex, string token)
+		private static bool TrySetTerrariaOrSlot(int slotIndex, string token, out AkDecisionReason reason)
 		{
-			if (_working == null || (slotIndex != 1 && slotIndex != 2))
+			reason = AkDecisionReason.None;
+
+			if (_working == null)
+			{
+				reason = AkDecisionReason.MissingWorkingBinding;
 				return false;
+			}
+
+			if (slotIndex != 1 && slotIndex != 2)
+			{
+				reason = AkDecisionReason.InvalidSlot;
+				return false;
+			}
 
 			if (string.IsNullOrEmpty(token))
+			{
+				reason = AkDecisionReason.EmptyToken;
 				return false;
+			}
 
 			// All capturable keys: Pad (incl. LS/RS directions), keyboard, mouse, Escape, etc.
 			// Pad-only rejection left purple wait stuck (Escape/KB rejected → re-arm forever).
@@ -3997,6 +4055,7 @@ namespace AdvancedKeybinds.UI
 			{
 				if (StableKeyToken.IsDisplayAlias(token))
 				{
+					reason = AkDecisionReason.DisplayAlias;
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					return false;
 				}
@@ -4010,12 +4069,14 @@ namespace AdvancedKeybinds.UI
 					canonical = token.Trim();
 				else
 				{
+					reason = AkDecisionReason.UnknownToken;
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					return false;
 				}
 
 				if (BindingRestrictions.IsF11Token(canonical))
 				{
+					reason = AkDecisionReason.DebugHotkeyBlocked;
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					return false;
 				}
@@ -4033,12 +4094,14 @@ namespace AdvancedKeybinds.UI
 					same = string.Equals(otherPad, canonPad, StringComparison.OrdinalIgnoreCase);
 				if (same)
 				{
+					reason = AkDecisionReason.DuplicateToken;
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					return false;
 				}
 
 				if (GamePadStickOppositeDirectionRules.AreOppositeDirections(canonical, other))
 				{
+					reason = AkDecisionReason.OppositeStick;
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					return false;
 				}
@@ -4047,6 +4110,7 @@ namespace AdvancedKeybinds.UI
 			if (GamePadStickOppositeDirectionRules.ConflictsWithOtherSlots(
 				_working.Slot1, _working.Slot2, null, slotIndex, canonical))
 			{
+				reason = AkDecisionReason.OppositeStick;
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				return false;
 			}
@@ -4068,12 +4132,15 @@ namespace AdvancedKeybinds.UI
 			return true;
 		}
 
-		private static bool TrySetAlternateGamePadToken(string token)
+		private static bool TrySetAlternateGamePadToken(string token, out AkDecisionReason reason)
 		{
+			reason = AkDecisionReason.None;
+
 			string primary = AlternateGamePadBindingPolicy.ResolvePrimaryToken(_working?.Keys);
 			if (!AlternateGamePadBindingPolicy.TryNormalizeAlternateToken(
-				    token, primary, out string canonical, out _))
+				    token, primary, out string canonical, out AlternateGamePadBindingPolicy.RejectReason reject))
 			{
+				reason = MapAlternateReject(reject);
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				if (AkDiag.Enabled) AkDiag.Log($"ComboPanel alternate rejected token={token}");
 				return false;
@@ -4091,6 +4158,25 @@ namespace AdvancedKeybinds.UI
 			_dirty = true;
 			SoundEngine.PlaySound(SoundID.MenuTick);
 			return true;
+		}
+
+		private static AkDecisionReason MapAlternateReject(AlternateGamePadBindingPolicy.RejectReason reject)
+		{
+			switch (reject)
+			{
+				case AlternateGamePadBindingPolicy.RejectReason.EmptyToken:
+					return AkDecisionReason.EmptyToken;
+				case AlternateGamePadBindingPolicy.RejectReason.NotPadToken:
+					return AkDecisionReason.NotPadToken;
+				case AlternateGamePadBindingPolicy.RejectReason.DuplicatePrimary:
+					return AkDecisionReason.DuplicateToken;
+				case AlternateGamePadBindingPolicy.RejectReason.NotEligible:
+				case AlternateGamePadBindingPolicy.RejectReason.SubsystemInactive:
+				case AlternateGamePadBindingPolicy.RejectReason.AndComboSlots:
+					return AkDecisionReason.GamePadAlternateRejected;
+				default:
+					return AkDecisionReason.GamePadAlternateRejected;
+			}
 		}
 
 		private static int MouseTokenToButtonMask(string token) => token switch {
@@ -4177,6 +4263,8 @@ namespace AdvancedKeybinds.UI
 			PushEditHistoryBeforeMutation("SlotClear");
 			_working.SetSlot(index, null);
 			_working.SetSlotDisplay(index, null);
+			ApplyDoubleTapAfterSlotsEdited();
+			SyncDurationBufferFromWorking();
 			BindingRestrictions.ClearUnsupportedHoldFlags(_working);
 			if (_working.FilledSlotCount != 1)
 			{
@@ -4199,11 +4287,12 @@ namespace AdvancedKeybinds.UI
 
 			Point hover = GetPanelMouseUi();
 			UpdateKeyboardAdditionalOrTabHover(hover);
-			_hoverHoldNumber = HoldEditable && _holdNumberRect.Contains(hover);
-			_hoverHoldSlider = HoldEditable && HoldSliderHit().Contains(hover);
-			_hoverHoldDefaultBtn = HoldEditable && _holdDefaultBtn.Contains(hover);
+			_hoverHoldNumber = DurationEditable && _holdNumberRect.Contains(hover);
+			_hoverHoldSlider = DurationEditable && HoldSliderHit().Contains(hover);
+			_hoverHoldDefaultBtn = DurationEditable && _holdDefaultBtn.Contains(hover);
 			_hoverHoldWhileHeld = _holdWhileHeldBox.Contains(hover);
 			_hoverHoldOnRelease = _holdOnReleaseBox.Contains(hover);
+			_hoverDoubleTap = _doubleTapBox.Contains(hover);
 
 			MouseState physicalMouse = Mouse.GetState();
 			ComboPanelGamePadNavigation.OnPhysicalMouseMoved(physicalMouse.X, physicalMouse.Y);
@@ -4355,7 +4444,7 @@ namespace AdvancedKeybinds.UI
 				// Chord-cancel before capture latch so Back/Start are not registered as binds.
 				ComboPanelGamePadNavigation.Tick(
 					registrationWait: true,
-					holdEditable: HoldEditable,
+					holdEditable: DurationEditable,
 					resolveRect: null,
 					host: PadHost.Instance,
 					twoKeySetupEligible: _twoKeySetupEligible);
@@ -4391,7 +4480,7 @@ namespace AdvancedKeybinds.UI
 				bool openGate = ComboPanelGamePadNavigation.IsOpenGateActive;
 				bool padConsumed = ComboPanelGamePadNavigation.Tick(
 					registrationWait: false,
-					holdEditable: HoldEditable,
+					holdEditable: DurationEditable,
 					resolveRect: null,
 					host: PadHost.Instance,
 					twoKeySetupEligible: _twoKeySetupEligible);
@@ -4444,7 +4533,7 @@ namespace AdvancedKeybinds.UI
 			Point tipAt = GetPanelMouseUi();
 			if (_holdNumberRect.Contains(hover))
 			{
-				string tip = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldMsInputTooltip");
+				string tip = ActiveDurationTooltip;
 				if (!string.IsNullOrEmpty(tip))
 					Main.instance.MouseText(tip, 0, 0, tipAt.X, tipAt.Y);
 			}
@@ -4774,7 +4863,7 @@ namespace AdvancedKeybinds.UI
 				return;
 
 			// Hold-duration controls only respond while Hold is on; otherwise they're greyed out.
-			if (leftJustPressed && HoldEditable)
+			if (leftJustPressed && DurationEditable)
 			{
 				// A click anywhere but the number box confirms and ends an in-progress hold-value edit.
 				if (_holdTyping && !_holdNumberRect.Contains(mouse))
@@ -4794,7 +4883,7 @@ namespace AdvancedKeybinds.UI
 				if (_holdDefaultBtn.Contains(mouse))
 				{
 					_holdTyping = false;
-					SetHoldMs(ComboBinding.DefaultHoldMs);
+					ResetActiveDurationToDefault();
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					return;
 				}
@@ -4893,6 +4982,11 @@ namespace AdvancedKeybinds.UI
 					ToggleHoldOnReleaseFromUi();
 					return;
 				}
+				if (_doubleTapBox.Contains(mouse))
+				{
+					ToggleDoubleTapFromUi();
+					return;
+				}
 
 				if (_clearBtn.Contains(mouse))
 				{
@@ -4978,10 +5072,12 @@ namespace AdvancedKeybinds.UI
 				return "HoldWhileHeld";
 			if (_holdOnReleaseBox.Contains(mouse))
 				return "HoldOnRelease";
-			if (HoldEditable && _holdNumberRect.Contains(mouse))
+			if (DurationEditable && _holdNumberRect.Contains(mouse))
 				return "HoldNumber";
-			if (HoldEditable && HoldSliderHit().Contains(mouse))
+			if (DurationEditable && HoldSliderHit().Contains(mouse))
 				return "HoldSlider";
+			if (_doubleTapBox.Contains(mouse))
+				return "DoubleTap";
 			for (int i = 1; i <= 3; i++)
 			{
 				if (_slotBox[i].Contains(mouse))
@@ -5407,23 +5503,20 @@ namespace AdvancedKeybinds.UI
 
 		private static void ComputeLayout()
 		{
-			// Left block = original 600px combo UI. Extra width = splice + inset + key-info + right pad.
-			int w = Math.Min(PanelWidthTarget, Math.Max(LeftBlockWidth + 80, Main.screenWidth - 40));
-			if (w < LeftBlockWidth + KeyInfoSpliceGap + KeyInfoColW)
-				w = Math.Min(PanelWidthTarget, Main.screenWidth - 40);
-
-			const int h = PanelHeight;
-			const int gap = SlotRowGap;
+			DoubleTapHorizontalMetrics hz = DoubleTapPanelPolicy.GetHorizontalMetrics(Main.screenWidth);
+			int w = hz.PanelWidth;
+			int h = DoubleTapPanelPolicy.PanelHeight(Main.screenHeight);
+			int gap = hz.SlotRowGap;
 			int x = (Main.screenWidth - w) / 2;
 			int y = (Main.screenHeight - h) / 2;
 			_panel = new Rectangle(x, y, w, h);
 
-			// --- Left block (same geometry as pre-keyinfo 600px panel) ---
-			int contentLeft = x + ContentMargin;
-			int leftContentRight = x + LeftBlockWidth - ContentMargin;
+			// --- Left block / key-info from shared pure horizontal metrics ---
+			int contentLeft = x + hz.ContentMargin;
+			int leftContentRight = x + hz.LeftBlockWidth - hz.ContentMargin;
 			int leftContentWidth = leftContentRight - contentLeft;
 
-			const int holdColW = 168;
+			int holdColW = hz.HoldColumnWidth;
 			// Folder tabs attach flush on the top-outside edge (Hold-column width each).
 			LayoutKeyboardAdditionalOrTabs(contentLeft, y, holdColW);
 			int titleTop = y + HeaderTopPad;
@@ -5432,65 +5525,53 @@ namespace AdvancedKeybinds.UI
 			int holdCenterY = holdRowTop + HoldControlBoxH / 2;
 			int rowY = holdRowTop + HoldControlBoxH + HoldToSlotGap;
 
-			_backBtn = new Rectangle(leftContentRight - HoldControlBoxW, titleTop, HoldControlBoxW, HoldControlBoxH);
-			int headerTextWidth = Math.Max(40, leftContentWidth - HoldControlBoxW - gap);
+			_backBtn = new Rectangle(leftContentRight - hz.HoldControlBoxWidth, titleTop, hz.HoldControlBoxWidth, HoldControlBoxH);
+			int headerTextWidth = Math.Max(40, leftContentWidth - hz.HoldControlBoxWidth - gap);
 			_headerTitleRect = new Rectangle(contentLeft, titleTop, headerTextWidth, HeaderTitleHeight);
 			_headerPreviewRect = new Rectangle(contentLeft, previewTop, headerTextWidth, HeaderPreviewHeight);
 
-			_holdNumberRect = new Rectangle(leftContentRight - HoldControlBoxW, holdCenterY - HoldControlBoxH / 2, HoldControlBoxW, HoldControlBoxH);
-			_holdDefaultBtn = new Rectangle(contentLeft, holdCenterY - HoldControlBoxH / 2, HoldControlBoxW, HoldControlBoxH);
+			_holdNumberRect = new Rectangle(leftContentRight - hz.HoldControlBoxWidth, holdCenterY - HoldControlBoxH / 2, hz.HoldControlBoxWidth, HoldControlBoxH);
+			_holdDefaultBtn = new Rectangle(contentLeft, holdCenterY - HoldControlBoxH / 2, hz.HoldControlBoxWidth, HoldControlBoxH);
 
 			Texture2D colorBar = TextureAssets.ColorBar.Value;
 			int barH = colorBar?.Height ?? 20;
-			int sliderLeft = _holdDefaultBtn.Right + HoldControlGap;
-			int sliderRight = _holdNumberRect.X - HoldControlGap;
-			int sliderW = Math.Max(48, sliderRight - sliderLeft);
-			_holdSliderFrame = new Rectangle(sliderLeft, holdCenterY - barH / 2, sliderW, barH);
+			_holdSliderFrame = new Rectangle(x + hz.SliderLeft, holdCenterY - barH / 2, hz.SliderWidth, barH);
 			_holdInnerX = _holdSliderFrame.X + 5f;
 			_holdInnerY = _holdSliderFrame.Y + 4f;
 			_holdInnerWidth = _holdSliderFrame.Width - 10f;
 
-			const int slotH = 138;
-			_holdColumn = new Rectangle(contentLeft, rowY, holdColW, slotH);
-			int halfH = slotH / 2;
-			_holdWhileHeldBox = new Rectangle(contentLeft, rowY, holdColW, halfH);
-			_holdOnReleaseBox = new Rectangle(contentLeft, rowY + halfH, holdColW, slotH - halfH);
+			int slotH = DoubleTapPanelPolicy.SlotColumnHeight(Main.screenHeight);
+			LayoutHoldModeColumn(contentLeft, rowY, holdColW, slotH);
 
-			int slotsLeft = _holdColumn.Right + gap;
-			int slotsWidth = leftContentRight - slotsLeft;
-			int slotW = Math.Max(40, (slotsWidth - gap * 2) / 3);
+			int slotsLeft = x + hz.SlotsLeft;
+			int slotsWidth = hz.SlotsWidth;
+			int slotW = Math.Max(1, (slotsWidth - gap * 2) / 3);
 			for (int i = 1; i <= 3; i++)
 				_slotBox[i] = new Rectangle(slotsLeft + (i - 1) * (slotW + gap), rowY, slotW, slotH);
 
-			int btnW = PanelButtonW;
+			int btnW = hz.PanelButtonWidth;
 			int btnH = PanelButtonH;
-			_clearBtn = new Rectangle(x + ContentMargin, y + h - btnH - 14, btnW, btnH);
+			_clearBtn = new Rectangle(x + hz.ButtonsLeft, y + h - btnH - 14, btnW, btnH);
 			// Save / Cancel stay on the left block's right edge (before the wavy splice).
-			_closeBtn = new Rectangle(leftContentRight - btnW, y + h - btnH - 14, btnW, btnH);
+			_closeBtn = new Rectangle(x + hz.ButtonsLeft + hz.ButtonsWidth - btnW, y + h - btnH - 14, btnW, btnH);
 
 			int hintAreaTop = rowY + slotH + FooterHintTopGap;
 			int hintAreaBottom = _clearBtn.Y - FooterHintBottomGap;
 			int hintAreaH = Math.Max(FooterHintLineSlots * 16, hintAreaBottom - hintAreaTop);
 			_footerHintRect = new Rectangle(contentLeft, hintAreaTop, leftContentWidth, hintAreaH);
 
-			// --- Key-info: same row as slots, shifted right of the splice for visual balance ---
-			int keyInfoW = KeyInfoColW;
-			int keyInfoX = leftContentRight + KeyInfoSpliceGap + KeyInfoLeftInset;
-			int maxRight = x + w - KeyInfoRightPad;
-			if (keyInfoX + keyInfoW > maxRight)
-				keyInfoW = Math.Max(120, maxRight - keyInfoX);
-
-			_keyInfoColumn = new Rectangle(keyInfoX, rowY, keyInfoW, slotH);
+			// --- Key-info / name / reset from the same metrics (panel-local → screen) ---
+			_keyInfoColumn = new Rectangle(x + hz.KeyInfoLeft, rowY, hz.KeyInfoWidth, slotH);
 			_keyInfoNameBox = new Rectangle(
-				_keyInfoColumn.X + KeyInfoPad,
-				_keyInfoColumn.Bottom - KeyInfoPad - KeyInfoNameFieldH,
-				Math.Max(40, keyInfoW - KeyInfoPad * 2),
+				x + hz.NameLeft,
+				_keyInfoColumn.Bottom - hz.KeyInfoPad - KeyInfoNameFieldH,
+				hz.NameWidth,
 				KeyInfoNameFieldH);
 			_keyInfoBody = new Rectangle(
-				_keyInfoColumn.X + KeyInfoPad,
-				_keyInfoColumn.Y + KeyInfoPad,
-				Math.Max(40, keyInfoW - KeyInfoPad * 2),
-				Math.Max(20, _keyInfoNameBox.Y - KeyInfoPad - (_keyInfoColumn.Y + KeyInfoPad)));
+				_keyInfoColumn.X + hz.KeyInfoPad,
+				_keyInfoColumn.Y + hz.KeyInfoPad,
+				hz.NameWidth,
+				Math.Max(20, _keyInfoNameBox.Y - hz.KeyInfoPad - (_keyInfoColumn.Y + hz.KeyInfoPad)));
 			_keyInfoGuideRect = new Rectangle(
 				_keyInfoColumn.X,
 				hintAreaTop,
@@ -5499,8 +5580,8 @@ namespace AdvancedKeybinds.UI
 
 			// Right of Cancel (same band), above the key-info panel — 2-line control.
 			const int resetH = 44;
-			int resetW = _keyInfoNameBox.Width;
-			int resetX = _keyInfoColumn.X + (_keyInfoColumn.Width - resetW) / 2;
+			int resetW = hz.ResetWidth;
+			int resetX = x + hz.ResetLeft;
 			int resetY = _backBtn.Y;
 			int maxResetBottom = _keyInfoColumn.Y - 6;
 			if (resetY + resetH > maxResetBottom)
@@ -5527,7 +5608,7 @@ namespace AdvancedKeybinds.UI
 		private static void HandleHoldInput()
 		{
 			// While Hold is off the controls are greyed out and cannot be edited.
-			if (!HoldEditable)
+			if (!DurationEditable)
 			{
 				_holdTyping = false;
 				_draggingHold = false;
@@ -5548,10 +5629,19 @@ namespace AdvancedKeybinds.UI
 		{
 			Point mouse = GetPanelMouseUi();
 			float proportion = MathHelper.Clamp((mouse.X - _holdInnerX) / _holdInnerWidth, 0f, 1f);
-			int span = ComboBinding.SliderMaxHoldMs - ComboBinding.MinHoldMs;
-			int raw = ComboBinding.MinHoldMs + (int)(proportion * span);
-			int value = System.Math.Clamp(RoundToTen(raw), ComboBinding.MinHoldMs, ComboBinding.SliderMaxHoldMs);
-			SetHoldMs(value);
+			if (_working != null && _working.DoubleTap)
+			{
+				int span = DoubleTapMsPolicy.MaxMs - DoubleTapMsPolicy.MinMs;
+				int raw = DoubleTapMsPolicy.MinMs + (int)(proportion * span);
+				SetActiveDuration(raw, slider: true);
+			}
+			else
+			{
+				int span = ComboBinding.SliderMaxHoldMs - ComboBinding.MinHoldMs;
+				int raw = ComboBinding.MinHoldMs + (int)(proportion * span);
+				int value = System.Math.Clamp(RoundToTen(raw), ComboBinding.MinHoldMs, ComboBinding.SliderMaxHoldMs);
+				SetActiveDuration(value, slider: true);
+			}
 		}
 
 		private static void HandleHoldTyping()
@@ -5700,23 +5790,19 @@ namespace AdvancedKeybinds.UI
 		private static void ApplyHoldBuffer()
 		{
 			if (!int.TryParse(_holdBuffer, out int parsed))
-				parsed = _working.EffectiveHoldMs;
+				parsed = ActiveDurationMs;
 
-			SetHoldMs(System.Math.Clamp(parsed, ComboBinding.MinTypedHoldMs, ComboBinding.MaxHoldMs));
-			_holdBuffer = _working.EffectiveHoldMs.ToString();
+			if (_working != null && _working.DoubleTap)
+				SetActiveDuration(parsed, slider: false);
+			else
+				SetActiveDuration(
+					System.Math.Clamp(parsed, ComboBinding.MinTypedHoldMs, ComboBinding.MaxHoldMs),
+					slider: false);
 		}
 
 		private static void SetHoldMs(int value)
 		{
-			value = System.Math.Clamp(value, ComboBinding.MinTypedHoldMs, ComboBinding.MaxHoldMs);
-			if (_working.HoldMs != value)
-			{
-				PushEditHistoryBeforeMutation("HoldTimeChange");
-				_working.HoldMs = value;
-				_dirty = true;
-			}
-
-			_holdBuffer = value.ToString();
+			SetActiveDuration(value, slider: false);
 		}
 
 		private static int RoundToTen(int value) => (int)(System.Math.Round(value / 10.0) * 10.0);
@@ -6184,7 +6270,14 @@ namespace AdvancedKeybinds.UI
 			if (_working.FilledSlotCount == 0 && !_working.HasAlternateGamePad && !_working.HasAdditionalOr)
 				return Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.Unset");
 
-			return BindingDisplayResolver.FormatComboDisplayLabel(_working);
+			string label = BindingDisplayResolver.FormatComboDisplayLabel(_working);
+			string dtPrefix = BuildDoubleTapPreviewPrefix();
+			if (string.IsNullOrEmpty(dtPrefix))
+				return label;
+			if (string.IsNullOrEmpty(label)
+				|| label == Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.Unset"))
+				return dtPrefix;
+			return dtPrefix + " " + label;
 		}
 
 		private static string SlotDisplay(int index)
@@ -6398,11 +6491,7 @@ namespace AdvancedKeybinds.UI
 			DrawBox(spriteBatch, _holdWhileHeldBox, whileHeldFill, whileHeldBorder);
 			DrawBox(spriteBatch, _holdOnReleaseBox, onReleaseFill, onReleaseBorder);
 
-			// Divider between the two halves.
-			Texture2D pixel = TextureAssets.MagicPixel.Value;
-			int dividerY = _holdWhileHeldBox.Bottom - 1;
-			Color divider = twoKeyHoldLocked ? new Color(60, 60, 78) : new Color(110, 110, 140);
-			spriteBatch.Draw(pixel, new Rectangle(_holdColumn.X, dividerY, _holdColumn.Width, 2), divider);
+			DrawHoldColumnDividers(spriteBatch, twoKeyHoldLocked);
 
 			Color textColor = twoKeyHoldLocked
 				? new Color(90, 90, 105)
@@ -6413,14 +6502,15 @@ namespace AdvancedKeybinds.UI
 			string releaseHint = twoKeyHoldLocked
 				? Language.GetTextValue("Mods.AdvancedKeybinds.UI.TwoKeySetup.HoldUnavailableHint")
 				: Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldOnReleaseHint");
-			DrawHoldModeHalf(spriteBatch, _holdWhileHeldBox,
+			DrawEnlargedHoldModeHalf(spriteBatch, _holdWhileHeldBox,
 				Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldWhileHeldTitle"),
 				whileHint,
 				textColor);
-			DrawHoldModeHalf(spriteBatch, _holdOnReleaseBox,
+			DrawEnlargedHoldModeHalf(spriteBatch, _holdOnReleaseBox,
 				Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldOnReleaseTitle"),
 				releaseHint,
 				textColor);
+			DrawDoubleTapModeBox(spriteBatch);
 		}
 
 		private static void DrawHoldModeHalf(SpriteBatch spriteBatch, Rectangle rect, string title, string hint, Color color)
@@ -6451,6 +6541,133 @@ namespace AdvancedKeybinds.UI
 			Utils.DrawBorderString(spriteBatch, hint, new Vector2(hintX, startY + titleSize.Y + hintGap), color * 0.92f, hintScale);
 		}
 
+		private static void DrawEnlargedHoldModeHalf(SpriteBatch spriteBatch, Rectangle rect, string title, string hint, Color color)
+		{
+			const float inset = 2f;
+			const float bandSep = 2f;
+			// Utils.DrawBorderString / ChatManager: fixed spread 1.5 logical px (not * scale).
+			const float shadow = 1.5f;
+			var font = FontAssets.MouseText.Value;
+
+			float innerW = rect.Width - inset * 2f;
+			float innerH = rect.Height - inset * 2f - bandSep;
+			if (innerW <= 0f || innerH <= 0f)
+				return;
+
+			float bandH = innerH * 0.5f;
+			float budgetW = innerW - shadow * 2f;
+			float budgetH = bandH - shadow * 2f;
+			if (budgetW <= 0f || budgetH <= 0f)
+				return;
+
+			float contentLeft = rect.X + inset;
+			float titleBandTop = rect.Y + inset;
+			float hintBandTop = titleBandTop + bandH + bandSep;
+
+			bool TryGlyphUnion(string text, out float minX, out float minY, out float maxX, out float maxY)
+			{
+				minX = minY = maxX = maxY = 0f;
+				if (string.IsNullOrEmpty(text))
+					return false;
+
+				bool hasInk = false;
+				float penX = 0f;
+				float penY = 0f;
+				bool firstOnLine = true;
+				float uMinX = float.PositiveInfinity;
+				float uMinY = float.PositiveInfinity;
+				float uMaxX = float.NegativeInfinity;
+				float uMaxY = float.NegativeInfinity;
+
+				for (int i = 0; i < text.Length; i++)
+				{
+					char c = text[i];
+					if (c == '\r')
+						continue;
+					if (c == '\n')
+					{
+						penX = 0f;
+						penY += font.LineSpacing;
+						firstOnLine = true;
+						continue;
+					}
+
+					// SpriteCharacterData is a struct; missing keys use DefaultCharacterData (also struct).
+					bool foundGlyph = font.SpriteCharacters.TryGetValue(c, out var sc);
+					if (!foundGlyph)
+						sc = font.DefaultCharacterData;
+
+					float left = firstOnLine ? Math.Max(sc.Kerning.X, 0f) : sc.Kerning.X;
+					if (!firstOnLine)
+						penX += font.CharacterSpacing;
+					firstOnLine = false;
+
+					// Exclude ink only when a whitespace glyph exists in the font dictionary.
+					// Missing keys that fall back to DefaultCharacter remain visible ink.
+					bool skipInk = char.IsWhiteSpace(c) && foundGlyph;
+					if (!skipInk && sc.Glyph.Width > 0 && sc.Glyph.Height > 0)
+					{
+						float gx = penX + left + sc.Padding.X;
+						float gy = penY + sc.Padding.Y;
+						float gw = sc.Glyph.Width;
+						float gh = sc.Glyph.Height;
+						if (gx < uMinX) uMinX = gx;
+						if (gy < uMinY) uMinY = gy;
+						if (gx + gw > uMaxX) uMaxX = gx + gw;
+						if (gy + gh > uMaxY) uMaxY = gy + gh;
+						hasInk = true;
+					}
+
+					penX += left + sc.Kerning.Y + sc.Kerning.Z;
+				}
+
+				if (!hasInk)
+					return false;
+
+				minX = uMinX;
+				minY = uMinY;
+				maxX = uMaxX;
+				maxY = uMaxY;
+				return true;
+			}
+
+			void DrawBand(string text, float bandTop, Color drawColor)
+			{
+				if (string.IsNullOrEmpty(text))
+					return;
+				if (!TryGlyphUnion(text, out float minX, out float minY, out float maxX, out float maxY))
+					return;
+
+				float unionW = maxX - minX;
+				float unionH = maxY - minY;
+				if (unionW <= 0f || unionH <= 0f)
+					return;
+
+				float scale = Math.Min(budgetW / unionW, budgetH / unionH);
+				if (scale <= 0f)
+					return;
+
+				float posX = contentLeft + innerW * 0.5f - (minX + maxX) * 0.5f * scale;
+				float posY = bandTop + bandH * 0.5f - (minY + maxY) * 0.5f * scale;
+				// Full-string DrawString (no ChatManager word split). Shadow spread fixed 1.5 (not * scale).
+				Vector2 pos = new Vector2(posX, posY);
+				Color shadowColor = new Color(0, 0, 0, (int)drawColor.A);
+				ReLogic.Graphics.DynamicSpriteFontExtensionMethods.DrawString(
+					spriteBatch, font, text, pos + new Vector2(-1.5f, 0f), shadowColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+				ReLogic.Graphics.DynamicSpriteFontExtensionMethods.DrawString(
+					spriteBatch, font, text, pos + new Vector2(1.5f, 0f), shadowColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+				ReLogic.Graphics.DynamicSpriteFontExtensionMethods.DrawString(
+					spriteBatch, font, text, pos + new Vector2(0f, -1.5f), shadowColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+				ReLogic.Graphics.DynamicSpriteFontExtensionMethods.DrawString(
+					spriteBatch, font, text, pos + new Vector2(0f, 1.5f), shadowColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+				ReLogic.Graphics.DynamicSpriteFontExtensionMethods.DrawString(
+					spriteBatch, font, text, pos, drawColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+			}
+
+			DrawBand(title, titleBandTop, color);
+			DrawBand(hint, hintBandTop, color * 0.92f);
+		}
+
 		private static readonly string[] FooterHintKeys = {
 			"Mods.AdvancedKeybinds.UI.Combo.HintLine1",
 			"Mods.AdvancedKeybinds.UI.Combo.HintLine2",
@@ -6469,6 +6686,27 @@ namespace AdvancedKeybinds.UI
 			"Mods.AdvancedKeybinds.UI.AdditionalOr.HintLine3",
 		};
 
+		/// <summary>
+		/// Normal combo tab middle footer line: when exactly one slot is filled and that key
+		/// cannot use DT and/or Hold, show a dedicated localized hint; otherwise HintLine2.
+		/// </summary>
+		private static string ResolveNormalComboFooterHintLine2Key()
+		{
+			if (_working != null && _working.FilledSlotCount == 1)
+			{
+				bool dtForbidden = IsWorkingPrimaryForbiddenForDoubleTapUi;
+				bool holdForbidden = !BindingRestrictions.SupportsHold(_working);
+				if (dtForbidden && holdForbidden)
+					return "Mods.AdvancedKeybinds.UI.Combo.HintLine2HoldDoubleTapForbidden";
+				if (dtForbidden)
+					return "Mods.AdvancedKeybinds.UI.Combo.HintLine2DoubleTapForbidden";
+				if (holdForbidden)
+					return "Mods.AdvancedKeybinds.UI.Combo.HintLine2HoldForbidden";
+			}
+
+			return FooterHintKeys[1];
+		}
+
 		/// <summary>Footer hints: one localized line per row; shrinks as needed to stay inside each slot.</summary>
 		private static void DrawFooterHints(SpriteBatch spriteBatch, Color hintColor)
 		{
@@ -6483,7 +6721,10 @@ namespace AdvancedKeybinds.UI
 			float minScale = (_twoKeySetupEligible || IsKeyboardAdditionalOrTab) ? 0.18f : 0.35f;
 			for (int i = 0; i < FooterHintLineSlots; i++)
 			{
-				string text = Language.GetTextValue(keys[i]);
+				string key = keys[i];
+				if (i == 1 && keys == FooterHintKeys)
+					key = ResolveNormalComboFooterHintLine2Key();
+				string text = Language.GetTextValue(key);
 				if (string.IsNullOrEmpty(text) || text.StartsWith("Mods.", StringComparison.Ordinal))
 					continue;
 				var slotRect = new Rectangle(
@@ -6532,7 +6773,7 @@ namespace AdvancedKeybinds.UI
 
 		private static void DrawHoldControls(SpriteBatch spriteBatch, Point mouse)
 		{
-			bool editable = HoldEditable;
+			bool editable = DurationEditable;
 
 			// Reset-to-default button (same width as the number box; label is always English).
 			Color defaultBtnFill = !editable
@@ -6546,7 +6787,7 @@ namespace AdvancedKeybinds.UI
 			if (padDefault.HasValue)
 				defaultBtnBorder = padDefault.Value;
 			DrawBox(spriteBatch, _holdDefaultBtn, defaultBtnFill, defaultBtnBorder);
-			DrawCentered(spriteBatch, HoldDefaultButtonLabel, _holdDefaultBtn,
+			DrawCentered(spriteBatch, ActiveDurationDefaultButtonLabel, _holdDefaultBtn,
 				editable ? Color.White : new Color(120, 120, 130), maxScale: 0.8f);
 
 			// Number box (typed value; accepts [MinTypedHoldMs, MaxHoldMs]). Greyed out when Hold is off.
@@ -6563,7 +6804,9 @@ namespace AdvancedKeybinds.UI
 			if (ComboPanelGamePadNavigation.IsNumberEditActive)
 				numFill = new Color(40, 70, 100);
 			DrawBox(spriteBatch, _holdNumberRect, numFill, numBorder);
-			string numStr = _holdTyping ? (_holdBuffer.Length == 0 ? "_____" : _holdBuffer) : _working.EffectiveHoldMs.ToString();
+			string numStr = _holdTyping
+				? (_holdBuffer.Length == 0 ? "_____" : _holdBuffer)
+				: ActiveDurationMs.ToString();
 			DrawHoldNumberText(spriteBatch, numStr,
 				editable ? Color.White : new Color(120, 120, 130),
 				editable ? new Color(200, 200, 210) : new Color(110, 110, 120));
@@ -6592,11 +6835,25 @@ namespace AdvancedKeybinds.UI
 							? new Color(80, 200, 255)
 							: Main.OurFavoriteColor));
 
-			float sliderSpan = ComboBinding.SliderMaxHoldMs - ComboBinding.MinHoldMs;
-			int sliderValue = System.Math.Clamp(_working.EffectiveHoldMs, ComboBinding.MinHoldMs, ComboBinding.SliderMaxHoldMs);
-			float proportion = sliderSpan > 0
-				? MathHelper.Clamp((sliderValue - (float)ComboBinding.MinHoldMs) / sliderSpan, 0f, 1f)
-				: 0f;
+			float proportion;
+			if (_working != null && _working.DoubleTap)
+			{
+				float sliderSpan = DoubleTapMsPolicy.MaxMs - DoubleTapMsPolicy.MinMs;
+				int sliderValue = System.Math.Clamp(
+					ActiveDurationMs, DoubleTapMsPolicy.MinMs, DoubleTapMsPolicy.MaxMs);
+				proportion = sliderSpan > 0
+					? MathHelper.Clamp((sliderValue - (float)DoubleTapMsPolicy.MinMs) / sliderSpan, 0f, 1f)
+					: 0f;
+			}
+			else
+			{
+				float sliderSpan = ComboBinding.SliderMaxHoldMs - ComboBinding.MinHoldMs;
+				int sliderValue = System.Math.Clamp(
+					ActiveDurationMs, ComboBinding.MinHoldMs, ComboBinding.SliderMaxHoldMs);
+				proportion = sliderSpan > 0
+					? MathHelper.Clamp((sliderValue - (float)ComboBinding.MinHoldMs) / sliderSpan, 0f, 1f)
+					: 0f;
+			}
 			spriteBatch.Draw(knob, new Vector2(_holdInnerX + _holdInnerWidth * proportion, _holdInnerY + 4f), null, Color.White * dim, 0f, knob.Size() * 0.5f, 1f, SpriteEffects.None, 0f);
 		}
 
@@ -6660,7 +6917,7 @@ namespace AdvancedKeybinds.UI
 				return;
 
 			// Sit in the gap just right of Cancel/Save's shared right edge.
-			int edgeX = _backBtn.Width > 0 ? _backBtn.Right : (_panel.X + LeftBlockWidth);
+			int edgeX = _backBtn.Width > 0 ? _backBtn.Right : _closeBtn.Right;
 			if (_keyInfoColumn.Width > 0 && _keyInfoColumn.X > edgeX)
 				edgeX = edgeX + (_keyInfoColumn.X - edgeX) / 2;
 
@@ -6892,27 +7149,10 @@ namespace AdvancedKeybinds.UI
 				return;
 			}
 
-			bool nextHold;
-			bool nextOnRelease = false;
 			if (_working.Hold && !_working.HoldOnRelease)
-				nextHold = false;
+				ApplyHoldModeViaPolicy(hold: false, onRelease: false);
 			else
-			{
-				nextHold = true;
-				nextOnRelease = false;
-			}
-
-			if (_working.Hold == nextHold && _working.HoldOnRelease == nextOnRelease)
-			{
-				SoundEngine.PlaySound(SoundID.MenuTick);
-				return;
-			}
-
-			PushEditHistoryBeforeMutation("HoldChange");
-			_working.Hold = nextHold;
-			_working.HoldOnRelease = nextOnRelease;
-			_dirty = true;
-			SoundEngine.PlaySound(SoundID.MenuTick);
+				ApplyHoldModeViaPolicy(hold: true, onRelease: false);
 		}
 
 		private static void ToggleHoldOnReleaseFromUi()
@@ -6951,40 +7191,15 @@ namespace AdvancedKeybinds.UI
 				return;
 			}
 
-			bool nextHold;
-			bool nextOnRelease;
 			if (_working.Hold && _working.HoldOnRelease)
-			{
-				nextHold = false;
-				nextOnRelease = false;
-			}
+				ApplyHoldModeViaPolicy(hold: false, onRelease: false);
 			else
-			{
-				nextHold = true;
-				nextOnRelease = true;
-			}
-
-			if (_working.Hold == nextHold && _working.HoldOnRelease == nextOnRelease)
-			{
-				SoundEngine.PlaySound(SoundID.MenuTick);
-				return;
-			}
-
-			PushEditHistoryBeforeMutation("HoldChange");
-			_working.Hold = nextHold;
-			_working.HoldOnRelease = nextOnRelease;
-			_dirty = true;
-			SoundEngine.PlaySound(SoundID.MenuTick);
+				ApplyHoldModeViaPolicy(hold: true, onRelease: true);
 		}
 
 		private static void ExecuteClearBindingFromUi()
 		{
-			if (_working == null
-				|| !ComboPanelClearPolicy.ShouldClearWorkingBinding(
-					_working.IsEmpty,
-					_working.HasAlternateGamePad,
-					_working.Hold,
-					_working.HoldOnRelease))
+			if (_working == null || !WorkingNeedsClearIncludingDoubleTap())
 			{
 				ClearLeftClickConfirmPrompt();
 				SoundEngine.PlaySound(SoundID.MenuClose);
@@ -6996,7 +7211,7 @@ namespace AdvancedKeybinds.UI
 			_working = IsTwoKeyTerrariaOrSession()
 				? new ComboBinding { UseTerrariaKeyStatusOr = true, PersistAsEmptyRecord = true }
 				: new ComboBinding();
-			_holdBuffer = ComboBinding.DefaultHoldMs.ToString();
+			SyncDurationBufferFromWorking();
 			_dirty = true;
 			SoundEngine.PlaySound(SoundID.MenuClose);
 		}
@@ -7011,7 +7226,17 @@ namespace AdvancedKeybinds.UI
 		{
 			public static readonly PadHost Instance = new();
 
-			public int CurrentHoldMs => _working?.EffectiveHoldMs ?? ComboBinding.DefaultHoldMs;
+			public int CurrentHoldMs => ActiveDurationMs;
+
+			public int DurationSliderMinMs
+				=> _working != null && _working.DoubleTap
+					? DoubleTapMsPolicy.MinMs
+					: ComboBinding.MinHoldMs;
+
+			public int DurationSliderMaxMs
+				=> _working != null && _working.DoubleTap
+					? DoubleTapMsPolicy.MaxMs
+					: ComboBinding.SliderMaxHoldMs;
 
 			public void StartSlotCapture(int slot)
 			{
@@ -7035,31 +7260,35 @@ namespace AdvancedKeybinds.UI
 
 			public void ToggleHoldOnRelease() => ToggleHoldOnReleaseFromUi();
 
+			public void ToggleDoubleTap() => ToggleDoubleTapFromUi();
+
 			public void ResetHoldToDefault()
 			{
-				if (!HoldEditable)
+				if (!DurationEditable)
 				{
 					PlayDeniedTick();
 					return;
 				}
 
-				SetHoldMs(ComboBinding.DefaultHoldMs);
+				ResetActiveDurationToDefault();
 				SoundEngine.PlaySound(SoundID.MenuTick);
 			}
 
-			public void SetHoldMs(int ms) => ComboPanel.SetHoldMs(ms);
+			public void SetHoldMs(int ms) => SetActiveDuration(ms, slider: false);
+
+			public void SetSliderMs(int ms)
+				=> SetActiveDuration(DoubleTapPanelPolicy.PadSliderValue(_working, ms), slider: false);
 
 			public void AdjustHoldMs(int delta)
 			{
-				if (!HoldEditable)
+				if (!DurationEditable)
 				{
 					PlayDeniedTick();
 					return;
 				}
 
-				int next = CurrentHoldMs + delta;
-				next = (int)(Math.Round(next / 10.0) * 10);
-				SetHoldMs(next);
+				int next = ActiveDurationMs + delta;
+				SetActiveDuration(DoubleTapPanelPolicy.PadNumberValue(_working, next), slider: false);
 				SoundEngine.PlaySound(SoundID.MenuTick);
 			}
 

@@ -107,6 +107,10 @@ namespace AdvancedKeybinds.Patches
 		// Marker stored in dwExtraInfo on the events we inject, so the hook can recognise and ignore them.
 		private static readonly IntPtr InjectedMarker = new IntPtr(0x11AC0DE5);
 
+		/// <summary>Readonly compare — does not expose or duplicate the marker value.</summary>
+		internal static bool IsOwnInjectedMarker(IntPtr extraInfo)
+			=> extraInfo == InjectedMarker;
+
 		/// <summary>
 		/// While SendInput is synthesizing a Win chord, do not swallow those keys again in the thread
 		/// hook / WndProc (LL hook already skips via <see cref="InjectedMarker"/>).
@@ -3504,6 +3508,19 @@ namespace AdvancedKeybinds.Patches
 				// Let our own injected events straight through, untouched.
 				if (data.dwExtraInfo == InjectedMarker)
 					return CallNextHookEx(_hookId, nCode, wParam, lParam);
+
+				if (isDown || isUp)
+				{
+					global::AdvancedKeybinds.Features.DoubleTap.DoubleTapNativeInput.NotifyLowLevel(
+						data.vkCode,
+						(ushort)(data.scanCode & 0xFF),
+						(data.flags & LLKHF_EXTENDED) != 0,
+						isDown,
+						isUp,
+						data.time,
+						ownMarker: false,
+						foreground: gameForegroundForDiagnostic);
+				}
 
 				if (gameForegroundForDiagnostic)
 					_lastGameForegroundMs = Environment.TickCount64;

@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: Open Controls
 	OpenModConfigMenu.DisplayName: Open Mod Configuration
 	CycleHoldTierHudAnchor.DisplayName: Cycle Hold HUD
+	OpenBindingList.DisplayName: Key Settings List
 }
 
 Configs: {
@@ -160,6 +161,19 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+		SuffixKeyboardUi: " (Menu)"
+		SuffixGamePadUi: " (Pad UI)"
+		SuffixGamePadGame: " (Pad)"
+		SuffixGamePad: " (Pad)"
+	}
+
 	KeybindRow: {
 		OutsideSlotTip: When the cursor is selecting an action name, right-click to unset (confirm required), middle-click to restore the default
 		ConfirmUnsetHover: Right-click again to unset
@@ -173,8 +187,11 @@ UI: {
 		Undo: Undo
 		Save: Save
 		HintLine1: Left-click a slot, then press a key or mouse button.
-		HintLine2: Hold only with 1 key.
+		HintLine2: Hold / DT only with 1 key.
 		HintLine3: Hover a slot and right-click to clear the binding.
+		HintLine2DoubleTapForbidden: This key cannot be assigned to DT.
+		HintLine2HoldForbidden: This key cannot be assigned to Hold.
+		HintLine2HoldDoubleTapForbidden: This key cannot be assigned to Hold / DT.
 		HoldDefaultLabel: Default
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: while held
@@ -183,6 +200,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Enter a value from 10～10000
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: Tap twice quickly
+		DoubleTapPreview: DT
+		DoubleTapMsInputTooltip: Enter a value from 250～1000
 		ConfirmLeftClickOnly: Bind Left-click alone? Save again to confirm.
 		ClearConfirmPad: Clear?
 		RejectOppositeStickDirection: Opposite stick directions cannot be combined (e.g. Up+Down).

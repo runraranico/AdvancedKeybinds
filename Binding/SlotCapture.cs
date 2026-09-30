@@ -321,12 +321,43 @@ namespace AdvancedKeybinds.Binding
 						reason: _session.LastDiagReason);
 				}
 
+				// Explicit CaptureTokenResolver reject only (waiting/recovery stay None → no notify).
+				AkDecisionReason rejectReason = _session.LastPollDecisionReason;
+				if (rejectReason != AkDecisionReason.None)
+				{
+					int frame = Main.GameUpdateCount == 0
+						? -1
+						: unchecked((int)Main.GameUpdateCount);
+					AkDecisionFeed.Publish(new AkDecisionEvent(
+						AkDecisionKind.CaptureRejected,
+						rejectReason,
+						null,
+						-1,
+						null,
+						frame));
+				}
+
 				return PollResult.Waiting;
 			}
 
 			token = KeyToken.NormalizeCapturedToken(token);
 			// CAPTURE Accepted=True is logged from ComboPanel after purple clear (avoid duplicate lines).
-			return FinishCapture(token, _session.LastDiagReason);
+			PollResult finished = FinishCapture(token, _session.LastDiagReason);
+			if (finished == PollResult.Captured)
+			{
+				int frame = Main.GameUpdateCount == 0
+					? -1
+					: unchecked((int)Main.GameUpdateCount);
+				AkDecisionFeed.Publish(new AkDecisionEvent(
+					AkDecisionKind.CaptureAccepted,
+					AkDecisionReason.None,
+					null,
+					-1,
+					token,
+					frame));
+			}
+
+			return finished;
 		}
 
 		private static bool ContainsPadToken(IEnumerable<string> tokens)

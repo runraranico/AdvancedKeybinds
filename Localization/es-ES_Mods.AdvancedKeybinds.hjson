@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: Abrir controles
 	OpenModConfigMenu.DisplayName: Abrir configuracion de mods
 	CycleHoldTierHudAnchor.DisplayName: Alternar HUD de Hold
+	OpenBindingList.DisplayName: Lista de ajustes de teclas
 }
 
 Configs: {
@@ -160,6 +161,19 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+		// SuffixKeyboardUi: " (Menu)"
+		// SuffixGamePadUi: " (Pad UI)"
+		// SuffixGamePadGame: " (Pad)"
+		// SuffixGamePad: " (Pad)"
+	}
+
 	KeybindRow: {
 		OutsideSlotTip: Cuando el cursor selecciona un nombre de acción, clic derecho para dejar sin asignar (confirmación), clic central para restaurar el valor predeterminado
 		ConfirmUnsetHover: Clic derecho otra vez para dejar sin asignar
@@ -173,8 +187,11 @@ UI: {
 		Undo: Deshacer
 		Save: Guardar
 		HintLine1: Haz clic izquierdo en una casilla y luego pulsa una tecla o boton del raton.
-		HintLine2: Hold solo con 1 tecla.
+		HintLine2: Hold / DT solo con 1 tecla.
 		HintLine3: Coloca el cursor sobre una casilla y clic derecho para quitar el ajuste.
+		HintLine2DoubleTapForbidden: Esta tecla no se puede asignar a DT.
+		HintLine2HoldForbidden: Esta tecla no se puede asignar a Hold.
+		HintLine2HoldDoubleTapForbidden: Esta tecla no se puede asignar a Hold / DT.
 		HoldDefaultLabel: Predeterminado
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: mantenido
@@ -183,6 +200,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Introduce un valor de 10～10000
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: Toca dos veces rápido
+		// DoubleTapPreview: DT
+		// DoubleTapMsInputTooltip: Enter a value from 250～1000
 		ConfirmLeftClickOnly: ¿Asignar solo clic izquierdo? Guarda otra vez para confirmar.
 		ClearConfirmPad: ¿Borrar?
 		RejectOppositeStickDirection: No se pueden combinar direcciones opuestas del stick (p. ej. Arriba+Abajo).

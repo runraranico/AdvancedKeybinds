@@ -1,12 +1,13 @@
 using System.Collections.Generic;
 using AdvancedKeybinds.Core;
+using AdvancedKeybinds.Features.DoubleTap;
 using Terraria.Localization;
 
 namespace AdvancedKeybinds.Binding
 {
 	/// <summary>
-	/// Public display-only API: returns the same label string as the Advanced Keybinds Controls /
-	/// combo panel for an action. Does not modify KeyStatus, GetAssignedKeys, ownership, or input.
+	/// Public display-only API for legacy shared labels. Controls DT decoration is opt-in.
+	/// Does not modify KeyStatus, GetAssignedKeys, ownership, or input.
 	/// Other mods may call this when they would otherwise show raw <c>AKAdv:</c> markers.
 	/// </summary>
 	public static class BindingDisplayResolver
@@ -27,7 +28,7 @@ namespace AdvancedKeybinds.Binding
 		}
 
 		/// <summary>
-		/// Resolves the AK Controls-equivalent display for <paramref name="actionId"/> from BindingStorage.
+		/// Resolves the legacy shared display for <paramref name="actionId"/> from BindingStorage.
 		/// </summary>
 		public static bool TryGetBindingDisplayText(string actionId, out string displayText)
 		{
@@ -60,10 +61,17 @@ namespace AdvancedKeybinds.Binding
 		}
 
 		/// <summary>
-		/// Same string as Controls row overlay / combo preview for a stored combo
-		/// (<see cref="ComboBinding.FormatJoinedLabel"/> + HOLD prefix).
+		/// Shared legacy label (<see cref="ComboBinding.FormatJoinedLabel"/> + HOLD prefix).
+		/// Deliberately excludes the Controls-only DT prefix.
 		/// </summary>
 		public static string FormatComboDisplayLabel(ComboBinding combo)
+			=> FormatComboDisplayLabelCore(combo, controlsDoubleTap: false);
+
+		/// <summary>Controls-row opt-in. Other shared API callers retain their existing labels.</summary>
+		public static string FormatControlsDisplayLabel(ComboBinding combo)
+			=> FormatComboDisplayLabelCore(combo, controlsDoubleTap: true);
+
+		private static string FormatComboDisplayLabelCore(ComboBinding combo, bool controlsDoubleTap)
 		{
 			if (combo == null || combo.IsEmpty)
 				return string.Empty;
@@ -89,6 +97,9 @@ namespace AdvancedKeybinds.Binding
 				combo.FilledSlotCount,
 				whileHeld,
 				onRelease);
+
+			if (controlsDoubleTap)
+				withHold = DoubleTapControlsDisplay.ApplyPrefix(withHold, combo);
 
 			if (!combo.HasAdditionalOr)
 				return withHold;

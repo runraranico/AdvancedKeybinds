@@ -295,7 +295,9 @@ namespace AdvancedKeybinds.Core
 					HoldOnRelease = s.HoldOnRelease,
 					HoldMs = s.HoldMs,
 					PersistAsEmptyRecord = s.PersistAsEmptyRecord,
-					UseTerrariaKeyStatusOr = s.UseTerrariaKeyStatusOr
+					UseTerrariaKeyStatusOr = s.UseTerrariaKeyStatusOr,
+					DoubleTap = s.DoubleTap,
+					DoubleTapMs = s.DoubleTapMs
 				};
 			}
 

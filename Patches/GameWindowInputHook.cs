@@ -816,6 +816,8 @@ namespace AdvancedKeybinds.Patches
 		private static void HandleKeyDown(uint msg, IntPtr wParam, IntPtr lParam)
 		{
 			Win32KeystrokeMessage.Parsed k = Win32KeystrokeMessage.Parse(wParam, lParam);
+			global::AdvancedKeybinds.Features.DoubleTap.DoubleTapNativeInput.NotifyWindow(
+				k.Vk, k.Scan, k.Extended, k.WasKeyDown);
 			string messageName = msg == WM_SYSKEYDOWN ? "WM_SYSKEYDOWN" : "WM_KEYDOWN";
 			string source = messageName;
 			if (AdvancedKeybindsDiagnosticEvents.HasKeyMessageSubscribers)
@@ -860,6 +862,8 @@ namespace AdvancedKeybinds.Patches
 		private static void HandleKeyUp(uint msg, IntPtr wParam, IntPtr lParam)
 		{
 			Win32KeystrokeMessage.Parsed k = Win32KeystrokeMessage.Parse(wParam, lParam);
+			global::AdvancedKeybinds.Features.DoubleTap.DoubleTapNativeInput.NotifyWindowKeyUpForDiag(
+				k.Vk, k.Scan, k.Extended, k.WasKeyDown);
 			string messageName = msg == WM_SYSKEYUP ? "WM_SYSKEYUP" : "WM_KEYUP";
 			string source = messageName;
 			if (AdvancedKeybindsDiagnosticEvents.HasKeyMessageSubscribers)

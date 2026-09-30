@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using AdvancedKeybinds.Core;
 using AdvancedKeybinds.Diagnostics;
+using AdvancedKeybinds.Features.DoubleTap;
 using Terraria;
 using Terraria.GameInput;
 
@@ -17,6 +18,20 @@ namespace AdvancedKeybinds.Binding
 	public static class BindingStorage
 	{
 		private static readonly Dictionary<string, ComboBinding> Combos = new();
+
+		/// <summary>
+		/// Incremented whenever <see cref="Combos"/> contents change (Set / Clear / Load).
+		/// ListView watches this to rebuild AK ALL KEY without per-frame full scans.
+		/// </summary>
+		public static int CombosMutationRevision { get; private set; }
+
+		private static void NoteCombosMutated()
+		{
+			unchecked
+			{
+				CombosMutationRevision++;
+			}
+		}
 
 		/// <summary>
 		/// Set when LoadFromFile hits InvalidJson after Combos.Clear — blocks empty SaveToFile wipe.
@@ -88,13 +103,17 @@ namespace AdvancedKeybinds.Binding
 		{
 			Combos.Clear();
 			if (snapshot == null)
+			{
+				NoteCombosMutated();
 				return;
+			}
 			foreach (KeyValuePair<string, ComboBindingData> pair in snapshot)
 			{
 				ComboBinding combo = FromData(pair.Value?.Clone());
 				if (combo != null)
 					Combos[pair.Key] = combo;
 			}
+			NoteCombosMutated();
 		}
 
 		private static bool TryCaptureGamePadPreEdit(
@@ -232,7 +251,7 @@ namespace AdvancedKeybinds.Binding
 						ComboBindingData dto = ToData(pair.Key, pair.Value);
 						if (dto == null)
 							continue;
-						if (dto.IsEmpty
+						if (dto.IsEmpty && !dto.DoubleTap
 							&& !(dto.PersistAsEmptyRecord
 								&& GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key)))
 							continue;
@@ -272,9 +291,18 @@ namespace AdvancedKeybinds.Binding
 		/// <summary>Memory-only Set mutation (no disk). Used inside <see cref="TryCommitGamePadUserEdit"/>.</summary>
 		private static void ApplySetMemoryOnly(string actionId, ComboBinding combo, string syncReason)
 		{
+			if (combo != null && combo.DoubleTap)
+			{
+				Combos[actionId] = combo.Clone();
+				NoteCombosMutated();
+				DoubleTapOwnershipBridge.Sync(actionId, Combos[actionId]);
+				return;
+			}
+
 			if (combo == null || combo.IsEmpty)
 			{
 				Combos.Remove(actionId);
+				NoteCombosMutated();
 				SyncVanillaKeyStatusForAction(actionId, null, syncReason + "-empty");
 				MirrorGameBindingToUiIfNeeded(actionId, null, syncReason);
 				return;
@@ -297,6 +325,7 @@ namespace AdvancedKeybinds.Binding
 				if (toStore == null || toStore.IsEmpty || defaultVanillaMouse)
 				{
 					Combos.Remove(actionId);
+					NoteCombosMutated();
 					SyncVanillaKeyStatusForAction(actionId, null, syncReason + "-kb-pad-strip-empty");
 					if (defaultVanillaMouse
 						|| KeyboardMousePadIsolationPolicy.TryMapMouseActionToDefaultToken(
@@ -313,6 +342,7 @@ namespace AdvancedKeybinds.Binding
 			}
 
 			Combos[actionId] = toStore;
+			NoteCombosMutated();
 			SyncVanillaKeyStatusForAction(actionId, Combos[actionId], syncReason);
 			MirrorGameBindingToUiIfNeeded(actionId, Combos[actionId], syncReason);
 		}
@@ -326,6 +356,7 @@ namespace AdvancedKeybinds.Binding
 				return;
 			}
 
+			NoteCombosMutated();
 			SyncVanillaKeyStatusForAction(actionId, null, syncReason + "-empty");
 			MirrorGameBindingToUiIfNeeded(actionId, null, syncReason);
 		}
@@ -397,7 +428,7 @@ namespace AdvancedKeybinds.Binding
 				return;
 			if (!Combos.TryGetValue(storageKey, out ComboBinding combo) || combo == null)
 				return;
-			if (!combo.PersistAsEmptyRecord || !combo.IsEmpty)
+			if (combo.DoubleTap || !combo.PersistAsEmptyRecord || !combo.IsEmpty)
 				return;
 			Combos.Remove(storageKey);
 		}
@@ -419,10 +450,17 @@ namespace AdvancedKeybinds.Binding
 			bool holdHudCustomized)
 		{
 			string syncReason = "controls-undo-memory";
-			if (advanced == null || advanced.IsEmpty)
+			if (advanced == null || (advanced.IsEmpty && !advanced.DoubleTap))
 				ApplyClearMemoryOnly(storageKey, syncReason);
 			else
 				ApplySetMemoryOnly(storageKey, advanced, syncReason);
+
+			if (advanced != null && advanced.DoubleTap)
+			{
+				ClientPrefs.OpenKeybindMenuCustomized = openMenuCustomized;
+				ClientPrefs.HoldTierHudHotkeyCustomized = holdHudCustomized;
+				return;
+			}
 
 			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(storageKey);
 			VanillaRebindHelper.RestoreAssignedKeysForInputMode(
@@ -491,6 +529,16 @@ namespace AdvancedKeybinds.Binding
 					continue;
 				}
 
+				if (combo.DoubleTap)
+				{
+					if (!DoubleTapOwnershipBridge.Matches(pair.Key, combo))
+					{
+						DoubleTapOwnershipBridge.Sync(pair.Key, combo);
+						repaired++;
+					}
+					continue;
+				}
+
 				if (combo.IsEmpty)
 					continue;
 
@@ -517,6 +565,9 @@ namespace AdvancedKeybinds.Binding
 			{
 				ComboBinding combo = pair.Value;
 				if (combo == null)
+					continue;
+
+				if (combo.DoubleTap)
 					continue;
 
 				bool holdBefore = combo.Hold;
@@ -580,6 +631,9 @@ namespace AdvancedKeybinds.Binding
 					}
 				}
 			}
+
+			if (changed)
+				NoteCombosMutated();
 
 			return changed;
 		}
@@ -902,6 +956,12 @@ namespace AdvancedKeybinds.Binding
 				return;
 			}
 
+			if (combo?.DoubleTap == true)
+			{
+				DoubleTapOwnershipBridge.Sync(actionId, combo);
+				return;
+			}
+
 			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId);
 			var syncKind = ControlsGameUiSeparationPolicy.ResolveSyncKind(actionId, out int singleOrdinal);
 			InputMode[] modes = ResolveSyncModesArray(syncKind, singleOrdinal);
@@ -1130,6 +1190,8 @@ namespace AdvancedKeybinds.Binding
 		{
 			foreach (KeyValuePair<string, ComboBinding> pair in Combos)
 			{
+				if (pair.Value?.DoubleTap == true)
+					continue;
 				if (!GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key))
 					continue;
 				SyncGamePadTwoKeyTerrariaOrKeyStatus(pair.Key, pair.Value, reason);
@@ -1140,6 +1202,9 @@ namespace AdvancedKeybinds.Binding
 
 		private static bool OwnershipMatchesForStorageKey(string storageKey, ComboBinding combo)
 		{
+			if (combo?.DoubleTap == true)
+				return DoubleTapOwnershipBridge.Matches(storageKey, combo);
+
 			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(storageKey);
 			var kind = ControlsGameUiSeparationPolicy.ResolveSyncKind(storageKey, out int singleOrdinal);
 
@@ -1222,6 +1287,9 @@ namespace AdvancedKeybinds.Binding
 			ComboBinding combo,
 			string reason)
 		{
+			if (combo?.DoubleTap == true)
+				return;
+
 			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(storageKey);
 			int modeOrdinal = GamePadTwoKeyTerrariaOrPolicy.ResolveSyncInputModeOrdinal(storageKey);
 			if (modeOrdinal < 0 || string.IsNullOrEmpty(trigger))
@@ -1299,6 +1367,9 @@ namespace AdvancedKeybinds.Binding
 			if (!GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(storageKey))
 				return false;
 
+			if (combo?.DoubleTap == true)
+				return false;
+
 #if AK_DIAGNOSTICS
 			ControlsGameUiSeparationTrace.LogStage("4_before_ak_save", storageKey, reason ?? "TryCommitGamePadTwoKey");
 #endif
@@ -1316,6 +1387,7 @@ namespace AdvancedKeybinds.Binding
 
 			bool ok = TryCommitGamePadUserEdit(storageKey, syncReason, () => {
 				Combos[storageKey] = toStore;
+				NoteCombosMutated();
 				// Empty PersistAsEmpty must match ClearBindings (state C): Controls GenInput reads
 				// KeyStatus, so leaving living pad tokens makes the list show glyphs after Clear+Save.
 				if (toStore.IsEmpty)
@@ -1361,7 +1433,7 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, ComboBinding> pair in Combos)
 			{
 				ComboBinding combo = pair.Value;
-				if (combo == null || !combo.IsPlainSingleTap)
+				if (combo == null || combo.DoubleTap || !combo.IsPlainSingleTap)
 					continue;
 
 				SyncVanillaKeyStatusForAction(pair.Key, combo, "sync-plain-to-vanilla");
@@ -1382,7 +1454,16 @@ namespace AdvancedKeybinds.Binding
 			foreach (KeyValuePair<string, ComboBinding> pair in Combos)
 			{
 				ComboBinding combo = pair.Value;
-				if (combo == null || !combo.RequiresAdvancedStorage())
+				if (combo == null)
+					continue;
+
+				if (combo.DoubleTap)
+				{
+					DoubleTapOwnershipBridge.Sync(pair.Key, combo);
+					continue;
+				}
+
+				if (!combo.RequiresAdvancedStorage())
 					continue;
 
 				SyncVanillaKeyStatusForAction(pair.Key, combo, "load-sync-advanced-markers");
@@ -1429,7 +1510,10 @@ namespace AdvancedKeybinds.Binding
 			ControlsGameUiSeparationTrace.LogStage("4_before_ak_save", actionId, reason ?? "BindingStorage.Set");
 #endif
 
-			if (GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(actionId))
+			// TwoKey Terraria-OR commit is non-DT only. DT rows use ApplySetMemoryOnly
+			// (clone preserve + eligible-only ownership sync) so out-of-scope GP:G:/GP:U: keep originals.
+			if (GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(actionId)
+				&& combo?.DoubleTap != true)
 				return TryCommitGamePadTwoKeyTerrariaOr(actionId, combo, reason ?? "BindingStorage.Set");
 
 			string syncReason = reason ?? "BindingStorage.Set";
@@ -1486,6 +1570,7 @@ namespace AdvancedKeybinds.Binding
 						UseTerrariaKeyStatusOr = true,
 						PersistAsEmptyRecord = true
 					};
+					NoteCombosMutated();
 					ExplicitClearGamePadTwoKeyKeyStatus(actionId, syncReason);
 					// Evaluation-only: do not Remove legacy Combos / do not rewrite legacy out of JSON.
 					MarkLegacyEvaluateSuppressedForTrigger(
@@ -1513,6 +1598,9 @@ namespace AdvancedKeybinds.Binding
 			if (!GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(storageKey))
 				return false;
 			if (!Combos.TryGetValue(storageKey, out ComboBinding combo) || combo == null)
+				return false;
+			// DT metadata alone must not suppress legacy GP assignment.
+			if (combo.DoubleTap)
 				return false;
 			return GamePadTwoKeyTerrariaOrPolicy.TryGetEffectiveTwoKeyInputs(
 				combo.Slot1, combo.Slot2, combo.Slot3, out _, out _);
@@ -1726,6 +1814,7 @@ namespace AdvancedKeybinds.Binding
 		private static void LoadFromFile()
 		{
 			Combos.Clear();
+			NoteCombosMutated();
 			_bindingsLoadFailedKeepDisk = false;
 
 			try
@@ -1777,13 +1866,14 @@ namespace AdvancedKeybinds.Binding
 					ComboBinding combo = FromData(pair.Value);
 					if (combo == null)
 						continue;
-					if (combo.IsEmpty
+					if (combo.IsEmpty && !combo.DoubleTap
 						&& !(combo.PersistAsEmptyRecord
 							&& GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key)))
 						continue;
 
 					Combos[pair.Key] = combo;
 				}
+				NoteCombosMutated();
 
 #if AK_DIAGNOSTICS
 				AkEscStartSaveSessionDiagSystem.NoteBindingLoad(
@@ -1831,7 +1921,9 @@ namespace AdvancedKeybinds.Binding
 				UseTerrariaKeyStatusOr = data.UseTerrariaKeyStatusOr,
 				Hold = data.Hold,
 				HoldOnRelease = data.HoldOnRelease,
-				HoldMs = data.HoldMs
+				HoldMs = data.HoldMs,
+				DoubleTap = data.DoubleTap,
+				DoubleTapMs = data.DoubleTapMs
 			};
 		}
 
@@ -1853,7 +1945,9 @@ namespace AdvancedKeybinds.Binding
 				UseTerrariaKeyStatusOr = combo.UseTerrariaKeyStatusOr,
 				Hold = combo.Hold,
 				HoldOnRelease = combo.HoldOnRelease,
-				HoldMs = combo.HoldMs
+				HoldMs = combo.HoldMs,
+				DoubleTap = combo.DoubleTap,
+				DoubleTapMs = combo.DoubleTapMs
 			}, storageKey);
 		}
 
@@ -1898,18 +1992,18 @@ namespace AdvancedKeybinds.Binding
 
 		private static bool SaveToFile()
 		{
-			var data = new Dictionary<string, ComboBindingData>(Combos.Count, StringComparer.Ordinal);
-			foreach (KeyValuePair<string, ComboBinding> pair in Combos)
-			{
+				var data = new Dictionary<string, ComboBindingData>(Combos.Count, StringComparer.Ordinal);
+				foreach (KeyValuePair<string, ComboBinding> pair in Combos)
+				{
 				ComboBindingData dto = ToData(pair.Key, pair.Value);
 				if (dto == null)
 					continue;
-				if (dto.IsEmpty
+				if (dto.IsEmpty && !dto.DoubleTap
 					&& !(dto.PersistAsEmptyRecord
 						&& GamePadTwoKeyTerrariaOrPolicy.IsTargetStorageKey(pair.Key)))
-					continue;
-				data[pair.Key] = dto;
-			}
+						continue;
+					data[pair.Key] = dto;
+				}
 
 			return TryWriteBindingsDictionary(data, "BindingStorage.SaveToFile");
 		}

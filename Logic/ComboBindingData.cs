@@ -28,6 +28,11 @@ namespace AdvancedKeybinds.Core
 		public bool HoldOnRelease;
 		public int HoldMs;
 
+		/// <summary>Stage2C: saved Double Tap flag (not live Judge fire).</summary>
+		public bool DoubleTap;
+		/// <summary>Stage2C: Double Tap window ms (250–1000). Default 250.</summary>
+		public int DoubleTapMs = 250;
+
 		/// <summary>
 		/// Explicit empty two-key Terraria-OR record (Slot1/Slot2 both unset) must remain in JSON.
 		/// Distinct from missing key (= never saved).
@@ -144,7 +149,9 @@ namespace AdvancedKeybinds.Core
 			HoldOnRelease = HoldOnRelease,
 			HoldMs = HoldMs,
 			PersistAsEmptyRecord = PersistAsEmptyRecord,
-			UseTerrariaKeyStatusOr = UseTerrariaKeyStatusOr
+			UseTerrariaKeyStatusOr = UseTerrariaKeyStatusOr,
+			DoubleTap = DoubleTap,
+			DoubleTapMs = DoubleTapMs
 		};
 
 		/// <summary>Value equality for edit-session snapshot / cancel checks (slots, displays, hold).</summary>
@@ -167,7 +174,9 @@ namespace AdvancedKeybinds.Core
 				&& a.HoldOnRelease == b.HoldOnRelease
 				&& a.HoldMs == b.HoldMs
 				&& a.PersistAsEmptyRecord == b.PersistAsEmptyRecord
-				&& a.UseTerrariaKeyStatusOr == b.UseTerrariaKeyStatusOr;
+				&& a.UseTerrariaKeyStatusOr == b.UseTerrariaKeyStatusOr
+				&& a.DoubleTap == b.DoubleTap
+				&& a.DoubleTapMs == b.DoubleTapMs;
 		}
 
 		/// <summary>Compact slot join for asserts / diagnostics (empty → "-").</summary>

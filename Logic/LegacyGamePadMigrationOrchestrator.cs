@@ -178,7 +178,10 @@ namespace AdvancedKeybinds.Core
 				keys.Add(pair.Key);
 
 			List<LegacyGamePadStorageMigrationPolicy.PlanItem> plan =
-				LegacyGamePadStorageMigrationPolicy.BuildPlan(keys, k => session.Combos.ContainsKey(k));
+				BuildDtSafeStoragePlan(
+					keys,
+					k => session.Combos.ContainsKey(k),
+					k => session.Combos.TryGetValue(k, out ComboBindingData data) ? data : null);
 
 			bool combosMutate = phase == RunPhase.Full
 				&& LegacyGamePadStorageMigrationPolicy.PlanRequiresCombosMutation(plan);
@@ -749,8 +752,84 @@ namespace AdvancedKeybinds.Core
 				HoldOnRelease = src.HoldOnRelease,
 				HoldMs = src.HoldMs,
 				PersistAsEmptyRecord = src.PersistAsEmptyRecord,
-				UseTerrariaKeyStatusOr = src.UseTerrariaKeyStatusOr
+				UseTerrariaKeyStatusOr = src.UseTerrariaKeyStatusOr,
+				DoubleTap = src.DoubleTap,
+				DoubleTapMs = src.DoubleTapMs
 			};
+		}
+
+		internal static bool IsDoubleTapData(ComboBindingData data)
+			=> data != null && data.DoubleTap;
+
+		public static List<LegacyGamePadStorageMigrationPolicy.PlanItem> BuildDtSafeStoragePlan(
+			IEnumerable<string> storageKeys,
+			Func<string, bool> hasBinding,
+			Func<string, ComboBindingData> getData)
+		{
+			List<LegacyGamePadStorageMigrationPolicy.PlanItem> plan =
+				LegacyGamePadStorageMigrationPolicy.BuildPlan(storageKeys, hasBinding);
+			if (plan == null || plan.Count == 0 || getData == null)
+				return plan;
+
+			var filtered = new List<LegacyGamePadStorageMigrationPolicy.PlanItem>(plan.Count);
+			for (int i = 0; i < plan.Count; i++)
+			{
+				LegacyGamePadStorageMigrationPolicy.PlanItem item = plan[i];
+				ComboBindingData source = getData(item.StorageKey);
+				if (IsDoubleTapData(source)
+					&& (item.Action == LegacyGamePadStorageMigrationPolicy.PlanAction.DeleteDuplicate
+						|| item.Action == LegacyGamePadStorageMigrationPolicy.PlanAction.Migrate))
+				{
+					filtered.Add(new LegacyGamePadStorageMigrationPolicy.PlanItem(
+						item.StorageKey,
+						item.Kind,
+						LegacyGamePadStorageMigrationPolicy.PlanAction.Keep,
+						item.TargetStorageKey,
+						item.Reason + " (DT source keep)"));
+					continue;
+				}
+
+				if (item.Action == LegacyGamePadStorageMigrationPolicy.PlanAction.Migrate
+					&& !string.IsNullOrEmpty(item.TargetStorageKey)
+					&& IsDoubleTapData(getData(item.TargetStorageKey)))
+				{
+					filtered.Add(new LegacyGamePadStorageMigrationPolicy.PlanItem(
+						item.StorageKey,
+						item.Kind,
+						LegacyGamePadStorageMigrationPolicy.PlanAction.Keep,
+						item.TargetStorageKey,
+						item.Reason + " (DT target keep)"));
+					continue;
+				}
+
+				if (item.Action == LegacyGamePadStorageMigrationPolicy.PlanAction.DeleteDuplicate
+					&& IsLegacyVanillaDuplicateOfDtModern(item.StorageKey, getData))
+				{
+					filtered.Add(new LegacyGamePadStorageMigrationPolicy.PlanItem(
+						item.StorageKey,
+						item.Kind,
+						LegacyGamePadStorageMigrationPolicy.PlanAction.Keep,
+						item.TargetStorageKey,
+						item.Reason + " (DT modern sibling keep legacy)"));
+					continue;
+				}
+
+				filtered.Add(item);
+			}
+
+			return filtered;
+		}
+
+		private static bool IsLegacyVanillaDuplicateOfDtModern(
+			string legacyStorageKey,
+			Func<string, ComboBindingData> getData)
+		{
+			if (!ControlsGameUiSeparationPolicy.IsGamePadLegacySharedStorageKey(legacyStorageKey))
+				return false;
+			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(legacyStorageKey);
+			string g = ControlsGameUiSeparationPolicy.GamePadGamePrefix + trigger;
+			string u = ControlsGameUiSeparationPolicy.GamePadUiPrefix + trigger;
+			return IsDoubleTapData(getData(g)) || IsDoubleTapData(getData(u));
 		}
 
 		private static (Dictionary<string, List<string>> g, Dictionary<string, List<string>> u) SnapshotKeyStatus(Session s)

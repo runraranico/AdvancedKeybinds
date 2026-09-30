@@ -379,14 +379,22 @@ namespace AdvancedKeybinds.UI
 				onRelease);
 		}
 
-		private static bool TrySetAdditionalOrToken(string token)
+		private static bool TrySetAdditionalOrToken(string token, out AkDecisionReason reason)
 		{
+			reason = AkDecisionReason.None;
+
 			if (_working == null)
+			{
+				reason = AkDecisionReason.MissingWorkingBinding;
 				return false;
+			}
 
 			if (!KeyboardAdditionalOrPolicy.TryNormalizeToken(
-				    token, _working.Keys, out string canonical, out _))
+				    token, _working.Keys, out string canonical, out KeyboardAdditionalOrPolicy.RejectReason reject))
+			{
+				reason = MapAdditionalOrReject(reject);
 				return false;
+			}
 
 			if (string.Equals(_working.AdditionalOrToken, canonical, StringComparison.Ordinal))
 				return true;
@@ -395,6 +403,29 @@ namespace AdvancedKeybinds.UI
 			_working.AdditionalOrToken = canonical;
 			_dirty = true;
 			return true;
+		}
+
+		private static AkDecisionReason MapAdditionalOrReject(KeyboardAdditionalOrPolicy.RejectReason reject)
+		{
+			switch (reject)
+			{
+				case KeyboardAdditionalOrPolicy.RejectReason.EmptyToken:
+					return AkDecisionReason.EmptyToken;
+				case KeyboardAdditionalOrPolicy.RejectReason.DisplayAlias:
+					return AkDecisionReason.DisplayAlias;
+				case KeyboardAdditionalOrPolicy.RejectReason.InvalidToken:
+					return AkDecisionReason.UnknownToken;
+				case KeyboardAdditionalOrPolicy.RejectReason.PadToken:
+					return AkDecisionReason.PadTokenNotAllowed;
+				case KeyboardAdditionalOrPolicy.RejectReason.F11:
+					return AkDecisionReason.DebugHotkeyBlocked;
+				case KeyboardAdditionalOrPolicy.RejectReason.DuplicateAndSlot:
+					return AkDecisionReason.DuplicateToken;
+				case KeyboardAdditionalOrPolicy.RejectReason.NotEligible:
+					return AkDecisionReason.AdditionalOrRejected;
+				default:
+					return AkDecisionReason.AdditionalOrRejected;
+			}
 		}
 
 		private static void ClearAdditionalOrToken()

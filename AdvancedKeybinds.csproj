@@ -22,12 +22,16 @@
     <!-- Prefer explicit -p:EnableAkDiagnostics=...; else local marker; else false (public-safe). -->
     <EnableAkDiagnostics Condition="'$(EnableAkDiagnostics)' == '' and Exists('$(MSBuildProjectDirectory)\.ak-enable-diagnostics')">true</EnableAkDiagnostics>
     <EnableAkDiagnostics Condition="'$(EnableAkDiagnostics)' == ''">false</EnableAkDiagnostics>
+    <EnableAkDoubleTapDiagnostics Condition="'$(EnableAkDoubleTapDiagnostics)' == ''">false</EnableAkDoubleTapDiagnostics>
     <!-- AKDIAG_DEFINE_MARKER -->
     <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**;**/tools/**;**/_developer/**;**/*.Tests/**;**/AdvancedKeybinds.Core.Tests/**;**/AdvancedKeybinds.Dev/**;**/build/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(EnableAkDiagnostics)' == 'true'">
     <DefineConstants>$(DefineConstants);AK_DIAGNOSTICS</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(EnableAkDoubleTapDiagnostics)' == 'true'">
+    <DefineConstants>$(DefineConstants);AK_DOUBLETAP_DIAGNOSTICS</DefineConstants>
   </PropertyGroup>
 
   <!-- Explicit diagnostics build: link Dev first-group / second-group / idle-esc + former product-tree diag bodies. -->
@@ -106,6 +110,16 @@
     Test harnesses that need Core.Tests catalogs must not live as *.cs in the product root
     (EnableAkDiagnostics=true used to skip the public-only Remove list and break B+R).
   -->
+  <!-- Opt-in only, after _developer Remove. Non-.cs extensions exclude in-game glob builds. -->
+  <ItemGroup Condition="'$(EnableAkDoubleTapDiagnostics)' == 'true'">
+    <Compile Include="_developer/Features/DoubleTap/Diagnostic/*.cs.disabled" Link="Features/DoubleTap/Diagnostic/%(Filename)" />
+  </ItemGroup>
+  <Target Name="AssertDoubleTapDiagnosticsIsolation" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(EnableAkDoubleTapDiagnostics)' != 'true' and $(DefineConstants.Contains('AK_DOUBLETAP_DIAGNOSTICS'))"
+           Text="AK_DOUBLETAP_DIAGNOSTICS requires explicit EnableAkDoubleTapDiagnostics=true." />
+    <Error Condition="'$(EnableAkDoubleTapDiagnostics)' == 'true' and '$(EnableAkDiagnostics)' == 'true'"
+           Text="DT-only diagnostics must not enable the unrelated AK_DIAGNOSTICS systems." />
+  </Target>
   <ItemGroup>
     <!-- Always exclude: lives in AdvancedKeybinds.Core.Tests; archived under _developer/archive. -->
     <Compile Remove="FullKeyboardRegistrationComboBurstHarness.cs" />

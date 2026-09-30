@@ -26,6 +26,12 @@ namespace AdvancedKeybinds
 		/// <summary>Cycles Hold-tier HUD anchor (feet / mouse / custom). Default U via reset; starts unset.</summary>
 		public static ModKeybind CycleHoldTierHudAnchorHotkey { get; private set; }
 
+		/// <summary>
+		/// Opens the loosely-coupled binding list overlay (<c>Features/ListView</c>).
+		/// Detach: remove this hotkey registration and delete that folder.
+		/// </summary>
+		public static ModKeybind OpenBindingListHotkey { get; private set; }
+
 		public override void Load()
 		{
 			Instance = this;
@@ -54,6 +60,8 @@ namespace AdvancedKeybinds
 			OpenKeybindMenuHotkey = KeybindLoader.RegisterKeybind(this, "OpenKeybindMenu", Keys.K);
 			OpenModConfigHotkey = KeybindLoader.RegisterKeybind(this, "OpenModConfigMenu", Keys.O);
 			CycleHoldTierHudAnchorHotkey = KeybindLoader.RegisterKeybind(this, "CycleHoldTierHudAnchor", Keys.U);
+			// Binding list overlay (Features/ListView). Default F9; user can rebind / clear in Controls.
+			OpenBindingListHotkey = KeybindLoader.RegisterKeybind(this, "OpenBindingList", Keys.F9);
 
 			ClientPrefs.Load();
 			// Pref drives session on/off for this load (ON→on, OFF→off). Manual toggles after load are free.
@@ -205,6 +213,7 @@ namespace AdvancedKeybinds
 			OpenKeybindMenuHotkey = null;
 			OpenModConfigHotkey = null;
 			CycleHoldTierHudAnchorHotkey = null;
+			OpenBindingListHotkey = null;
 			AkDiag.ResetAnnounceState();
 			AkPlatform.ResetForReload();
 			AdvancedKeybindsDiagnosticEvents.ClearAllSubscribers();

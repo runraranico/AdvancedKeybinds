@@ -361,6 +361,7 @@ namespace AdvancedKeybinds.Patches
 				mlAfterSuppress,
 				padAJp);
 #endif
+			BindingInputEngine.PublishDecisionSnapshotsAfterApply(justPressed);
 		}
 
 		private static readonly List<string> _suppressScratch = new(8);

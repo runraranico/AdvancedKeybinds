@@ -11,9 +11,8 @@ Additional features for Terraria's standard Key Mapping screen.
 
 Click a key binding to open the combo panel.
  - Assign up to 3 keyboard keys or mouse buttons
- - Supports Mouse Wheel Up and Mouse Wheel Down
- - Supports Mouse 4 and Mouse 5
  - Single-key hold actions (while pressed or on release, adjustable duration)
+ - Single-key double-tap action (ver 6.1.0)
  - Custom display names for individual keys
  - Undo / Clear / Save functions inside the combo panel
 

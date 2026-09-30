@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: Steuerung öffnen
 	OpenModConfigMenu.DisplayName: Mod-Konfiguration öffnen
 	CycleHoldTierHudAnchor.DisplayName: Hold-HUD umschalten
+	OpenBindingList.DisplayName: Tasteneinstellungsliste
 }
 
 Configs: {
@@ -160,6 +161,19 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Taste
+		ColAction: Aktion
+		ColMod: MOD
+		EmptyHint: Klicke auf AK ALL KEY oder drücke eine Taste im Fenster
+		NoMatch: (keine Belegung für diese Taste)
+		SuffixKeyboardUi: " (Menü)"
+		SuffixGamePadUi: " (Pad UI)"
+		SuffixGamePadGame: " (Pad)"
+		SuffixGamePad: " (Pad)"
+	}
+
 	KeybindRow: {
 		OutsideSlotTip: Wenn der Cursor einen Aktionsnamen auswählt, Rechtsklick = nicht zugewiesen (Bestätigung), Mittelklick = Standard wiederherstellen
 		ConfirmUnsetHover: Nochmals Rechtsklick zum Zurücksetzen
@@ -173,8 +187,11 @@ UI: {
 		Undo: Rückgängig
 		Save: Speichern
 		HintLine1: Linksklick auf ein Feld, dann Taste oder Maustaste drücken.
-		HintLine2: Hold nur bei 1 Taste möglich.
+		HintLine2: Hold / DT nur bei 1 Taste möglich.
 		HintLine3: Maus über ein Feld und Rechtsklick zum Aufheben der Belegung.
+		HintLine2DoubleTapForbidden: Diese Taste kann nicht DT zugewiesen werden.
+		HintLine2HoldForbidden: Diese Taste kann nicht Hold zugewiesen werden.
+		HintLine2HoldDoubleTapForbidden: Diese Taste kann nicht Hold / DT zugewiesen werden.
 		HoldDefaultLabel: Standard
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: gehalten
@@ -183,6 +200,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Geben Sie einen Wert von 10～10000 ein
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: Zweimal schnell tippen
+		// DoubleTapPreview: DT
+		// DoubleTapMsInputTooltip: Enter a value from 250～1000
 		ConfirmLeftClickOnly: Linksklick allein belegen? Speichern erneut zum Bestätigen.
 		ClearConfirmPad: Löschen?
 		RejectOppositeStickDirection: Entgegengesetzte Stickrichtungen können nicht kombiniert werden (z. B. Hoch+Runter).

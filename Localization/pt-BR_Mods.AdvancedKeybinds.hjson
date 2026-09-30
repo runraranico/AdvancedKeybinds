@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: Abrir controles
 	OpenModConfigMenu.DisplayName: Abrir configuracao de mods
 	CycleHoldTierHudAnchor.DisplayName: Alternar HUD de Hold
+	OpenBindingList.DisplayName: Lista de configurações de teclas
 }
 
 Configs: {
@@ -160,6 +161,19 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+		// SuffixKeyboardUi: " (Menu)"
+		// SuffixGamePadUi: " (Pad UI)"
+		// SuffixGamePadGame: " (Pad)"
+		// SuffixGamePad: " (Pad)"
+	}
+
 	KeybindRow: {
 		OutsideSlotTip: Quando o cursor estiver selecionando um nome de ação, clique com o botão direito para deixar sem atribuição (confirmação), clique do meio para restaurar o padrão
 		ConfirmUnsetHover: Clique direito de novo para limpar
@@ -173,8 +187,11 @@ UI: {
 		Undo: Desfazer
 		Save: Salvar
 		HintLine1: Clique esquerdo em um slot e depois pressione uma tecla ou botão do mouse.
-		HintLine2: Hold apenas com 1 tecla.
+		HintLine2: Hold / DT apenas com 1 tecla.
 		HintLine3: Passe o cursor sobre um slot e clique direito para limpar a vinculação.
+		HintLine2DoubleTapForbidden: Esta tecla não pode ser atribuída a DT.
+		HintLine2HoldForbidden: Esta tecla não pode ser atribuída a Hold.
+		HintLine2HoldDoubleTapForbidden: Esta tecla não pode ser atribuída a Hold / DT.
 		HoldDefaultLabel: Padrão
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: enquanto pressionado
@@ -183,6 +200,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Digite um valor de 10～10000
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: Toque duas vezes rápido
+		// DoubleTapPreview: DT
+		// DoubleTapMsInputTooltip: Enter a value from 250～1000
 		ConfirmLeftClickOnly: Vincular só o clique esquerdo? Salve de novo para confirmar.
 		ClearConfirmPad: Limpar?
 		RejectOppositeStickDirection: Direções opostas do stick não podem ser combinadas (ex.: Cima+Baixo).

@@ -1,4 +1,5 @@
 using System;
+using AdvancedKeybinds.Features.DoubleTap;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -1338,6 +1339,9 @@ namespace AdvancedKeybinds.Patches
 
 			// Plain single-key taps use vanilla's label path. GenInput already remaps raw tokens
 			// (VK:/SC:/Oem*) to the same glyphs as the combo-panel slots, so no overlay is needed.
+			// DT is a Controls display override only; shared single-tap input policy stays unchanged.
+			if (DoubleTapControlsDisplay.IsActive(combo))
+				return true;
 			if (combo.IsPlainSingleTap)
 				return false;
 			// Must use OrPair (not Single): Alternate 2-key GamePad rows need the overlay so
@@ -1414,7 +1418,7 @@ namespace AdvancedKeybinds.Patches
 					font,
 					display,
 					position,
-					AdvancedKeyTextColor,
+					DoubleTapControlsDisplay.TextColor(combo, AdvancedKeyTextColor),
 					0f,
 					Vector2.Zero,
 					baseScale,
@@ -1549,7 +1553,13 @@ namespace AdvancedKeybinds.Patches
 
 			string prefix = string.Empty;
 			string joined = fullLabel;
-			if (combo != null && combo.Hold && combo.FilledSlotCount == 1)
+			if (DoubleTapControlsDisplay.IsActive(combo)
+				&& fullLabel.StartsWith(DoubleTapControlsDisplay.Prefix, StringComparison.Ordinal))
+			{
+				prefix = DoubleTapControlsDisplay.Prefix;
+				joined = fullLabel[prefix.Length..];
+			}
+			else if (combo != null && combo.Hold && combo.FilledSlotCount == 1)
 			{
 				prefix = combo.HoldOnRelease
 					? Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewOnRelease")
@@ -1873,7 +1883,7 @@ namespace AdvancedKeybinds.Patches
 
 			string modeName = rowMode.ToString();
 			if (!ControlsGamePadGlyphDisplayPolicy.IsTargetControlsGamePadMode(modeName))
-				return BindingDisplayResolver.FormatComboDisplayLabel(combo);
+				return BindingDisplayResolver.FormatControlsDisplayLabel(combo);
 
 			GamePadControllerFamily padFamily = GamePadControllerFamilySnapshot.Current;
 			if (combo.HasAlternateGamePad
@@ -1901,20 +1911,21 @@ namespace AdvancedKeybinds.Patches
 			if (TryBuildControlsGamePadGlyphJoinedLabel(combo, modeName, padFamily, out string glyphJoined))
 				return ApplyControlsHoldPrefix(glyphJoined, combo);
 
-			return BindingDisplayResolver.FormatComboDisplayLabel(combo);
+			return BindingDisplayResolver.FormatControlsDisplayLabel(combo);
 		}
 
 		private static string ApplyControlsHoldPrefix(string joined, ComboBinding combo)
 		{
 			string whileHeld = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewWhileHeld");
 			string onRelease = Language.GetTextValue("Mods.AdvancedKeybinds.UI.Combo.HoldPreviewOnRelease");
-			return BindingDisplayText.ApplyHoldPrefix(
+			string withHold = BindingDisplayText.ApplyHoldPrefix(
 				joined,
 				combo.Hold,
 				combo.HoldOnRelease,
 				combo.FilledSlotCount,
 				whileHeld,
 				onRelease);
+			return DoubleTapControlsDisplay.ApplyPrefix(withHold, combo);
 		}
 
 		/// <summary>

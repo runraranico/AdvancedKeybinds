@@ -3,6 +3,7 @@ Keybinds: {
 	OpenKeybindMenu.DisplayName: Открыть управление
 	OpenModConfigMenu.DisplayName: Открыть настройки модов
 	CycleHoldTierHudAnchor.DisplayName: Переключить Hold HUD
+	OpenBindingList.DisplayName: Список настроек клавиш
 }
 
 Configs: {
@@ -160,6 +161,19 @@ CursorConfine: {
 }
 
 UI: {
+	BindingList: {
+		Title: AK ALL KEY
+		ColKey: Key
+		ColAction: Action
+		ColMod: MOD
+		EmptyHint: Click AK ALL KEY or press a key
+		NoMatch: (no bindings for this key)
+		// SuffixKeyboardUi: " (Menu)"
+		// SuffixGamePadUi: " (Pad UI)"
+		// SuffixGamePadGame: " (Pad)"
+		// SuffixGamePad: " (Pad)"
+	}
+
 	KeybindRow: {
 		OutsideSlotTip: Когда курсор выбирает имя действия, ПКМ — сбросить (с подтверждением), СКМ — вернуть значение по умолчанию
 		ConfirmUnsetHover: ПКМ ещё раз — сбросить
@@ -173,8 +187,11 @@ UI: {
 		Undo: Отменить
 		Save: Сохранить
 		HintLine1: Щелкните по слоту ЛКМ, затем нажмите клавишу или кнопку мыши.
-		HintLine2: Hold только при 1 клавише.
+		HintLine2: Hold / DT только при 1 клавише.
 		HintLine3: Наведите курсор на слот и ПКМ, чтобы снять назначение.
+		HintLine2DoubleTapForbidden: Эту клавишу нельзя назначить на DT.
+		HintLine2HoldForbidden: Эту клавишу нельзя назначить на Hold.
+		HintLine2HoldDoubleTapForbidden: Эту клавишу нельзя назначить на Hold / DT.
 		HoldDefaultLabel: По умолчанию
 		HoldWhileHeldTitle: Hold
 		HoldWhileHeldHint: при удержании
@@ -183,6 +200,10 @@ UI: {
 		HoldPreviewWhileHeld: Hold
 		HoldPreviewOnRelease: Hold↑
 		HoldMsInputTooltip: Введите значение от 10～10000
+		DoubleTapTitle: Double Tap (DT)
+		DoubleTapHint: Быстро нажмите дважды
+		// DoubleTapPreview: DT
+		// DoubleTapMsInputTooltip: Enter a value from 250～1000
 		ConfirmLeftClickOnly: Назначить только левый клик? Сохраните ещё раз для подтверждения.
 		ClearConfirmPad: Очистить?
 		RejectOppositeStickDirection: Противоположные направления стика нельзя комбинировать (напр. Вверх+Вниз).
