@@ -50,6 +50,14 @@ namespace AdvancedKeybinds.Binding
 					continue;
 				}
 
+				// Shared UI-back plain KeyStatus OR (Escape + Tab) has no AKAdv marker — strip OR leg on unload.
+				if (!KeyStatusHasOwnershipMarker(actionId)
+					&& TryRestorePlainSharedUiBackOr(actionId, combo))
+				{
+					restored++;
+					continue;
+				}
+
 				// Only touch actions that still carry AKAdv markers (AK wrote them).
 				if (!KeyStatusHasOwnershipMarker(actionId))
 					continue;
@@ -143,6 +151,39 @@ namespace AdvancedKeybinds.Binding
 			}
 
 			return anyModeChanged;
+		}
+
+		/// <summary>
+		/// Unload: when KeyStatus still matches enabled-sync plain OR (e.g. Escape + Tab on Inventory),
+		/// restore vanilla to the AND key only (e.g. Escape). No AKAdv marker required.
+		/// </summary>
+		private static bool TryRestorePlainSharedUiBackOr(string storageKey, ComboBinding combo)
+		{
+			if (combo == null || !combo.HasAdditionalOr)
+				return false;
+
+			ControlsGameUiSeparationPolicy.SyncModeKind kind =
+				ControlsGameUiSeparationPolicy.ResolveSyncKind(storageKey, out int ordinal);
+			if (kind != ControlsGameUiSeparationPolicy.SyncModeKind.SingleInputMode)
+				return false;
+			if (ordinal != ControlsGameUiSeparationPolicy.ModeKeyboard
+				&& ordinal != ControlsGameUiSeparationPolicy.ModeKeyboardUi)
+				return false;
+
+			var expected = new List<string>(2);
+			if (!KeyboardAdditionalOrPolicy.TryBuildVanillaOrKeyStatusEntries(
+				    storageKey,
+				    combo.Hold,
+				    combo.Keys,
+				    combo.AdditionalOrToken,
+				    expected,
+				    ordinal)
+				|| expected.Count != 2)
+				return false;
+
+			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(storageKey);
+			InputMode mode = (InputMode)ordinal;
+			return global::AdvancedKeybinds.Patches.AdditionalOrPersistencePatches.TryRestoreCurrentPlainOr(trigger, mode, expected);
 		}
 
 		private static void TryAppendDoubleTapOrRestoreToken(

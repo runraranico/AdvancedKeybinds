@@ -74,8 +74,11 @@ namespace AdvancedKeybinds.Patches
 			}
 			catch (Exception ex)
 			{
-				AdvancedKeybinds.Instance?.Logger.Debug(
-					"ControlsManageOpenGamepadDeviceTab: " + ex.GetType().Name + ": " + ex.Message);
+#if AK_DIAGNOSTICS
+				if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+					AdvancedKeybinds.Instance?.Logger.Debug(
+						"ControlsManageOpenGamepadDeviceTab: " + ex.GetType().Name + ": " + ex.Message);
+#endif
 			}
 		}
 

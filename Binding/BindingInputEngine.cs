@@ -50,6 +50,7 @@ namespace AdvancedKeybinds.Binding
 
 		private static ulong _lastUpdateGameFrame = ulong.MaxValue;
 		private static bool _updatedThisGameFrame;
+		private static ulong _evaluationGeneration;
 
 		/// <summary>
 		/// In-world ownership watch: sparse checks via <see cref="OwnershipEnsureWatchSchedule"/>.
@@ -59,6 +60,15 @@ namespace AdvancedKeybinds.Binding
 
 		/// <summary>Set while a slot is being captured so gameplay bindings don't fire during setup.</summary>
 		public static bool IsRecording { get; set; }
+
+		/// <summary>
+		/// Monotonic generation of the last determined evaluation result (unchecked ++).
+		/// Advances only on <see cref="InvalidateBindings"/>, the existing blocked-clear return,
+		/// and at the end of a successful <see cref="Update"/>. Never reset to 0.
+		/// Same world-frame read-many does not advance. Not consulted for input, DT,
+		/// diagnostics, ownership, or registration.
+		/// </summary>
+		public static ulong EvaluationGeneration => _evaluationGeneration;
 
 		public static void InvalidateBindings()
 		{
@@ -74,6 +84,7 @@ namespace AdvancedKeybinds.Binding
 			_lastUpdateGameFrame = ulong.MaxValue;
 			_updatedThisGameFrame = false;
 			RequestVanillaOwnershipEnsure();
+			unchecked { _evaluationGeneration++; }
 		}
 
 		/// <summary>Re-run KeyStatus ownership repair watch (Build+Reload / world load / profile rebuild).</summary>
@@ -113,6 +124,7 @@ namespace AdvancedKeybinds.Binding
 				_updatedThisGameFrame = true;
 				_lastEvalBindCount = 0;
 				ResetAllDoubleTapRuntimes();
+				unchecked { _evaluationGeneration++; }
 				return;
 			}
 
@@ -243,6 +255,7 @@ namespace AdvancedKeybinds.Binding
 			_previousPressed.Clear();
 			foreach (string token in pressed)
 				_previousPressed.Add(token);
+			unchecked { _evaluationGeneration++; }
 		}
 
 		private static void EvaluateAllCompiledBindings(HashSet<string> pressed, HashSet<string> toggleEdges, HashSet<string> winEdges)
@@ -1153,9 +1166,12 @@ namespace AdvancedKeybinds.Binding
 		/// </summary>
 		public static void ApplyResultsToTriggers(TriggersSet justPressed, TriggersSet current)
 		{
+			bool deferInventory = ShouldDeferInventoryTriggersToVanillaDuringAutopause();
 			foreach (KeyValuePair<string, bool> pair in JustPressedActions)
 			{
 				if (!pair.Value)
+					continue;
+				if (deferInventory && string.Equals(pair.Key, "Inventory", StringComparison.Ordinal))
 					continue;
 				justPressed.KeyStatus[pair.Key] = true;
 				if (LiveInputDiagnosticSession.IsActive)
@@ -1164,8 +1180,11 @@ namespace AdvancedKeybinds.Binding
 
 			foreach (KeyValuePair<string, bool> pair in CurrentActions)
 			{
-				if (pair.Value)
-					current.KeyStatus[pair.Key] = true;
+				if (!pair.Value)
+					continue;
+				if (deferInventory && string.Equals(pair.Key, "Inventory", StringComparison.Ordinal))
+					continue;
+				current.KeyStatus[pair.Key] = true;
 			}
 		}
 
@@ -1251,6 +1270,7 @@ namespace AdvancedKeybinds.Binding
 		public static void ApplyOwnershipToTriggers(TriggersSet justPressed, TriggersSet current, TriggersSet justReleased)
 		{
 			EnsureCompiled();
+			bool deferInventory = ShouldDeferInventoryTriggersToVanillaDuringAutopause();
 			bool currentInputIsGamePad = PlayerInput.CurrentInputMode == InputMode.XBoxGamepad
 				|| PlayerInput.CurrentInputMode == InputMode.XBoxGamepadUI;
 			CompiledBinding[] compiled = _compiled;
@@ -1261,6 +1281,10 @@ namespace AdvancedKeybinds.Binding
 					continue;
 
 				string actionId = cb.ActionId;
+				if (deferInventory
+					&& (string.Equals(actionId, "Inventory", StringComparison.Ordinal)
+						|| string.Equals(actionId, "KU:Inventory", StringComparison.Ordinal)))
+					continue;
 				bool dtMayReplace = false;
 				if (cb.IsDoubleTap)
 				{
@@ -1304,6 +1328,102 @@ namespace AdvancedKeybinds.Binding
 				if (justReleased != null && justReleased.KeyStatus.ContainsKey(triggerId))
 					justReleased.KeyStatus[triggerId] = akReleased;
 			}
+		}
+
+		/// <summary>
+		/// Autopause (Keyboard or Mouse): leave vanilla Inventory trigger edges untouched.
+		/// Does not require playerInventory; Options window does not exclude deferral.
+		/// Side-effect free. Reads Combos via AllBindings dictionary cast (no Get/Clone).
+		/// </summary>
+		private static bool ShouldDeferInventoryTriggersToVanillaDuringAutopause()
+		{
+			if (Main.gameMenu || !Main.gamePaused)
+				return false;
+			if (IsRecording
+				|| global::AdvancedKeybinds.UI.ComboPanel.IsOpen)
+				return false;
+			if (PlayerInput.CurrentInputMode != InputMode.Keyboard
+				&& PlayerInput.CurrentInputMode != InputMode.Mouse)
+				return false;
+
+			if (!(BindingStorage.AllBindings is IReadOnlyDictionary<string, ComboBinding> map))
+				return false;
+			if (!map.TryGetValue("Inventory", out ComboBinding inventory)
+				|| !IsEscapePlusTabInventoryCombo(inventory))
+				return false;
+			if (!map.TryGetValue("KU:Inventory", out ComboBinding kuInventory)
+				|| !IsEscapePlusTabInventoryCombo(kuInventory))
+				return false;
+
+			var profile = PlayerInput.CurrentProfile;
+			if (profile == null)
+				return false;
+			var modes = profile.InputModes;
+			if (modes == null)
+				return false;
+			if (!modes.TryGetValue(InputMode.Keyboard, out var keyboard) || keyboard == null)
+				return false;
+			if (!modes.TryGetValue(InputMode.KeyboardUI, out var keyboardUi) || keyboardUi == null)
+				return false;
+			return IsExactEscapeTabInventoryKeyStatus(keyboard.KeyStatus)
+				&& IsExactEscapeTabInventoryKeyStatus(keyboardUi.KeyStatus);
+		}
+
+		private static bool IsEscapePlusTabInventoryCombo(ComboBinding combo)
+		{
+			if (combo == null || combo.Hold || combo.HoldOnRelease || combo.DoubleTap)
+				return false;
+			if (!string.Equals(combo.AdditionalOrToken, "Tab", StringComparison.Ordinal))
+				return false;
+
+			int filled = 0;
+			string only = null;
+			if (!string.IsNullOrEmpty(combo.Slot1))
+			{
+				filled++;
+				only = combo.Slot1;
+			}
+			if (!string.IsNullOrEmpty(combo.Slot2))
+			{
+				filled++;
+				only = combo.Slot2;
+			}
+			if (!string.IsNullOrEmpty(combo.Slot3))
+			{
+				filled++;
+				only = combo.Slot3;
+			}
+			return filled == 1 && string.Equals(only, "Escape", StringComparison.Ordinal);
+		}
+
+		private static bool IsExactEscapeTabInventoryKeyStatus(Dictionary<string, List<string>> keyStatus)
+		{
+			if (keyStatus == null)
+				return false;
+			if (!keyStatus.TryGetValue("Inventory", out List<string> list) || list == null || list.Count != 2)
+				return false;
+
+			bool hasEscape = false;
+			bool hasTab = false;
+			for (int i = 0; i < 2; i++)
+			{
+				string token = list[i];
+				if (string.Equals(token, "Escape", StringComparison.Ordinal))
+				{
+					if (hasEscape)
+						return false;
+					hasEscape = true;
+				}
+				else if (string.Equals(token, "Tab", StringComparison.Ordinal))
+				{
+					if (hasTab)
+						return false;
+					hasTab = true;
+				}
+				else
+					return false;
+			}
+			return hasEscape && hasTab;
 		}
 
 		/// <summary>

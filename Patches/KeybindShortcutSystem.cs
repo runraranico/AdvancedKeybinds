@@ -40,6 +40,17 @@ namespace AdvancedKeybinds.Patches
 		private static bool _wasMiddleMouseDown;
 		private static bool _wasHiddenConfineChordDown;
 		private static bool _wasHiddenSaveQuitDeleteDown;
+		private static readonly MenuHotkeyEdgePolicy MenuHotkeyBatchPolicy = new MenuHotkeyEdgePolicy();
+		private static bool _settingsCloseContextActive;
+		[ThreadStatic]
+		private static bool _hiddenSettingsTransition;
+		internal static Action<Action> SettingsTransitionCloseSoundScope;
+
+		/// <summary>
+		/// True only while an AK Settings-close path is inside <see cref="CloseIngameOptionsWithSettingsCloseContext"/>.
+		/// Nested calls restore the previous value; exceptions do not leak the flag.
+		/// </summary>
+		internal static bool IsSettingsCloseContextActive => _settingsCloseContextActive;
 
 		private const uint VkDelete = 0x2E;
 
@@ -70,8 +81,7 @@ namespace AdvancedKeybinds.Patches
 
 				// Configured Open Settings / Controls / Mod Config hotkeys must also work while those
 				// menus are already open (jump between them without closing first).
-				if (!Main.drawingPlayerChat && !Main.editSign && !Main.editChest)
-					HandleConfiguredMenuHotkeys();
+				HandleConfiguredMenuHotkeys();
 
 				if (Main.gameMenu)
 					return;
@@ -101,19 +111,29 @@ namespace AdvancedKeybinds.Patches
 		{
 			// Title screen: still allow jumping between title settings / controls / mod config.
 			// In-world: allow while IngameOptions / FancyUI (controls / mod config) are open.
-			if (IsMenuHotkeyJustPressed(AdvancedKeybinds.OpenSettingsMenuHotkey))
+			// Observe EvaluationGeneration every input poll, including rejected environments.
+			bool allowEnginePress = MenuHotkeyBatchPolicy.TryConsumeGeneration(BindingInputEngine.EvaluationGeneration);
+			if (BindingInputEngine.IsRecording
+				|| global::AdvancedKeybinds.UI.ComboPanel.IsOpen
+				|| !Main.hasFocus
+				|| Main.drawingPlayerChat
+				|| Main.editSign
+				|| Main.editChest)
+				return;
+
+			if (IsMenuHotkeyJustPressed(AdvancedKeybinds.OpenSettingsMenuHotkey, allowEnginePress))
 			{
 				OpenSettingsMenu();
 				return;
 			}
 
-			if (IsMenuHotkeyJustPressed(AdvancedKeybinds.OpenKeybindMenuHotkey))
+			if (IsMenuHotkeyJustPressed(AdvancedKeybinds.OpenKeybindMenuHotkey, allowEnginePress))
 			{
 				OpenKeybindMenu();
 				return;
 			}
 
-			if (IsMenuHotkeyJustPressed(AdvancedKeybinds.OpenModConfigHotkey))
+			if (IsMenuHotkeyJustPressed(AdvancedKeybinds.OpenModConfigHotkey, allowEnginePress))
 			{
 				OpenModConfigList();
 			}
@@ -123,23 +143,22 @@ namespace AdvancedKeybinds.Patches
 		/// Vanilla <see cref="ModKeybind.JustPressed"/> can stay false while Controls / FancyUI
 		/// swallows input; BindingInputEngine still records the advanced/plain trigger edge
 		/// (also covered by <see cref="ModKeybindPatches"/>, kept here as an explicit fallback).
-		/// The vanilla read is gated by <see cref="ModKeybindTriggerReadPolicy"/> because this system
-		/// already runs while tModLoader is still loading, before the trigger sets know the action id.
+		/// AK WasJustPressed is classified first. True cache returns only allowEnginePress
+		/// (consumed generation must not revive via patched ModKeybind.JustPressed).
+		/// Native-only (AK JP false) keeps ModKeybindTriggerReadPolicy dictionary-safe read
+		/// plus hotkey.JustPressed and is not gated by generation.
 		/// </summary>
-		private static bool IsMenuHotkeyJustPressed(ModKeybind hotkey)
+		private static bool IsMenuHotkeyJustPressed(ModKeybind hotkey, bool allowEnginePress)
 		{
 			if (hotkey == null)
 				return false;
 
 			string actionId = ModKeybindReflection.GetActionId(hotkey);
+			if (!string.IsNullOrEmpty(actionId) && BindingInputEngine.WasJustPressed(actionId))
+				return allowEnginePress;
 
-			if (ModKeybindTriggerReadPolicy.IsActionIdReadable(PlayerInput.Triggers?.JustPressed?.KeyStatus, actionId)
-				&& hotkey.JustPressed)
-			{
-				return true;
-			}
-
-			return !string.IsNullOrEmpty(actionId) && BindingInputEngine.WasJustPressed(actionId);
+			return ModKeybindTriggerReadPolicy.IsActionIdReadable(PlayerInput.Triggers?.JustPressed?.KeyStatus, actionId)
+				&& hotkey.JustPressed;
 		}
 
 		private static void HandleHiddenSaveAndQuitShortcut()
@@ -170,7 +189,7 @@ namespace AdvancedKeybinds.Patches
 
 			SteamedWraps.StopPlaytimeTracking();
 			SystemLoader.PreSaveAndQuit();
-			IngameOptions.Close();
+			CloseIngameOptionsWithSettingsCloseContext();
 			Main.menuMode = 10;
 			Main.gameMenu = true;
 			WorldGen.SaveAndQuit();
@@ -248,7 +267,16 @@ namespace AdvancedKeybinds.Patches
 
 			if (leftJustPressed)
 			{
-				OpenSettingsMenu();
+				bool previousHiddenSettingsTransition = _hiddenSettingsTransition;
+				_hiddenSettingsTransition = true;
+				try
+				{
+					OpenSettingsMenu();
+				}
+				finally
+				{
+					_hiddenSettingsTransition = previousHiddenSettingsTransition;
+				}
 				Main.mouseLeftRelease = false;
 				Main.mouseLeft = false;
 				return;
@@ -402,7 +430,7 @@ namespace AdvancedKeybinds.Patches
 		private static void CloseTitleMenuUiForTransition()
 		{
 			if (Main.ingameOptionsWindow)
-				IngameOptions.Close();
+				CloseIngameOptionsWithSettingsCloseContext();
 
 			if (Main.inFancyUI)
 				IngameFancyUI.Close();
@@ -481,10 +509,35 @@ namespace AdvancedKeybinds.Patches
 			// IngameOptions and IngameFancyUI do not share the same close flow. If we open one on top of
 			// the other without explicitly clearing the previous one, Escape can reveal the older screen.
 			if (Main.ingameOptionsWindow)
-				IngameOptions.Close();
+				CloseIngameOptionsWithSettingsCloseContext();
 
 			if (Main.inFancyUI)
+			{
+				Action<Action> closeSoundScope = SettingsTransitionCloseSoundScope;
+				if (_hiddenSettingsTransition && closeSoundScope != null)
+					closeSoundScope(IngameFancyUI.Close);
+				else
 				IngameFancyUI.Close();
+			}
+		}
+
+		/// <summary>
+		/// Marks AK Settings-close context for <see cref="ControlsOverlayPatches"/> HookOptionsClose,
+		/// then invokes vanilla <see cref="IngameOptions.Close"/> once. Restores prior context in finally
+		/// so nesting and orig exceptions do not leak the flag. Does not swallow exceptions.
+		/// </summary>
+		private static void CloseIngameOptionsWithSettingsCloseContext()
+		{
+			bool previous = _settingsCloseContextActive;
+			_settingsCloseContextActive = true;
+			try
+			{
+				IngameOptions.Close();
+			}
+			finally
+			{
+				_settingsCloseContextActive = previous;
+			}
 		}
 
 		private static void ResolveMenuOpeners()

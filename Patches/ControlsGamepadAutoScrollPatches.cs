@@ -212,10 +212,13 @@ namespace AdvancedKeybinds.Patches
 
 			ControlsSectionHeaderSupport.ApplyReflection(manageType);
 
-			AdvancedKeybinds.Instance?.Logger.Info(
-				"ControlsGamepadAutoScrollPatches: GetSnapPoint="
-				+ (_getSnapPointMethod != null ? "OK" : "MISSING")
-				+ " _snapPointField=" + (_snapPointFieldExists ? "OK" : "MISSING"));
+#if AK_DIAGNOSTICS
+			if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+				AdvancedKeybinds.Instance?.Logger.Info(
+					"ControlsGamepadAutoScrollPatches: GetSnapPoint="
+					+ (_getSnapPointMethod != null ? "OK" : "MISSING")
+					+ " _snapPointField=" + (_snapPointFieldExists ? "OK" : "MISSING"));
+#endif
 
 			MethodInfo setup = manageType.GetMethod(
 				"SetupGamepadPoints",
@@ -409,8 +412,11 @@ namespace AdvancedKeybinds.Patches
 				try { PrepareBeforeVanillaSetup(self); }
 				catch (Exception ex)
 				{
-					AdvancedKeybinds.Instance?.Logger.Debug(
-						"ControlsGamepadAutoScrollPatches.Prepare: " + ex.GetType().Name + ": " + ex.Message);
+#if AK_DIAGNOSTICS
+					if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+						AdvancedKeybinds.Instance?.Logger.Debug(
+							"ControlsGamepadAutoScrollPatches.Prepare: " + ex.GetType().Name + ": " + ex.Message);
+#endif
 				}
 
 				_blockFixedUiFocus = !_catalogFailsafeActive && !string.IsNullOrEmpty(_pendingRestoreStableId);
@@ -425,8 +431,11 @@ namespace AdvancedKeybinds.Patches
 				try { AfterVanillaSetup(self, spriteBatch); }
 				catch (Exception ex)
 				{
-					AdvancedKeybinds.Instance?.Logger.Debug(
-						"ControlsGamepadAutoScrollPatches.After: " + ex.GetType().Name + ": " + ex.Message);
+#if AK_DIAGNOSTICS
+					if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+						AdvancedKeybinds.Instance?.Logger.Debug(
+							"ControlsGamepadAutoScrollPatches.After: " + ex.GetType().Name + ": " + ex.Message);
+#endif
 				}
 			});
 		}
@@ -1845,6 +1854,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static void LogSectionPostRelease3002(int from, int to, bool applied)
 		{
+#if AK_DIAGNOSTICS
+			if (!global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+				return;
 			if (applied && _postRelease3002Logged)
 				return;
 			if (!applied)
@@ -1911,8 +1923,10 @@ namespace AdvancedKeybinds.Patches
 				_manualScrollSelectedPoint,
 				_manualScrollSelectedStableId ?? "?",
 				applied);
+#endif
 		}
 
+#if AK_DIAGNOSTICS
 		private static void ResolveCaller(out string callerType, out string callerMethod, out string stackBrief)
 		{
 			callerType = "?";
@@ -1954,6 +1968,7 @@ namespace AdvancedKeybinds.Patches
 				// ignore
 			}
 		}
+#endif
 
 		private static int FindRestoreIndex(
 			List<RowInfo> rows,
@@ -3107,23 +3122,6 @@ namespace AdvancedKeybinds.Patches
 					navigable = true;
 					provenCollapsedChild = false;
 					visibleByStructure = true;
-				}
-
-				if (kind == ControlRowKind.SectionHeader && !navigable)
-				{
-					string reason = duplicate ? "duplicate" : isRightThinHalf ? "horizontal-only" : "other";
-					ControlsSectionHeaderSupport.LogHeaderSkippedIfChanged(stable, reason);
-				}
-
-				if (kind == ControlRowKind.SectionHeader)
-				{
-					ControlsSectionHeaderSupport.LogHeaderSampleIfChanged(
-						stable,
-						el,
-						snap,
-						navigable,
-						isRightThinHalf,
-						isExpanded);
 				}
 
 				if (!navigable && provenCollapsedChild && !string.IsNullOrEmpty(parentHeader) && !isRightThinHalf)

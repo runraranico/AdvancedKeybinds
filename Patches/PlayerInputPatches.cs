@@ -283,10 +283,15 @@ namespace AdvancedKeybinds.Patches
 					try { gameUpdate = unchecked((int)Main.GameUpdateCount); }
 					catch { gameUpdate = 0; }
 
-					if (!ToggleInvSameFrameCoalescePolicy.ShouldInvokeOrig(
+					if (!ToggleInvSameFrameCoalescePolicy.ShouldInvokeOrigForContext(
 						gameUpdate,
+						FnaKeyboardProvider.InputTickEpoch,
+						!Main.gameMenu && (Main.inFancyUI || Main.ingameOptionsWindow),
 						ref _toggleInvLastGameUpdate,
-						ref _toggleInvInvokedThisUpdate))
+						ref _toggleInvInvokedThisUpdate,
+						ref _toggleInvLastInputTickEpoch,
+						ref _toggleInvInvokedThisInputTick,
+						ref _toggleInvMenuInvokedThisInputTick))
 					{
 						return;
 					}
@@ -315,6 +320,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static int _toggleInvLastGameUpdate = int.MinValue;
 		private static bool _toggleInvInvokedThisUpdate;
+		private static int _toggleInvLastInputTickEpoch = int.MinValue;
+		private static bool _toggleInvInvokedThisInputTick;
+		private static bool _toggleInvMenuInvokedThisInputTick;
 
 		private static void ApplyAdvancedBindingsToTriggers()
 		{

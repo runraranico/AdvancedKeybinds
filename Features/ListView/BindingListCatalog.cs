@@ -187,7 +187,7 @@ namespace AdvancedKeybinds.Features.ListView
 				if (primaryToken == null)
 				{
 					primaryToken = tok;
-					primaryDisplay = combo.FormatSlotLabel(slot);
+					primaryDisplay = FormatOriginalTokenForListView(tok);
 				}
 			}
 
@@ -197,7 +197,7 @@ namespace AdvancedKeybinds.Features.ListView
 				if (primaryToken == null)
 				{
 					primaryToken = combo.AdditionalOrToken;
-					primaryDisplay = KeyToken.FormatDisplayForToken(combo.AdditionalOrToken);
+					primaryDisplay = FormatOriginalTokenForListView(combo.AdditionalOrToken);
 				}
 			}
 
@@ -208,7 +208,7 @@ namespace AdvancedKeybinds.Features.ListView
 			// Does not change Controls / ComboPanel localization (Hold / Hold↑).
 			string comboDisplay = FormatListViewKeyComboDisplay(combo);
 			if (string.IsNullOrEmpty(comboDisplay))
-				comboDisplay = combo.FormatJoinedLabel(compact: false);
+				comboDisplay = FormatOriginalJoinedLabelForListView(combo, compact: false);
 			string comboSortDisplay = comboDisplay;
 			comboDisplay = DoubleTapControlsDisplay.ApplyPrefix(comboDisplay, combo);
 
@@ -222,7 +222,7 @@ namespace AdvancedKeybinds.Features.ListView
 				ModDisplay = modDisplay,
 				MatchTokens = match,
 				PrimaryToken = primaryToken,
-				PrimaryDisplay = primaryDisplay ?? KeyToken.FormatDisplayForToken(primaryToken),
+				PrimaryDisplay = primaryDisplay ?? FormatOriginalTokenForListView(primaryToken),
 				GroupSortKey = BindingListSort.BuildGroupSortKey(primaryToken, primaryDisplay)
 			};
 			return true;
@@ -251,9 +251,35 @@ namespace AdvancedKeybinds.Features.ListView
 				|| string.Equals(bare, "Jump", StringComparison.Ordinal);
 		}
 
+		private static string FormatOriginalTokenForListView(string token)
+		{
+			string displayToken = BindingDisplayText.UnwrapOwnershipMarkerForDisplay(token);
+			if (string.IsNullOrEmpty(displayToken))
+				return string.Empty;
+			string formatted = KeyToken.FormatToken(displayToken);
+			return string.IsNullOrEmpty(formatted) ? displayToken : formatted;
+		}
+
+		private static string FormatOriginalJoinedLabelForListView(ComboBinding combo, bool compact)
+		{
+			if (combo == null)
+				return string.Empty;
+			var parts = new List<string>(3);
+			for (int slot = 1; slot <= 3; slot++)
+			{
+				string token = combo.GetSlot(slot);
+				if (string.IsNullOrEmpty(token))
+					continue;
+				string label = FormatOriginalTokenForListView(token);
+				if (!string.IsNullOrEmpty(label))
+					parts.Add(label);
+			}
+			return parts.Count == 0 ? string.Empty : string.Join(compact ? "+" : " + ", parts);
+		}
+
 		/// <summary>
-		/// Same join path as <see cref="BindingDisplayResolver.FormatComboDisplayLabel"/>,
-		/// but Hold prefixes are ListView-specific arrows with half-width spaces.
+		/// Original-key labels without global aliases or slot overrides, for ListView only.
+		/// Hold prefixes remain ListView-specific arrows with half-width spaces.
 		/// </summary>
 		private static string FormatListViewKeyComboDisplay(ComboBinding combo)
 		{
@@ -263,14 +289,14 @@ namespace AdvancedKeybinds.Features.ListView
 			string joined;
 			if (combo.HasAlternateGamePad && combo.FilledSlotCount == 1)
 			{
-				string primaryDisplay = KeyToken.FormatDisplayForToken(combo.Keys[0]);
-				string alternateDisplay = KeyToken.FormatDisplayForToken(combo.AlternateGamePadToken);
+				string primaryDisplay = FormatOriginalTokenForListView(combo.Keys[0]);
+				string alternateDisplay = FormatOriginalTokenForListView(combo.AlternateGamePadToken);
 				joined = AlternateGamePadBindingPolicy.FormatAlternateOverPrimaryDisplay(
 					alternateDisplay,
 					primaryDisplay);
 			}
 			else
-				joined = combo.FormatJoinedLabel(compact: true);
+				joined = FormatOriginalJoinedLabelForListView(combo, compact: true);
 
 			string withHold = BindingDisplayText.ApplyHoldPrefix(
 				joined,
@@ -283,7 +309,7 @@ namespace AdvancedKeybinds.Features.ListView
 			if (!combo.HasAdditionalOr)
 				return withHold;
 
-			string orDisplay = KeyToken.FormatDisplayForToken(combo.AdditionalOrToken);
+			string orDisplay = FormatOriginalTokenForListView(combo.AdditionalOrToken);
 			return KeyboardAdditionalOrPolicy.FormatAndWithAdditionalOrDisplay(withHold, orDisplay);
 		}
 

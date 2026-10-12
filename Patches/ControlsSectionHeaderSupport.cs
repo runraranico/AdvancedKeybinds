@@ -25,8 +25,6 @@ namespace AdvancedKeybinds.Patches
 		private static FieldInfo _labelField;
 		private static FieldInfo _keybindField;
 		private static FieldInfo _headerField;
-		private static string _lastHeaderSampleKey;
-		private static string _lastHeaderSkippedKey;
 
 		internal static void ApplyReflection(Type manageType)
 		{
@@ -48,8 +46,6 @@ namespace AdvancedKeybinds.Patches
 
 		internal static void ClearRuntimeState()
 		{
-			_lastHeaderSampleKey = null;
-			_lastHeaderSkippedKey = null;
 			_collapseKeyField = null;
 			_labelField = null;
 		}
@@ -86,8 +82,11 @@ namespace AdvancedKeybinds.Patches
 				}
 				catch (Exception ex)
 				{
-					AdvancedKeybinds.Instance?.Logger.Debug(
-						"EnsureSectionHeaderSnapPoints: " + ex.GetType().Name + ": " + ex.Message);
+#if AK_DIAGNOSTICS
+					if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+						AdvancedKeybinds.Instance?.Logger.Debug(
+							"EnsureSectionHeaderSnapPoints: " + ex.GetType().Name + ": " + ex.Message);
+#endif
 					GamePadProbeSystem.LogControlSectionLinkFailed(
 						"Controls.Section?.Header",
 						"SetSnapPointFailed:" + ex.GetType().Name);
@@ -378,42 +377,6 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			return true;
-		}
-
-		internal static void LogHeaderSampleIfChanged(
-			string stableId,
-			UIElement el,
-			SnapPoint snap,
-			bool navigable,
-			bool horizontalOnly,
-			bool? expanded)
-		{
-			string key = (stableId ?? "?")
-				+ "|" + (el?.GetType().Name ?? "-")
-				+ "|" + (snap?.Name ?? "-")
-				+ "|" + navigable
-				+ "|" + horizontalOnly
-				+ "|" + (expanded.HasValue ? expanded.Value.ToString() : "?");
-			if (string.Equals(key, _lastHeaderSampleKey, StringComparison.Ordinal))
-				return;
-			_lastHeaderSampleKey = key;
-
-			GamePadProbeSystem.LogControlSectionHeaderSample(
-				stableId,
-				el?.GetType().Name,
-				snap?.Name,
-				navigable,
-				horizontalOnly,
-				expanded);
-		}
-
-		internal static void LogHeaderSkippedIfChanged(string stableId, string reason)
-		{
-			string key = (stableId ?? "?") + "|" + (reason ?? "?");
-			if (string.Equals(key, _lastHeaderSkippedKey, StringComparison.Ordinal))
-				return;
-			_lastHeaderSkippedKey = key;
-			GamePadProbeSystem.LogControlSectionHeaderSkipped(stableId, reason);
 		}
 
 		internal static bool IsSectionHeaderElement(UIElement el)

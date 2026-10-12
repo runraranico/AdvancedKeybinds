@@ -892,6 +892,9 @@ namespace AdvancedKeybinds.Binding
 
 		private static void ForwardLegacyGpMigrationLogs(LegacyGamePadMigrationOrchestrator.Result result)
 		{
+#if AK_DIAGNOSTICS
+			if (!global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+				return;
 			if (result?.Log == null)
 				return;
 			for (int i = 0; i < result.Log.Count; i++)
@@ -899,10 +902,14 @@ namespace AdvancedKeybinds.Binding
 				try { AdvancedKeybinds.Instance?.Logger?.Info(result.Log[i]); }
 				catch { /* ignore */ }
 			}
+#endif
 		}
 
 		private static void ForwardLegacyGpMigrationLogs(IReadOnlyList<string> lines)
 		{
+#if AK_DIAGNOSTICS
+			if (!global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+				return;
 			if (lines == null)
 				return;
 			for (int i = 0; i < lines.Count; i++)
@@ -910,10 +917,14 @@ namespace AdvancedKeybinds.Binding
 				try { AdvancedKeybinds.Instance?.Logger?.Info(lines[i]); }
 				catch { /* ignore */ }
 			}
+#endif
 		}
 
 		private static void LogMigrationLine(string op, string from, string to, string reason)
 		{
+#if AK_DIAGNOSTICS
+			if (!global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+				return;
 			try
 			{
 				string msg = "[LegacyGpMigrate] " + op
@@ -926,6 +937,7 @@ namespace AdvancedKeybinds.Binding
 			{
 				/* ignore */
 			}
+#endif
 		}
 
 		/// <summary>Mod GamePad dual sync only (vanilla GAME/UI use single-mode arrays).</summary>
@@ -1080,12 +1092,25 @@ namespace AdvancedKeybinds.Binding
 					    actionId, combo.Hold, combo.Keys, combo.AdditionalOrToken,
 					    AdditionalOrVanillaOrScratch))
 				{
-					AssignKeyboardPlainKeys(
-						trigger,
-						AdditionalOrVanillaOrScratch,
-						reason ?? "sync-additional-or-vanilla-or-list",
-						syncKind,
-						modes);
+                    var orSyncLease = global::AdvancedKeybinds.Patches.AdditionalOrPersistencePatches.BeginPlainOrSync(
+                        trigger,
+                        AdditionalOrVanillaOrScratch,
+                        syncKind,
+                        modes);
+                    try
+                    {
+                        AssignKeyboardPlainKeys(
+                            trigger,
+                            AdditionalOrVanillaOrScratch,
+                            reason ?? "sync-additional-or-vanilla-or-list",
+                            syncKind,
+                            modes);
+                        global::AdvancedKeybinds.Patches.AdditionalOrPersistencePatches.CompletePlainOrSync(orSyncLease);
+                    }
+                    finally
+                    {
+                        orSyncLease.Dispose();
+                    }
 					return;
 				}
 
@@ -1472,6 +1497,7 @@ namespace AdvancedKeybinds.Binding
 
 		public static void Unload()
 		{
+			global::AdvancedKeybinds.Patches.AdditionalOrPersistencePatches.RestoreOwnedProfiles();
 			// Drop AKAdv markers: write one vanilla-fireable key from each advanced combo (Keyboard +
 			// KeyboardUI), then PlayerInput.Save so input profiles.json no longer holds dead markers.
 			// bindings.json is not rewritten — Combos are only cleared from memory.

@@ -1948,6 +1948,9 @@ namespace AdvancedKeybinds.Patches
 				if (now - sinceMs < 3000)
 					continue;
 
+				if (KeepExpiredGenericScanIfPhysicallyDown(pair.Key))
+					continue;
+
 				stale ??= new List<GenericScanId>();
 				stale.Add(pair.Key);
 			}
@@ -1959,6 +1962,57 @@ namespace AdvancedKeybinds.Patches
 			{
 				_genericScanHeld.Remove(stale[i]);
 				_genericScanDownSinceMs.Remove(stale[i]);
+			}
+		}
+
+		private static bool KeepExpiredGenericScanIfPhysicallyDown(GenericScanId id)
+		{
+			try
+			{
+				if (!OperatingSystem.IsWindows())
+					return false;
+
+				if (!IsGameForegroundCore())
+					return false;
+
+				if (Main.gameMenu)
+					return false;
+
+				if (Main.LocalPlayer == null)
+					return false;
+
+				if (Main.inFancyUI)
+					return false;
+
+				if (Main.ingameOptionsWindow)
+					return false;
+
+				if (Main.gamePaused)
+					return false;
+
+				if (BindingInputEngine.IsRecording)
+					return false;
+
+				if (IsSlotCapturePassthrough)
+					return false;
+
+				if (KeyboardDiagMode.IsActive)
+					return false;
+
+				foreach (KeyValuePair<uint, GenericScanId> measured in _vkMeasuredScan)
+				{
+					if (!measured.Value.Equals(id))
+						continue;
+
+					if (IsPhysicalKeyDown(measured.Key))
+						return true;
+				}
+
+				return false;
+			}
+			catch
+			{
+				return false;
 			}
 		}
 

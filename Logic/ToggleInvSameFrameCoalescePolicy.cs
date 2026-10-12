@@ -28,6 +28,41 @@ namespace AdvancedKeybinds.Core
 			return true;
 		}
 
+		public static bool ShouldInvokeOrigForContext(
+			int gameUpdateCount,
+			int inputTickEpoch,
+			bool isMenu,
+			ref int lastSeenGameUpdate,
+			ref bool alreadyInvokedThisUpdate,
+			ref int lastSeenInputTickEpoch,
+			ref bool alreadyInvokedThisInputTick,
+			ref bool menuInvokedThisInputTick)
+		{
+			if (inputTickEpoch != lastSeenInputTickEpoch)
+			{
+				lastSeenInputTickEpoch = inputTickEpoch;
+				alreadyInvokedThisInputTick = false;
+				menuInvokedThisInputTick = false;
+			}
+
+			if (isMenu)
+			{
+				if (alreadyInvokedThisInputTick)
+					return false;
+				alreadyInvokedThisInputTick = true;
+				menuInvokedThisInputTick = true;
+				return true;
+			}
+
+			if (menuInvokedThisInputTick)
+				return false;
+
+			bool allowed = ShouldInvokeOrig(gameUpdateCount, ref lastSeenGameUpdate, ref alreadyInvokedThisUpdate);
+			if (allowed)
+				alreadyInvokedThisInputTick = true;
+			return allowed;
+		}
+
 		/// <summary>
 		/// LIVE stroke oracle (legacy): ToggleInv count must not exceed Escape rising edges.
 		/// Insufficient alone — flicker can produce edges=20 / toggles=20 and still "pass".

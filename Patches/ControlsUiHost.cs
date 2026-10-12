@@ -61,6 +61,7 @@ namespace AdvancedKeybinds.Patches
 			{
 				if (Main.ManageControlsMenu != null
 					&& Main.inFancyUI
+					&& (Main.gameMenu || ingame == null)
 					&& IsManageControls(Main.ManageControlsMenu))
 				{
 					state = Main.ManageControlsMenu;

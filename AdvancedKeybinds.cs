@@ -38,8 +38,11 @@ namespace AdvancedKeybinds
 			AkDiag.ResetAnnounceState();
 
 			AkPlatform.ResetForReload();
+#if AK_DIAGNOSTICS
 			// Single line per launch: the only way to confirm Deck detection on real hardware.
-			Logger.Info("AK platform: " + AkPlatform.SteamDeckEvidence);
+			if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
+				Logger.Info("AK platform: " + AkPlatform.SteamDeckEvidence);
+#endif
 
 			ComboPanel.ResetStaticState();
 			ModDetours.DisposeAll();
@@ -67,6 +70,7 @@ namespace AdvancedKeybinds
 			// Pref drives session on/off for this load (ON→on, OFF→off). Manual toggles after load are free.
 			CursorConfineHelper.ApplyOnLoadPreference(ClientPrefs.EnableCursorConfineOnLoad);
 			WheelDirectionMigration.RunBeforeStorageLoad();
+			AdditionalOrPersistencePatches.Apply();
 			BindingStorage.Initialize();
 			KeyDisplayAliasStorage.Initialize();
 			OpenKeybindMenuDefaults.ApplyStartupState();
@@ -206,7 +210,14 @@ namespace AdvancedKeybinds
 			WindowsKeySuppressor.Uninstall();
 			FnaGamePadProvider.Reset();
 			BindingInputEngine.Unload();
-			BindingStorage.Unload();
+			try
+			{
+				BindingStorage.Unload();
+			}
+			finally
+			{
+				AdditionalOrPersistencePatches.Dispose();
+			}
 			KeyDisplayAliasStorage.Unload();
 			ClientPrefs.Unload();
 			OpenSettingsMenuHotkey = null;

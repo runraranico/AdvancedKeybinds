@@ -92,8 +92,6 @@ namespace AdvancedKeybinds.Diagnostics
 		public static void LogControlRowFailsafe(string reason, int totalSnap, string action) { }
 		public static void LogControlNavCenterScroll(string target, float oldView, float newView, bool clamped, string clamp) { }
 		public static void LogControlAccordionChildSkipped(string parent, string child, string reason) { }
-		public static void LogControlSectionHeaderSample(string stableId, string elementType, string snapName, bool isNavigable, bool isHorizontalOnly, bool? expanded) { }
-		public static void LogControlSectionHeaderSkipped(string stableId, string reason) { }
 		public static void LogControlPadBHoldBegin(int thresholdMs, string host = null) { }
 		public static void LogControlPadBHoldTrigger(long elapsedMs, string target, int pointId = int.MinValue) { }
 		public static void LogControlPadBHoldEnd(bool triggered, long? elapsedMs) { }

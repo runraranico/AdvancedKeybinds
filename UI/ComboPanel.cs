@@ -3227,6 +3227,9 @@ namespace AdvancedKeybinds.UI
 			if (Main.LocalPlayer == null)
 				return;
 
+			if (Main.LocalPlayer.controlInv)
+				return;
+
 			bool samePress = ControlsInventoryBackPolicy.IsEscapeSamePressActive(
 				_escapeRegisteredThisTick,
 				_escapeConsumedThisTick,

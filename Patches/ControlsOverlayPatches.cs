@@ -250,8 +250,10 @@ namespace AdvancedKeybinds.Patches
 		}
 
 		/// <summary>
-		/// IngameOptions.Close always sets Main.playerInventory = true. When settings were opened via
-		/// our shortcut, restore the pre-open inventory state in the same call so Esc does not flash inventory.
+		/// IngameOptions.Close always sets Main.playerInventory = true. Escape-down leave and AK
+		/// programmatic Settings closes still call SuppressVanillaInventoryOpenAfterSettingsUiClose
+		/// so Esc/transition never flash inventory. Ordinary mouse close (Escape up, no AK close
+		/// context) leaves the native Inventory/release result untouched.
 		/// </summary>
 		private static void HookOptionsClose()
 		{
@@ -264,9 +266,22 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			ModDetours.Apply(close, (orig_FancyClose orig) => {
+				bool keyboardEscapeDown = false;
+				try
+				{
+					keyboardEscapeDown = Microsoft.Xna.Framework.Input.Keyboard.GetState()
+						.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Escape);
+				}
+				catch
+				{
+					keyboardEscapeDown = false;
+				}
+
+				bool akCloseContext = KeybindShortcutSystem.IsSettingsCloseContextActive;
 				bool inventoryOpenBeforeClose = Main.playerInventory;
 				orig();
-				KeybindShortcutSystem.SuppressVanillaInventoryOpenAfterSettingsUiClose(inventoryOpenBeforeClose);
+				if (keyboardEscapeDown || akCloseContext)
+					KeybindShortcutSystem.SuppressVanillaInventoryOpenAfterSettingsUiClose(inventoryOpenBeforeClose);
 				ComboPanel.ArmSettingsEscapeLeaveInventoryGate();
 			});
 		}

@@ -375,13 +375,17 @@ namespace AdvancedKeybinds.Features.ListView
 				|| _resizingBottom;
 			EnsureContentHeightForScroll();
 			bool listCanScroll = BindingListViewWheelPolicy.ListCanScroll(State.MaxScrollUi);
+			// Scrollbar track / thumb-drag: suppress mouse-button key search only.
+			bool suppressMouseProbe = overUiChrome
+				|| _scrollingThumb
+				|| (State.IsMaximized && listCanScroll && BindingListViewLayout.ScrollTrackRect(State).Contains(mouseUi));
 			if (acceptingInput)
 			{
 				// Scrollbar → list scroll owns wheel. No scrollbar → Wheel Up/Down Key Search.
 				bool suppressWheelProbe = BindingListViewWheelPolicy.ShouldSuppressWheelProbe(overUiChrome, listCanScroll);
 				string probe = BindingListKeyProbe.TryGetRisingProbeToken(
 					suppressWheel: suppressWheelProbe,
-					suppressMouseButtons: overUiChrome,
+					suppressMouseButtons: suppressMouseProbe,
 					suppressKeyboard: overUiChrome);
 				if (!string.IsNullOrEmpty(probe))
 				{
