@@ -94,13 +94,10 @@ namespace AdvancedKeybinds.Features.ListView
 			_frozenHotbarSlot = -1;
 			_suppressHotbarWheelThisFrame = false;
 			BindingListViewResizeCursor.Clear();
-			BindingListViewInputOwnership.RunRegressionSelfCheck();
-			BindingListViewWheelPolicy.RunRegressionSelfCheck();
 			BindingListViewItemSlotGuard.Apply();
 			BindingListViewUiHoverGuard.Apply();
 			BindingListViewHoverRequestSuppress.Apply();
 			BindingListViewHoverSoundRequestSuppress.Apply();
-			BindingListViewHitDiag.BeginSession("ModSystem.Load");
 		}
 
 		public override void PostSetupContent()
@@ -210,8 +207,6 @@ namespace AdvancedKeybinds.Features.ListView
 				{
 					if (!wasOpen)
 					{
-						BindingListViewOpenPerfDiag.OnHotkeyOpenDetected();
-						BindingListViewOpenPerfDiag.OnOpenStateTrue();
 					}
 
 					// Always rebuild catalog from current Combos on open (add/change/clear).
@@ -222,8 +217,6 @@ namespace AdvancedKeybinds.Features.ListView
 					_wheelFocusSuspendedByOtherUi = false;
 					BindingListKeyProbe.Reset();
 					CaptureFrozenHotbarSlot();
-					BindingListViewHitDiag.BeginSession("ListViewOpened");
-					BindingListViewHoverLeakDiag.ResetLayerDumpFlag();
 				}
 				else
 				{
@@ -248,8 +241,6 @@ namespace AdvancedKeybinds.Features.ListView
 				_ownsWheelFocus = false;
 				_wheelFocusSuspendedByOtherUi = false;
 				TickTitleOriginLeftGestureWhileClosed(suspendContentForEditUi);
-				// READ-ONLY audit after per-frame capture clear (Close residual check).
-				BindingListViewInputRegressionAudit.Tick(State);
 				return;
 			}
 
@@ -275,17 +266,9 @@ namespace AdvancedKeybinds.Features.ListView
 			_claimFrontCachedThisFrame = claimFront;
 			bool acceptingInputEarly = IsListViewAcceptingInput(mouseUi) && claimFront;
 
-			BindingListViewClickPathDiag.CapturePostUpdateClick(
-				State,
-				mouseUi,
-				overListChrome,
-				foregroundCovers,
-				claimFront,
-				acceptingInputEarly);
 
 			if (suspendContentForEditUi)
 			{
-				BindingListViewHoverLeakDiag.Capture("PostUpdate_EditUiSuspend", State, claimFront, _frontMouseCaptureActive);
 				FinishTitleOriginLeftReleaseAfterClaim(leftHeldAtPostUpdateStart);
 				return;
 			}
@@ -300,7 +283,6 @@ namespace AdvancedKeybinds.Features.ListView
 				// but yields when a true front menu covers AK ALL KEY.
 				if (claimFront)
 					OccupyFrontWindowMouse(blockWheel: true, occupyReason: "PostUpdate_Minimized");
-				BindingListViewHoverLeakDiag.Capture("PostUpdate_Minimized_AfterOccupy", State, claimFront, _frontMouseCaptureActive);
 				FinishTitleOriginLeftReleaseAfterClaim(leftHeldAtPostUpdateStart);
 				return;
 			}
@@ -315,58 +297,21 @@ namespace AdvancedKeybinds.Features.ListView
 
 			if (_cacheDirty || _cachedAll == null)
 			{
-				BindingListViewOpenPerfDiag.OnCatalogBuildStart();
 				_cachedAll = BindingListCatalog.BuildAll();
-				BindingListViewOpenPerfDiag.OnCatalogBuildEnd();
 				_cacheDirty = false;
-				BindingListViewOpenPerfDiag.OnRebuildVisibleStart();
 				RebuildVisible();
-				BindingListViewOpenPerfDiag.OnRebuildVisibleEnd();
-				BindingListCatalogTraceDiag.TraceRebuild(
-					_cachedAll,
-					_deviceRows,
-					_visibleRows,
-					State.DeviceFilter,
-					State.ContentMode,
-					State.FilterProbeToken,
-					State.ModSortEnabled);
 			}
 
 			bool acceptingInput = acceptingInputEarly;
 
-			// TEMP: HitDiag-only wheel snapshots BEFORE ProcessWheel consumes them.
-			int wheelBefore = 0;
-			int wheelUiBefore = 0;
-			if (BindingListViewLiveDiagGate.FileOutputEnabled)
-			{
-				wheelBefore = PlayerInput.ScrollWheelDelta;
-				wheelUiBefore = PlayerInput.ScrollWheelDeltaForUI;
-			}
 
 			// Claim only when AK is the frontmost interactive layer over its chrome.
 			// Inventory under AK → claim. Mod Config / InGameUI over AK → yield.
 			if (claimFront)
 				OccupyFrontWindowMouse(blockWheel: false, occupyReason: "PostUpdate_Maximized");
-			BindingListViewHoverLeakDiag.Capture("PostUpdate_Maximized_AfterOccupy", State, claimFront, _frontMouseCaptureActive);
 
 			ProcessWheelForListView(acceptingInput, claimFront);
 
-			// TEMP investigation: raw vs UI mouse + accepting (verify same-space fix).
-			if (BindingListViewLiveDiagGate.FileOutputEnabled)
-			{
-				BindingListViewHitDiag.CapturePostUpdateInput(
-					State,
-					new Point(Main.mouseX, Main.mouseY),
-					mouseUi,
-					acceptingInput,
-					_suppressHotbarWheelThisFrame,
-					_frozenHotbarSlot,
-					_ownsWheelFocus,
-					_wheelFocusSuspendedByOtherUi,
-					_pointerOverWindow,
-					wheelBefore,
-					wheelUiBefore);
-			}
 
 			// Key / mouse / wheel-as-search probe: apply only while accepting input.
 			bool overUiChrome = IsPointerOverTitleBar(mouseUi)
@@ -402,16 +347,11 @@ namespace AdvancedKeybinds.Features.ListView
 					suppressKeyboard: true);
 			}
 
-			// READ-ONLY audit after claim/swallow for this frame (Open path).
-			BindingListViewInputRegressionAudit.Tick(State);
 			FinishTitleOriginLeftReleaseAfterClaim(leftHeldAtPostUpdateStart);
 		}
 
 		public override void ModifyInterfaceLayers(List<GameInterfaceLayer> layers)
 		{
-			// READ-ONLY Mouse Item LIVE: create session file/header even with zero user input.
-			BindingListViewMouseItemDiag.EnsureSessionStarted();
-
 			// BEFORE Vanilla: Inventory — ItemSlot LeftClick runs in that layer.
 			// PostUpdateInput / Mouse Text mouseInterface is too late once DrawInterface resets it.
 			int inventoryIndex = layers.FindIndex(l => l.Name.Equals("Vanilla: Inventory"));
@@ -437,17 +377,6 @@ namespace AdvancedKeybinds.Features.ListView
 							// Inventory ItemSlot.Draw sets HoverItem even when LeftClick is guarded.
 							// Clear under the same claimFront gate so tooltips do not draw through AK.
 							ClearBackUiHoverIfClaimingFront();
-							if (BindingListViewLiveDiagGate.HoverLeakDiagEnabled)
-							{
-								BindingListViewHoverLeakDiag.Capture(
-									"LAYER_AfterInventory",
-									State,
-									ShouldBlockInventoryItemSlotLeftClick(),
-									_frontMouseCaptureActive);
-							}
-							BindingListViewClickPathDiag.CapturePostInventoryLayer(State);
-							// READ-ONLY Mouse Item hold/draw LIVE (no state mutation).
-							BindingListViewMouseItemDiag.NoteAfterInventory(State);
 							return true;
 						},
 						InterfaceScaleType.UI));
@@ -468,27 +397,10 @@ namespace AdvancedKeybinds.Features.ListView
 						return true;
 					}
 
-					if (BindingListViewLiveDiagGate.HoverLeakDiagEnabled)
-					{
-						BindingListViewHoverLeakDiag.Capture(
-							"LAYER_AK_Draw_ENTER",
-							State,
-							ShouldBlockInventoryItemSlotLeftClick(),
-							_frontMouseCaptureActive);
-					}
 					ClearBackUiHoverIfClaimingFront();
 					UpdateMouseUi();
 					BindingListViewLayout.ClampToScreen(State);
 					BindingListViewRenderer.Draw(Main.spriteBatch, State, State.IsMaximized ? _visibleRows : null);
-					BindingListViewHitDiag.DrawOverlay(Main.spriteBatch);
-					if (BindingListViewLiveDiagGate.HoverLeakDiagEnabled)
-					{
-						BindingListViewHoverLeakDiag.Capture(
-							"LAYER_AK_Draw_AFTER_DRAW",
-							State,
-							ShouldBlockInventoryItemSlotLeftClick(),
-							_frontMouseCaptureActive);
-					}
 					return true;
 				},
 				InterfaceScaleType.UI));
@@ -513,37 +425,6 @@ namespace AdvancedKeybinds.Features.ListView
 				},
 				InterfaceScaleType.UI));
 
-			// TEMP A/B TEST (2026-09-20): disable ONLY the Vanilla Mouse Item / NPC Head wrap.
-			// Purpose: determine if AK layer replacement causes cursor Mouse Item not to draw
-			// despite Main.mouseItem holding the item (CASE A hold confirmed in LIVE).
-			// Vanilla layer must remain untouched in the interface list.
-			// Do NOT promote this disable to Baseline. Re-enable or replace with a real fix after RESULT A/B.
-			// Other layers (MouseText wrap, occupy, AfterInventory diag, AK draw) stay as-is.
-			const bool TemporarilyDisableMouseItemLayerWrapForAbTest = true;
-			if (!TemporarilyDisableMouseItemLayerWrapForAbTest)
-			{
-				// READ-ONLY wrap: log mouseItem immediately before/after Vanilla Mouse Item draw.
-				// Does not alter draw semantics — same pattern as Mouse Text wrap (observe only).
-				int mouseItemIndex = layers.FindIndex(l => l.Name.Equals("Vanilla: Mouse Item / NPC Head"));
-				if (mouseItemIndex >= 0)
-				{
-					GameInterfaceLayer vanillaMouseItem = layers[mouseItemIndex];
-					layers[mouseItemIndex] = new LegacyGameInterfaceLayer(
-						"Vanilla: Mouse Item / NPC Head",
-						delegate
-						{
-							bool active = vanillaMouseItem.Active;
-							BindingListViewMouseItemDiag.CapturePreMouseItemLayer(State, active);
-							BindingListViewMouseItemDiag.CaptureWrapBeforeDraw(State, active);
-							bool drew = vanillaMouseItem.Draw();
-							BindingListViewMouseItemDiag.CapturePostMouseItemLayer(State, active, drew);
-							return drew;
-						},
-						InterfaceScaleType.UI);
-				}
-			}
-
-			BindingListViewHoverLeakDiag.DumpInterfaceLayerOrderOnce(layers);
 		}
 
 		/// <summary>
@@ -553,12 +434,8 @@ namespace AdvancedKeybinds.Features.ListView
 		public override void PostDrawInterface(SpriteBatch spriteBatch)
 		{
 			bool claim = ShouldBlockInventoryItemSlotLeftClick();
-			if (BindingListViewLiveDiagGate.HoverLeakDiagEnabled)
-				BindingListViewHoverLeakDiag.Capture("PostDrawInterface_BEFORE_CLEAR", State, claim, _frontMouseCaptureActive);
 			if (claim)
 				ClearBackUiHoverIfClaimingFront();
-			if (BindingListViewLiveDiagGate.HoverLeakDiagEnabled)
-				BindingListViewHoverLeakDiag.Capture("PostDrawInterface_AFTER_CLEAR", State, claim, _frontMouseCaptureActive);
 		}
 
 		/// <summary>
@@ -577,113 +454,19 @@ namespace AdvancedKeybinds.Features.ListView
 			if (listOpen)
 				_mouseUiCachedThisFrame = mouseUi;
 
-			bool clickPath = BindingListViewLiveDiagGate.ClickPathDiagEnabled
-				&& BindingListViewLiveDiagGate.FileOutputEnabled;
-			Rectangle win = Rectangle.Empty;
-			Rectangle body = Rectangle.Empty;
-			bool overListChrome = false;
-			bool foregroundCovers = false;
-			bool mIfaceBefore = false;
-			bool blockBefore = false;
-			if (clickPath)
-			{
-				win = listOpen ? BindingListViewLayout.WindowRect(State) : Rectangle.Empty;
-				body = listOpen ? BindingListViewLayout.BodyRect(State) : Rectangle.Empty;
-				overListChrome = listOpen && IsPointerOverListInteractive(mouseUi);
-				foregroundCovers = listOpen && ForegroundMenuCoversListView();
-				mIfaceBefore = ReadPlayerMouseInterface();
-				blockBefore = Main.blockMouse;
-				BindingListViewClickPathDiag.TraceTryOccupy(
-					"ENTER",
-					State,
-					mouseUi,
-					win,
-					body,
-					listOpen,
-					overListChrome,
-					foregroundCovers,
-					claimFront,
-					calledOccupy: false,
-					mIfaceBefore,
-					blockBefore,
-					mIfaceBefore,
-					blockBefore);
-			}
 
 			if (!listOpen && !claimFront)
 			{
-				if (clickPath)
-				{
-					BindingListViewClickPathDiag.TraceTryOccupy(
-						"SKIP_LIST_CLOSED",
-						State,
-						mouseUi,
-						win,
-						body,
-						listOpen,
-						overListChrome,
-						foregroundCovers,
-						claimFront,
-						calledOccupy: false,
-						mIfaceBefore,
-						blockBefore,
-						mIfaceBefore,
-						blockBefore);
-				}
 				return;
 			}
 
 			if (!claimFront)
 			{
-				if (clickPath)
-				{
-					BindingListViewClickPathDiag.TraceTryOccupy(
-						"SKIP_NO_CLAIM",
-						State,
-						mouseUi,
-						win,
-						body,
-						listOpen,
-						overListChrome,
-						foregroundCovers,
-						claimFront,
-						calledOccupy: false,
-						mIfaceBefore,
-						blockBefore,
-						mIfaceBefore,
-						blockBefore);
-				}
 				return;
 			}
 
 			OccupyFrontWindowMouse(blockWheel: false, occupyReason: listOpen ? "PreInventory" : "PreInventory_TitleOriginClosedTail");
 
-			if (clickPath)
-			{
-				BindingListViewClickPathDiag.TraceTryOccupy(
-					"EXIT_AFTER_OCCUPY",
-					State,
-					mouseUi,
-					win,
-					body,
-					listOpen,
-					overListChrome,
-					foregroundCovers,
-					claimFront,
-					calledOccupy: true,
-					mIfaceBefore,
-					blockBefore,
-					ReadPlayerMouseInterface(),
-					Main.blockMouse);
-			}
-		}
-
-		private static bool ReadPlayerMouseInterface()
-		{
-			if (Main.myPlayer < 0 || Main.myPlayer >= Main.player.Length)
-				return false;
-			Player player = Main.LocalPlayer;
-			return player != null && player.active && player.mouseInterface;
 		}
 
 		private static BindingListDeviceFilter DetectOpenDeviceFilter()
@@ -818,32 +601,10 @@ namespace AdvancedKeybinds.Features.ListView
 		/// </summary>
 		private static void OccupyFrontWindowMouse(bool blockWheel, string occupyReason = null)
 		{
-			bool clickPath = occupyReason != null
-				&& BindingListViewLiveDiagGate.ClickPathDiagEnabled
-				&& BindingListViewLiveDiagGate.FileOutputEnabled;
-			bool mIfaceBefore = false;
-			bool blockBefore = false;
-			if (clickPath)
-			{
-				mIfaceBefore = ReadPlayerMouseInterface();
-				blockBefore = Main.blockMouse;
-				BindingListViewClickPathDiag.TraceOccupyFront("ENTER", occupyReason, blockWheel, mIfaceBefore, blockBefore, mIfaceBefore, blockBefore);
-			}
 
 			EnsureFrontWindowMouseCapture();
 			if (!blockWheel)
 			{
-				if (clickPath)
-				{
-					BindingListViewClickPathDiag.TraceOccupyFront(
-						"EXIT_CLAIM_MOUSE_ONLY",
-						occupyReason,
-						blockWheel,
-						mIfaceBefore,
-						blockBefore,
-						ReadPlayerMouseInterface(),
-						Main.blockMouse);
-				}
 
 				return;
 			}
@@ -854,17 +615,6 @@ namespace AdvancedKeybinds.Features.ListView
 				MarkListWheelConsumedForHotbar();
 			ConsumeWheelDeltas();
 
-			if (clickPath)
-			{
-				BindingListViewClickPathDiag.TraceOccupyFront(
-					"EXIT_CLAIM_MOUSE_AND_WHEEL",
-					occupyReason,
-					blockWheel,
-					mIfaceBefore,
-					blockBefore,
-					ReadPlayerMouseInterface(),
-					Main.blockMouse);
-			}
 		}
 
 		/// <summary>
@@ -1039,8 +789,6 @@ namespace AdvancedKeybinds.Features.ListView
 				inGameUiHasState);
 		}
 
-		/// <summary>TEMP READ-ONLY for input regression audit. Not a product API.</summary>
-		internal static bool FrontMouseCaptureActiveForAudit => _frontMouseCaptureActive;
 
 		/// <summary>
 		/// PreInventory / ItemSlot / UpdateUI gate: per-frame claim cache only (incl. title-origin
@@ -1392,16 +1140,6 @@ namespace AdvancedKeybinds.Features.ListView
 					_titleOriginLeftOwned);
 			bool acceptingInput = IsListViewAcceptingInput(mp) && claimFront;
 
-			// TEMP investigation: HitDiag-only wheel / raw Point snapshots BEFORE ProcessWheel.
-			int wheelBeforeUi = 0;
-			int wheelUiBeforeUi = 0;
-			Point rawMainPoint = Point.Zero;
-			if (BindingListViewLiveDiagGate.FileOutputEnabled)
-			{
-				wheelBeforeUi = PlayerInput.ScrollWheelDelta;
-				wheelUiBeforeUi = PlayerInput.ScrollWheelDeltaForUI;
-				rawMainPoint = new Point(Main.mouseX, Main.mouseY);
-			}
 
 			// UI layer: re-assert front ownership (mouseInterface + swallow) for the whole hover.
 			if (claimFront)
@@ -1409,21 +1147,6 @@ namespace AdvancedKeybinds.Features.ListView
 
 			ProcessWheelForListView(acceptingInput, claimFront);
 
-			if (BindingListViewLiveDiagGate.FileOutputEnabled)
-			{
-				BindingListViewHitDiag.CaptureUiLayer(
-					State,
-					rawMainPoint,
-					mouseUi,
-					acceptingInput,
-					_suppressHotbarWheelThisFrame,
-					_frozenHotbarSlot,
-					_ownsWheelFocus,
-					_wheelFocusSuspendedByOtherUi,
-					_pointerOverWindow,
-					wheelBeforeUi,
-					wheelUiBeforeUi);
-			}
 
 			if (leftEdge)
 			{

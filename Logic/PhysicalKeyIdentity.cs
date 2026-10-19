@@ -237,9 +237,6 @@ namespace AdvancedKeybinds.Core
 
 			if (string.IsNullOrWhiteSpace(token))
 			{
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(token, "-", branch, false, null);
-#endif
 				return false;
 			}
 
@@ -247,9 +244,6 @@ namespace AdvancedKeybinds.Core
 			if (StableKeyToken.IsDisplayAlias(input))
 			{
 				branch = "fail:display-alias";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, "-", branch, false, null);
-#endif
 				return false;
 			}
 
@@ -261,9 +255,6 @@ namespace AdvancedKeybinds.Core
 			{
 				physicalId = FormatMouse(mouseButton);
 				branch = "special:mouse-button";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
@@ -271,9 +262,6 @@ namespace AdvancedKeybinds.Core
 			{
 				physicalId = FormatWheel(up: true);
 				branch = "special:mouse-wheel-up";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
@@ -281,9 +269,6 @@ namespace AdvancedKeybinds.Core
 			{
 				physicalId = FormatWheel(up: false);
 				branch = "special:mouse-wheel-down";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
@@ -291,9 +276,6 @@ namespace AdvancedKeybinds.Core
 			{
 				physicalId = FormatHorizontalWheel(right: false);
 				branch = "special:mouse-wheel-left";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
@@ -301,9 +283,6 @@ namespace AdvancedKeybinds.Core
 			{
 				physicalId = FormatHorizontalWheel(right: true);
 				branch = "special:mouse-wheel-right";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
@@ -313,9 +292,6 @@ namespace AdvancedKeybinds.Core
 				e1 = false;
 				physicalId = Format(scan, e0, e1);
 				branch = "ScanToken";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
@@ -323,16 +299,10 @@ namespace AdvancedKeybinds.Core
 			{
 				if (TryResolveFromVirtualKeyDetailed(vk, canonical, out physicalId, out branch, out scan, out e0, out e1, out keysName))
 				{
-#if AK_DIAGNOSTICS
-					PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 					return true;
 				}
 
 				branch = "fail:vk-unresolved";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, false, null);
-#endif
 				return false;
 			}
 
@@ -342,9 +312,6 @@ namespace AdvancedKeybinds.Core
 				physicalId = Format(scan, false, false);
 				keysName = StableKeyToken.HankakuZenkakuToken;
 				branch = "special:HankakuZenkaku";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
@@ -354,9 +321,6 @@ namespace AdvancedKeybinds.Core
 				physicalId = Format(scan, false, false);
 				keysName = StableKeyToken.ScrollLockToken;
 				branch = "special:ScrollLock";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
@@ -370,17 +334,11 @@ namespace AdvancedKeybinds.Core
 					e1 = fbKnown.E1;
 					physicalId = Format(scan, e0, e1);
 					branch = "KeysName+UsSet1Fallback";
-#if AK_DIAGNOSTICS
-					PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 					return true;
 				}
 
 				if (TryResolveFromVirtualKeyDetailed(vk, canonical, out physicalId, out branch, out scan, out e0, out e1, out keysName))
 				{
-#if AK_DIAGNOSTICS
-					PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 					return true;
 				}
 			}
@@ -393,16 +351,10 @@ namespace AdvancedKeybinds.Core
 				e1 = fallback.E1;
 				physicalId = Format(scan, e0, e1);
 				branch = "UsSet1Fallback-only";
-#if AK_DIAGNOSTICS
-				PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, true, physicalId);
-#endif
 				return true;
 			}
 
 			branch = "fail:unresolved";
-#if AK_DIAGNOSTICS
-			PhysicalKeyDupDiag.LogResolveTrace(input, canonical, branch, false, null);
-#endif
 			return false;
 		}
 

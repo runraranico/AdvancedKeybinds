@@ -1,6 +1,5 @@
 using AdvancedKeybinds.Binding;
 using AdvancedKeybinds.Core;
-using AdvancedKeybinds.Diagnostics;
 using AdvancedKeybinds.UI;
 using Terraria;
 using Terraria.GameInput;
@@ -14,13 +13,6 @@ namespace AdvancedKeybinds.Patches
 	/// </summary>
 	internal static class FixedGamepadUiConfirmApplicator
 	{
-		internal static void ClearRuntimeState()
-		{
-#if AK_DIAGNOSTICS
-			FixedGamepadUiConfirmDiagSystem.Reset();
-#endif
-		}
-
 		internal static void ApplyAfterVanillaInput()
 		{
 			bool subsystem = FnaGamePadProvider.IsSubsystemActive;
@@ -78,11 +70,6 @@ namespace AdvancedKeybinds.Patches
 				padSession, menuOrUiCancel, subsystem, akOwns,
 				applyCancelEdge, confirmJp && cancelJp);
 
-#if AK_DIAGNOSTICS
-			bool mlBefore = TriggerOn(PlayerInput.Triggers?.JustPressed, "MouseLeft");
-			bool mrBefore = TriggerOn(PlayerInput.Triggers?.JustPressed, "MouseRight");
-			bool invBefore = TriggerOn(PlayerInput.Triggers?.JustPressed, "Inventory");
-#endif
 
 			if (injectConfirm)
 			{
@@ -106,70 +93,11 @@ namespace AdvancedKeybinds.Patches
 				SetTrigger(PlayerInput.Triggers?.Current, FixedGamepadUiConfirmPolicy.VanillaUiCancelTriggerAlternate, true);
 				Main.mouseRight = true;
 				Main.mouseRightRelease = true;
-#if AK_DIAGNOSTICS
-				KeybindEscapeDiagSystem.NoteCancelConsume(
-					"FixedGamepadUiConfirmApplicator.injectCancel",
-					"None",
-					consumed: false);
-#endif
 			}
 			else if (cancelJp)
 			{
-#if AK_DIAGNOSTICS
-				string deny = FixedGamepadUiConfirmPolicy.ClassifyInjectDenyReason(
-					padSession, menuOrUi, subsystem, akOwns, closeInputConsumeGateBlocking: false,
-					applyConfirmEdge, applyCancelEdge, wantConfirm: false);
-				KeybindEscapeDiagSystem.NoteCancelConsume(
-					"FixedGamepadUiConfirmApplicator",
-					deny ?? (akOwns ? "AkOwnsModal" : "Denied"),
-					consumed: akOwns);
-#endif
 			}
 
-#if AK_DIAGNOSTICS
-			if (confirmJp || cancelJp || injectConfirm || injectCancel)
-			{
-				string denyConfirm = injectConfirm
-					? null
-					: FixedGamepadUiConfirmPolicy.ClassifyInjectDenyReason(
-						padSession, menuOrUi, subsystem, akOwns, closeGate,
-						applyConfirmEdge, applyCancelEdge, wantConfirm: true);
-				string denyCancel = injectCancel
-					? null
-					: FixedGamepadUiConfirmPolicy.ClassifyInjectDenyReason(
-						padSession, menuOrUiCancel, subsystem, akOwns, closeInputConsumeGateBlocking: false,
-						applyConfirmEdge, applyCancelEdge, wantConfirm: false);
-
-				FixedGamepadUiConfirmDiagSystem.ObserveDecision(
-					gameMenu: Main.gameMenu,
-					modeName: PlayerInput.CurrentInputMode.ToString(),
-					usingPad: usingPad ? 1 : 0,
-					usingPadUi: usingPadUi ? 1 : 0,
-					padAJp: confirmJp ? 1 : 0,
-					padBJp: cancelJp ? 1 : 0,
-					fixedConfirm: injectConfirm ? 1 : 0,
-					fixedCancel: injectCancel ? 1 : 0,
-					denyConfirm: denyConfirm,
-					denyCancel: denyCancel,
-					mlBefore: mlBefore ? 1 : 0,
-					mlAfter: TriggerOn(PlayerInput.Triggers?.JustPressed, "MouseLeft") ? 1 : 0,
-					mrBefore: mrBefore ? 1 : 0,
-					mrAfter: TriggerOn(PlayerInput.Triggers?.JustPressed, "MouseRight") ? 1 : 0,
-					invBefore: invBefore ? 1 : 0,
-					invAfter: TriggerOn(PlayerInput.Triggers?.JustPressed, "Inventory") ? 1 : 0,
-					akOwns: akOwns ? 1 : 0,
-					closeGate: closeGate ? 1 : 0,
-					menuOrUi: menuOrUi ? 1 : 0,
-					padSession: padSession ? 1 : 0);
-			}
-#endif
-		}
-
-		private static bool TriggerOn(TriggersSet set, string name)
-		{
-			if (set?.KeyStatus == null || string.IsNullOrEmpty(name))
-				return false;
-			return set.KeyStatus.TryGetValue(name, out bool on) && on;
 		}
 
 		private static void SetTrigger(TriggersSet set, string name, bool value)

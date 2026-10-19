@@ -131,7 +131,7 @@ namespace AdvancedKeybinds.Features.DoubleTap
 
 		/// <summary>
 		/// UI-only primary-key forbid flag. Pure / non-mutating.
-		/// CapsLock / Win / Enter / NumLock / ScrollLock: all contexts. Kana-family: japaneseContext only.
+		/// CapsLock / Enter / NumLock / ScrollLock: all contexts. Kana-family: japaneseContext only.
 		/// Normal SC 0x45/0x46 = NumLock/ScrollLock; extended SC 0x46 (Pause candidate) is not rejected.
 		/// </summary>
 		public static bool IsForbiddenPrimaryForUi(ComboBinding working, bool japaneseContext)
@@ -144,8 +144,6 @@ namespace AdvancedKeybinds.Features.DoubleTap
 			string name = PhysicalKeyToken.StripKeyAliasPrefix(token);
 
 			if (NameEquals(name, "CapsLock")
-				|| NameEquals(name, "LeftWindows")
-				|| NameEquals(name, "RightWindows")
 				|| NameEquals(name, "Enter")
 				|| NameEquals(name, "NumLock")
 				|| NameEquals(name, "ScrollLock"))
@@ -153,7 +151,7 @@ namespace AdvancedKeybinds.Features.DoubleTap
 
 			if (PhysicalKeyToken.TryParseVk(token, out uint vk))
 			{
-				if (vk == 0x14u || vk == 0x5Bu || vk == 0x5Cu || vk == 0x0Du
+				if (vk == 0x14u || vk == 0x0Du
 					|| vk == 0x90u || vk == 0x91u)
 					return true;
 				if (japaneseContext && (vk == 0x15u || vk == 0xF2u))
@@ -163,10 +161,6 @@ namespace AdvancedKeybinds.Features.DoubleTap
 			if (PhysicalKeyToken.TryParseScan(token, out ushort scan, out bool extended))
 			{
 				if (scan == 0x3A && !extended)
-					return true;
-				if (scan == 0x5B && extended)
-					return true;
-				if (scan == 0x5C && extended)
 					return true;
 				if (scan == 0x1C)
 					return true;

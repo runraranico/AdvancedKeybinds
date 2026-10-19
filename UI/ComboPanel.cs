@@ -543,16 +543,7 @@ namespace AdvancedKeybinds.UI
 			SlotCapture.Cancel();
 			_awaitingSlotKey = false;
 			_awaitingKeyInfoPick = false;
-			#if AK_DIAGNOSTICS
-			ComboPanelRegistrationWaitDiag.ForceLeave("Open", "PanelOpenedReset", _actionId);
-			#endif
 
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage(
-				"2_before_ak_read_for_panel",
-				_storageKey,
-				"ComboPanel.Open mode=" + editInputMode);
-#endif
 
 			bool hasAkRecord = BindingStorage.HasRecord(_storageKey);
 			ComboBinding stored = BindingStorage.Get(_storageKey);
@@ -657,14 +648,6 @@ namespace AdvancedKeybinds.UI
 				_dirty = stored != null && !ComboBinding.ContentEquals(stored, _working);
 			}
 
-#if AK_DIAGNOSTICS
-			// IdleEsc first: must not be skipped if ControlsGameUiSeparationTrace throws.
-			ComboPanelIdleEscPathDiag.NotePanelOpened("action=" + (_actionId ?? "-"));
-			ControlsGameUiSeparationTrace.LogStage(
-				"3_before_panel_display",
-				_storageKey,
-				"working=" + FormatWorkingComboForDiag());
-#endif
 
 			_openSource = openSource != ComboPanelOpenSource.None
 				? openSource
@@ -1029,19 +1012,11 @@ namespace AdvancedKeybinds.UI
 			if (!IsOpen)
 				return;
 
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.NoteStack(
-				"ComboPanel.Close",
-				"save=" + save + " userInitiated=" + userInitiated);
-#endif
 
 			// Hard stop: the Escape-registration tick must never become Image2.
 			// (Do not use _escapeConsumedThisTick here — key-up-gate suppress sets it every tick.)
 			if (_escapeRegisteredThisTick)
 			{
-#if AK_DIAGNOSTICS
-				ComboPanelEscPathDiag.Note("Close.blockedDuringEscapeRegisteredTick");
-#endif
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel close blocked (escape registered this tick).");
 				LogPanelCloseAttemptIfPad("ComboPanel.Close.escapeRegisteredTick", blocked: true);
 				return;
@@ -1169,9 +1144,6 @@ namespace AdvancedKeybinds.UI
 			_hasLastGoodMouseUi = false;
 			ClearUiReuseSuppress();
 			ClearGamePadParentUiBlock();
-			#if AK_DIAGNOSTICS
-			ComboPanelRegistrationWaitDiag.ForceLeave("Close", "PanelClosed", closedActionId);
-			#endif
 			// Keep _padBackCloseGate* — Pad:B panel-back must block FancyUI.Close until RELEASE.
 			ClearPhysicalHoverLock();
 			ComboPanelGamePadNavigation.Reset();
@@ -1215,10 +1187,6 @@ namespace AdvancedKeybinds.UI
 			// Do not RememberPanelMouseUiIfValid here: PlayerInput/UI may already have moved
 			// Main.mouse via WASD/arrow navigation on the same registration key.
 			SyncMouseEdgeTrackersFromHardware();
-#if AK_DIAGNOSTICS
-			DiagObserveRegistrationWait("FinishKeyCapture", "CaptureAccepted");
-			ComboPanelEscPathDiag.Note("FinishKeyCapture panelOpen=" + IsOpen);
-#endif
 		}
 
 		/// <summary>
@@ -1235,99 +1203,8 @@ namespace AdvancedKeybinds.UI
 			ClearUiReuseSuppress();
 			ClearGamePadParentUiBlock();
 			SyncMouseEdgeTrackersFromHardware();
-#if AK_DIAGNOSTICS
-			DiagObserveRegistrationWait("CancelKeyCapture", leaveReason);
-			ComboPanelEscPathDiag.Note("CancelKeyCapture");
-#endif
 		}
 
-#if AK_DIAGNOSTICS
-		private static void DiagObserveRegistrationWait(string caller, string reason)
-		{
-			try
-			{
-				bool wait = _awaitingSlotKey || SlotCapture.IsCapturing;
-				ComboPanelRegistrationWaitDiag.ObserveRegistrationWait(
-					wait,
-					caller,
-					reason,
-					_actionId,
-					slot: _capturingSlot,
-					capturingSlot: _capturingSlot,
-					awaitingSlotKey: _awaitingSlotKey,
-					slotCaptureIsCapturing: SlotCapture.IsCapturing,
-					capturePhase: SlotCapture.DiagCapturePhase,
-					acceptedToken: SlotCapture.DiagAcceptedToken,
-					blockedAtBegin: SlotCapture.DiagBlockedAtBegin);
-			}
-			catch
-			{
-				/* diagnostics must never stop the panel */
-			}
-		}
-
-		private static void DiagNoteHoldAttemptDuringRegistrationWait(
-			bool leftJustPressed,
-			Point mouse)
-		{
-			try
-			{
-				if (!(_awaitingSlotKey || SlotCapture.IsCapturing))
-					return;
-
-				bool padAttempt = ComboPanelGamePadNavigation.IsPadNavVisible
-					&& (ComboPanelGamePadNavigation.Focus == ComboPanelPadFocus.HoldWhileHeld
-						|| ComboPanelGamePadNavigation.Focus == ComboPanelPadFocus.HoldOnRelease)
-					&& FnaGamePadProvider.WasJustPressed(GamePadToken.A);
-
-				string target = null;
-				string source = null;
-				if (padAttempt)
-				{
-					source = "gamepad";
-					target = ComboPanelGamePadNavigation.Focus == ComboPanelPadFocus.HoldWhileHeld
-						? "HoldWhileHeld"
-						: "HoldOnRelease";
-				}
-				else if (leftJustPressed)
-				{
-					if (_holdWhileHeldBox.Contains(mouse))
-					{
-						source = "mouse";
-						target = "HoldWhileHeld";
-					}
-					else if (_holdOnReleaseBox.Contains(mouse))
-					{
-						source = "mouse";
-						target = "HoldOnRelease";
-					}
-				}
-
-				if (source == null)
-					return;
-
-				ComboPanelRegistrationWaitDiag.NoteHoldToggleRequest(
-					source,
-					target,
-					requestedValue: "toggle",
-					accepted: false,
-					deniedReason: "RegistrationWaitActive",
-					registrationWait: true,
-					capturingSlot: _capturingSlot,
-					awaitingSlotKey: _awaitingSlotKey,
-					slotCaptureIsCapturing: SlotCapture.IsCapturing,
-					capturePhase: SlotCapture.DiagCapturePhase,
-					focus: ComboPanelGamePadNavigation.Focus.ToString(),
-					padNavVisible: ComboPanelGamePadNavigation.IsPadNavVisible,
-					captureGateRaw: ComboPanelGamePadNavigation.CaptureReleaseGateActiveRaw,
-					confirmButtonHeld: FnaGamePadProvider.IsDown(GamePadToken.A));
-			}
-			catch
-			{
-				/* ignore */
-			}
-		}
-#endif
 
 		/// <summary>
 		/// B. CloseComboPanel — ComboPanel を閉じ、親キーバインド画面へ戻る（通常時 ESC）。
@@ -1335,15 +1212,8 @@ namespace AdvancedKeybinds.UI
 		/// </summary>
 		private static void CloseComboPanel(bool save, bool userInitiated)
 		{
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.NoteStack("CloseComboPanel", "save=" + save);
-			ComboPanelIdleEscPathDiag.Note("CloseComboPanel.enter", "save=" + save + " user=" + userInitiated);
-#endif
 			// Escape dismiss is independent of GamePad parent-nav suppress.
 			Close(save, userInitiated, allowDuringPadSuppress: true);
-#if AK_DIAGNOSTICS
-			ComboPanelIdleEscPathDiag.Note("CloseComboPanel.exit", "open=" + (IsOpen ? 1 : 0));
-#endif
 		}
 
 		/// <summary>Reset the right-side key-info rename UI to empty (does not clear combo slots).</summary>
@@ -2229,9 +2099,6 @@ namespace AdvancedKeybinds.UI
 				_escDismissGraceUntilMs = 0;
 				if (!IsOpen && !keyboardEscapeDown)
 					WindowsKeySuppressor.ClearShellBlockedEscapeDown();
-#if AK_DIAGNOSTICS
-				ComboPanelEscPathDiag.Note("DismissKeyUpGate.cleared");
-#endif
 			}
 
 			if (_escDismissProtectArmed)
@@ -2287,10 +2154,6 @@ namespace AdvancedKeybinds.UI
 				}
 			}
 
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.Note("BeginInputTick");
-			ComboPanelIdleEscPathDiag.Note("BeginInputTickEscapeCaptureState.after");
-#endif
 		}
 
 		/// <summary>Marks this input tick as Escape-registration-only (survives clearing purple wait).</summary>
@@ -2300,9 +2163,6 @@ namespace AdvancedKeybinds.UI
 			_escapeConsumedThisTick = true;
 			_escapeCaptureInputTick = _escapeInputTickSerial;
 			_escapeDismissBlockedUntilKeyUp = true;
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.Note("MarkEscapeCaptureTick", reason);
-#endif
 		}
 
 		private static bool IsEscapeCaptureTickActive()
@@ -2326,16 +2186,9 @@ namespace AdvancedKeybinds.UI
 		{
 			if (!IsOpen)
 			{
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("HandleEscape.return", "reason=notOpen");
-#endif
 				return;
 			}
 
-#if AK_DIAGNOSTICS
-			ComboPanelIdleEscPathDiag.Note("HandleEscape.enter");
-			ComboPanelEscPathDiag.Note("HandleEscape.enter");
-#endif
 
 			bool keyboardEscapeDown = IsKeyboardEscapeDownOnly();
 			bool mainEscapeJustPressed =
@@ -2362,9 +2215,6 @@ namespace AdvancedKeybinds.UI
 				{
 					SuppressEscapeDerivedTriggers("HandleEscape.keyInfoNameEdit.gate");
 				}
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("HandleEscape.return", "reason=keyInfoNameEditing escJP=" + (escapeJustPressed ? 1 : 0));
-#endif
 				return;
 			}
 
@@ -2380,10 +2230,6 @@ namespace AdvancedKeybinds.UI
 					SlotCapture.DiscardPendingEdgesWhileInactive();
 
 				SuppressEscapeDerivedTriggers("HandleEscape.captureTick");
-#if AK_DIAGNOSTICS
-				ComboPanelEscPathDiag.Note("HandleEscape.captureTickHold open=" + IsOpen);
-				ComboPanelIdleEscPathDiag.Note("HandleEscape.return", "reason=captureTick");
-#endif
 				return;
 			}
 
@@ -2392,18 +2238,11 @@ namespace AdvancedKeybinds.UI
 			{
 				if (IsPhysicalEscapeDown())
 					SuppressEscapeDerivedTriggers("HandleEscape.keyUpGate");
-#if AK_DIAGNOSTICS
-				ComboPanelEscPathDiag.Note("HandleEscape.keyUpGate open=" + IsOpen);
-				ComboPanelIdleEscPathDiag.Note("HandleEscape.return", "reason=keyUpGate physDown=" + (IsPhysicalEscapeDown() ? 1 : 0));
-#endif
 				return;
 			}
 
 			if (!escapeJustPressed)
 			{
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("HandleEscape.return", "reason=noEscapeJustPressed");
-#endif
 				return;
 			}
 
@@ -2412,15 +2251,8 @@ namespace AdvancedKeybinds.UI
 				_escapeRegisteredThisTick,
 				_escapeConsumedThisTick,
 				_escapeDismissBlockedUntilKeyUp);
-#if AK_DIAGNOSTICS
-			ComboPanelIdleEscPathDiag.Note("HandleEscape.shouldDismiss", "result=" + (shouldDismiss ? 1 : 0));
-#endif
 			if (!shouldDismiss)
 			{
-#if AK_DIAGNOSTICS
-				ComboPanelEscPathDiag.Note("HandleEscape.dismissBlockedByPolicy");
-				ComboPanelIdleEscPathDiag.Note("HandleEscape.return", "reason=dismissBlockedByPolicy");
-#endif
 				return;
 			}
 
@@ -2429,33 +2261,20 @@ namespace AdvancedKeybinds.UI
 				ClearResetDisplaysConfirm();
 				SoundEngine.PlaySound(SoundID.MenuClose);
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel reset-displays confirm cancelled (Escape).");
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("HandleEscape.branch", "resetDisplaysConfirmCancelled");
-#endif
 			}
 			else if (_holdTyping)
 			{
 				_holdTyping = false;
 				_holdBuffer = _working.EffectiveHoldMs.ToString();
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("HandleEscape.branch", "holdTypingCancelled");
-#endif
 			}
 			else
 			{
 				// Idle ComboPanel ESC → Image2 (parent). Never used from Escape key registration.
-#if AK_DIAGNOSTICS
-				ComboPanelEscPathDiag.NoteStack("HandleEscape.CloseComboPanel");
-				ComboPanelIdleEscPathDiag.Note("CloseComboPanel.before", "from=HandleEscape");
-#endif
 				if (AkDiag.Enabled) AkDiag.Log("ComboPanel Escape dismiss (idle).");
 				// Snapshot before Close() clears the pending flag (mouse-close path also clears it).
 				bool pendingAfterNameEdit = _pendingKeyUpOnlyEscDismissAfterNameEdit;
 				_pendingKeyUpOnlyEscDismissAfterNameEdit = false;
 				CloseComboPanel(save: true, userInitiated: true);
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("CloseComboPanel.after", "open=" + (IsOpen ? 1 : 0));
-#endif
 				BeginEscDismissGrace(
 					ComboPanelEscapeRegistrationPolicy.ShouldArmTimedEscDismissGraceAfterIdleClose(
 						pendingAfterNameEdit));
@@ -2464,9 +2283,6 @@ namespace AdvancedKeybinds.UI
 			}
 
 			ConsumeEscape();
-#if AK_DIAGNOSTICS
-			ComboPanelIdleEscPathDiag.Note("HandleEscape.afterConsumeEscape", "open=" + (IsOpen ? 1 : 0));
-#endif
 		}
 
 		/// <summary>Hardware Escape, not Main.keyState (which ConsumeEscape rewrites).</summary>
@@ -2513,16 +2329,10 @@ namespace AdvancedKeybinds.UI
 
 			if (_awaitingKeyInfoPick)
 			{
-#if AK_DIAGNOSTICS
-				ComboPanelEscPathDiag.Note("EscapeSaved.keyInfo");
-#endif
 				CompleteKeyInfoPick("Escape");
 			}
 			else if (_capturingSlot >= 1 && _capturingSlot <= 3)
 			{
-#if AK_DIAGNOSTICS
-				ComboPanelEscPathDiag.Note("EscapeSaved.slot=" + _capturingSlot);
-#endif
 				CompleteSlotCapture("Escape");
 			}
 			else
@@ -2837,9 +2647,6 @@ namespace AdvancedKeybinds.UI
 				if (MouseInputHelper.IsPhysicalLeftDown())
 					_swallowOpenClickMouse1UntilUp = true;
 				SlotCapture.Begin(forceBlockMouse1: MouseInputHelper.IsPhysicalLeftDown());
-#if AK_DIAGNOSTICS
-				DiagObserveRegistrationWait("CompleteSlotCapture.rejected", "SlotCaptureReBegin");
-#endif
 				if (AkDiag.Enabled)
 				{
 					AkDiag.Log(
@@ -2851,9 +2658,6 @@ namespace AdvancedKeybinds.UI
 			}
 
 			ClearLeftClickConfirmPrompt();
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.Note("RegistrationWaitCleared.slotCapture token=" + token);
-#endif
 
 			bool isEscape = string.Equals(token, "Escape", StringComparison.OrdinalIgnoreCase);
 			if (isEscape)
@@ -2872,42 +2676,8 @@ namespace AdvancedKeybinds.UI
 			{
 				ArmGamePadParentUiBlockAfterCapture(token);
 				ComboPanelGamePadNavigation.NotifyPadCaptureConsumed(token, completedSlot, accepted: true);
-#if AK_DIAGNOSTICS
-				GamePadCaptureAR2Diag.NoteReleaseGate("begin", token, "accepted");
-#endif
 			}
 
-#if AK_DIAGNOSTICS
-			GamePadCaptureAR2Diag.NoteCompleteSlotCapture(
-				token,
-				completedSlot,
-				accepted: true,
-				finishKeyCaptureCalled: true,
-				purpleCleared: !_awaitingSlotKey && !SlotCapture.IsCapturing,
-				notifyPadCalled: GamePadToken.IsPadToken(token));
-
-			try
-			{
-				ComboPanelRegistrationWaitDiag.NoteCaptureCompleted(
-					token,
-					completedSlot,
-					accepted: true,
-					finishKeyCaptureCalled: true,
-					slotCaptureCancelled: !SlotCapture.IsCapturing,
-					capturingSlotAfter: _capturingSlot,
-					awaitingSlotKeyAfter: _awaitingSlotKey,
-					slotCaptureIsCapturingAfter: SlotCapture.IsCapturing,
-					capturePhaseAfter: SlotCapture.DiagCapturePhase,
-					focusAfter: ComboPanelGamePadNavigation.Focus.ToString(),
-					padNavVisibleAfter: ComboPanelGamePadNavigation.IsPadNavVisible,
-					confirmButtonStillHeld: GamePadToken.IsPadToken(token)
-						&& FnaGamePadProvider.IsDown(token));
-			}
-			catch
-			{
-				/* ignore */
-			}
-#endif
 
 			if (GamePadToken.IsPadToken(token))
 			{
@@ -2973,9 +2743,6 @@ namespace AdvancedKeybinds.UI
 		/// <summary>While the modal combo panel is open, strip MenuInquiry/Inventory before UIManageControls.Update runs.</summary>
 		public static void GuardModalInput()
 		{
-#if AK_DIAGNOSTICS
-			ComboPanelIdleEscPathDiag.Note("GuardModalInput.enter");
-#endif
 			// GamePad parent back/cancel — independent of Escape swallow flags.
 			ApplyGamePadParentUiTriggerSuppress("GuardModalInput.gamePad");
 			ComboPanelBackgroundInputBlock.ApplyWhilePanelOpen("GuardModalInput");
@@ -2983,17 +2750,11 @@ namespace AdvancedKeybinds.UI
 			if (_escDismissProtectArmed)
 			{
 				PollIdleEscParentReleaseProtect("GuardModalInput");
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("GuardModalInput.exit", "reason=releaseProtect");
-#endif
 				return;
 			}
 
 			if (!ShouldSwallowMenuEscape())
 			{
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("GuardModalInput.exit", "reason=noSwallow");
-#endif
 				return;
 			}
 
@@ -3004,9 +2765,6 @@ namespace AdvancedKeybinds.UI
 				ClearMenuInquiry(PlayerInput.Triggers.JustPressed);
 				ClearMenuInquiry(PlayerInput.Triggers.Current);
 			}
-#if AK_DIAGNOSTICS
-			ComboPanelIdleEscPathDiag.Note("GuardModalInput.exit");
-#endif
 		}
 
 		/// <summary>
@@ -3425,20 +3183,11 @@ namespace AdvancedKeybinds.UI
 		/// </summary>
 		public static void PrepareParentMenuForEscape()
 		{
-#if AK_DIAGNOSTICS
-			ComboPanelIdleEscPathDiag.Note("PrepareParentMenuForEscape.enter");
-#endif
 			if (!ShouldSwallowMenuEscape())
 			{
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("PrepareParentMenuForEscape.exit", "reason=noSwallow");
-#endif
 				return;
 			}
 
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.Note("PrepareParent.before");
-#endif
 
 			GuardModalInput();
 
@@ -3461,15 +3210,8 @@ namespace AdvancedKeybinds.UI
 				parentInterventionContext: IsOpen || IsControlsOrFancyBackContext()))
 			{
 				SuppressEscapeDerivedTriggers("PrepareParent.consume");
-#if AK_DIAGNOSTICS
-				ComboPanelIdleEscPathDiag.Note("PrepareParentMenuForEscape.consumed");
-#endif
 			}
 
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.Note("PrepareParent.after");
-			ComboPanelIdleEscPathDiag.Note("PrepareParentMenuForEscape.exit");
-#endif
 		}
 
 		/// <summary>
@@ -3514,16 +3256,10 @@ namespace AdvancedKeybinds.UI
 				parentInterventionContext: IsOpen || IsControlsOrFancyBackContext()))
 				return;
 
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.Note("AfterVanilla.beforeSuppress");
-#endif
 			SuppressEscapeDerivedTriggers("AfterVanillaInputRebuild");
 			if (Main.LocalPlayer != null
 				&& ComboPanelEscapeRegistrationPolicy.ShouldClearInventoryTriggersForEscapeConsume(keyboardEscapeDown))
 				Main.LocalPlayer.releaseInventory = false;
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.Note("AfterVanilla.afterSuppress");
-#endif
 		}
 
 		private static bool IsWithinEscDismissGrace() => Environment.TickCount64 < _escDismissGraceUntilMs;
@@ -3633,10 +3369,6 @@ namespace AdvancedKeybinds.UI
 			ClearTrigger(PlayerInput.Triggers.Current);
 			if (Main.LocalPlayer != null)
 				Main.LocalPlayer.releaseInventory = false;
-#if AK_DIAGNOSTICS
-			ComboPanelEscPathDiag.Note("SuppressParentControlsCloseFromEscapeRelease", reason);
-			ComboPanelIdleEscPathDiag.Note("SuppressParentClose.release", reason);
-#endif
 		}
 
 		private static void SuppressEscapeDerivedTriggers(string reason)
@@ -3646,10 +3378,6 @@ namespace AdvancedKeybinds.UI
 			bool clearInv = ComboPanelEscapeRegistrationPolicy.ShouldClearInventoryTriggersForEscapeConsume(
 				IsKeyboardEscapeDownOnly());
 			ConsumeEscape();
-#if AK_DIAGNOSTICS
-			KeybindEscapeDiagSystem.NoteConsume(reason, clearInv);
-			ComboPanelEscPathDiag.Note("SuppressEscapeDerivedTriggers", reason);
-#endif
 		}
 
 		private static void ConsumeEscape()
@@ -3893,9 +3621,6 @@ namespace AdvancedKeybinds.UI
 				return false;
 			}
 
-#if AK_DIAGNOSTICS
-			bool comparedAny = false;
-#endif
 			for (int i = 1; i <= 3; i++)
 			{
 				if (i == index)
@@ -3905,77 +3630,20 @@ namespace AdvancedKeybinds.UI
 				if (string.IsNullOrEmpty(existing))
 					continue;
 
-#if AK_DIAGNOSTICS
-				comparedAny = true;
-#endif
 				// Physical identity (SC+E0+E1). Display names are never consulted.
 				bool tokensEqual = StableKeyToken.TokensEqual(existing, token);
 				bool samePhysical = PhysicalKeyIdentity.AreSamePhysical(existing, token);
 
 				if (tokensEqual || samePhysical)
 				{
-#if AK_DIAGNOSTICS
-					bool resolveA = PhysicalKeyIdentity.TryResolve(existing, out string idA);
-					bool resolveB = PhysicalKeyIdentity.TryResolve(token, out string idB);
-					bool physicalIdEqual = resolveA && resolveB
-						&& string.Equals(idA, idB, StringComparison.OrdinalIgnoreCase);
-					PhysicalKeyDupDiag.LogDupCheck(
-						caller: "ComboPanel.TrySetSlot",
-						targetSlot: index,
-						existingSlot: i,
-						existingToken: existing,
-						incomingToken: token,
-						tokensEqual: tokensEqual,
-						samePhysical: samePhysical,
-						physicalIdEqual: physicalIdEqual,
-						result: "RejectedDuplicate",
-						reason: tokensEqual ? "tokens-equal" : "same-physical-id");
-#endif
 					reason = AkDecisionReason.DuplicateToken;
 					SoundEngine.PlaySound(SoundID.MenuTick);
 					if (AkDiag.Enabled) AkDiag.Log($"ComboPanel duplicate rejected token={token} conflicts-with-slot={i} existing={existing}");
 					return false;
 				}
 
-#if AK_DIAGNOSTICS
-				{
-					bool resolveA = PhysicalKeyIdentity.TryResolve(existing, out string idA);
-					bool resolveB = PhysicalKeyIdentity.TryResolve(token, out string idB);
-					bool physicalIdEqual = resolveA && resolveB
-						&& string.Equals(idA, idB, StringComparison.OrdinalIgnoreCase);
-					PhysicalKeyDupDiag.LogDupCheck(
-						caller: "ComboPanel.TrySetSlot",
-						targetSlot: index,
-						existingSlot: i,
-						existingToken: existing,
-						incomingToken: token,
-						tokensEqual: tokensEqual,
-						samePhysical: samePhysical,
-						physicalIdEqual: physicalIdEqual,
-						result: "Accepted",
-						reason: !resolveA || !resolveB
-							? "pair-ok-but-resolve-incomplete"
-							: "different-physical-id");
-				}
-#endif
 			}
 
-#if AK_DIAGNOSTICS
-			if (!comparedAny)
-			{
-				PhysicalKeyDupDiag.LogDupCheck(
-					caller: "ComboPanel.TrySetSlot",
-					targetSlot: index,
-					existingSlot: 0,
-					existingToken: string.Empty,
-					incomingToken: token,
-					tokensEqual: false,
-					samePhysical: false,
-					physicalIdEqual: false,
-					result: "Accepted",
-					reason: "no-other-filled-slots");
-			}
-#endif
 
 			string previous = _working.GetSlot(index);
 			string previousDisplay = _working.GetSlotDisplay(index);
@@ -4440,9 +4108,6 @@ namespace AdvancedKeybinds.UI
 			// Never run SlotCapture completion and normal pad nav on the same consumed token without a gate.
 			if (_awaitingSlotKey || SlotCapture.IsCapturing)
 			{
-#if AK_DIAGNOSTICS
-				DiagNoteHoldAttemptDuringRegistrationWait(leftJustPressed, hover);
-#endif
 
 				// Chord-cancel before capture latch so Back/Start are not registered as binds.
 				ComboPanelGamePadNavigation.Tick(
@@ -4956,13 +4621,6 @@ namespace AdvancedKeybinds.UI
 					if (IsKeyboardAdditionalOrTab && i != 3)
 						return;
 
-					#if AK_DIAGNOSTICS
-					GamePadCaptureAR2Diag.NoteHandleClicksSlotRestart(
-						i,
-						leftJustPressed,
-						gameLeftJustPressed,
-						blocked: blockPadReuse);
-					#endif
 					if (blockPadReuse)
 						return;
 
@@ -5803,11 +5461,6 @@ namespace AdvancedKeybinds.UI
 					slider: false);
 		}
 
-		private static void SetHoldMs(int value)
-		{
-			SetActiveDuration(value, slider: false);
-		}
-
 		private static int RoundToTen(int value) => (int)(System.Math.Round(value / 10.0) * 10.0);
 
 		private static string KeyToDigit(Keys key) => key switch {
@@ -6211,9 +5864,6 @@ namespace AdvancedKeybinds.UI
 			Utils.DrawBorderString(spriteBatch, text, pos, color, scale);
 		}
 
-		private static Rectangle InflateRect(Rectangle r, int dx, int dy)
-			=> new(r.X - dx, r.Y - dy, Math.Max(1, r.Width + dx * 2), Math.Max(1, r.Height + dy * 2));
-
 		/// <summary>
 		/// TwoKey Terraria-OR display mapping (read-only). Storage stays Slot1/2/3;
 		/// Slot3 fills an empty left/right box so Slot3-only saves are visible.
@@ -6514,34 +6164,6 @@ namespace AdvancedKeybinds.UI
 				releaseHint,
 				textColor);
 			DrawDoubleTapModeBox(spriteBatch);
-		}
-
-		private static void DrawHoldModeHalf(SpriteBatch spriteBatch, Rectangle rect, string title, string hint, Color color)
-		{
-			const float maxScale = 1f;
-			const float minScale = 0.45f;
-			const float padW = 8f;
-			const float padH = 6f;
-			const float hintGap = 4f;
-			var font = FontAssets.MouseText.Value;
-
-			float innerW = rect.Width - padW * 2f;
-			float innerH = rect.Height - padH * 2f;
-			float titleMaxH = innerH * 0.42f;
-			float titleScale = FitTextScaleToBox(title, innerW, titleMaxH, maxScale, minScale);
-			Vector2 titleSize = font.MeasureString(title) * titleScale;
-
-			float hintMaxH = Math.Max(8f, innerH - titleSize.Y - hintGap);
-			float hintScale = FitTextScaleToBox(hint, innerW, hintMaxH, maxScale, minScale);
-			Vector2 hintSize = font.MeasureString(hint) * hintScale;
-
-			float blockH = titleSize.Y + hintGap + hintSize.Y;
-			float startY = rect.Y + (rect.Height - blockH) / 2f;
-
-			float titleX = rect.X + (rect.Width - titleSize.X) / 2f;
-			float hintX = rect.X + (rect.Width - hintSize.X) / 2f;
-			Utils.DrawBorderString(spriteBatch, title, new Vector2(titleX, startY), color, titleScale);
-			Utils.DrawBorderString(spriteBatch, hint, new Vector2(hintX, startY + titleSize.Y + hintGap), color * 0.92f, hintScale);
 		}
 
 		private static void DrawEnlargedHoldModeHalf(SpriteBatch spriteBatch, Rectangle rect, string title, string hint, Color color)
@@ -7065,21 +6687,9 @@ namespace AdvancedKeybinds.UI
 				mouseUiPath: lockHoverAtMouse,
 				openClickSwallowActive: _blockMouseSlotStartUntilOpenClickUp))
 			{
-				#if AK_DIAGNOSTICS
-				GamePadCaptureAR2Diag.NoteHandleClicksSlotRestart(
-					slot,
-					physicalLeftEdge: false,
-					gameLeftEdge: false,
-					blocked: true);
-				#endif
 				return;
 			}
 
-			#if AK_DIAGNOSTICS
-			GamePadCaptureAR2Diag.NoteStartSlotCapture(
-				lockHoverAtMouse ? "StartSlotCaptureFromUi.mouse" : "StartSlotCaptureFromUi.pad",
-				slot);
-			#endif
 			GamePadProbeSystem.LogCaptureBeginDiag(slot, FormatWorkingComboForDiag());
 
 			CancelKeyInfoNameEdit(commit: false);
@@ -7105,11 +6715,6 @@ namespace AdvancedKeybinds.UI
 			}
 
 			SlotCapture.Begin(forceBlockMouse1: armMouseSwallow);
-#if AK_DIAGNOSTICS
-			DiagObserveRegistrationWait(
-				lockHoverAtMouse ? "StartSlotCaptureFromUi.mouse" : "StartSlotCaptureFromUi.pad",
-				"SlotCaptureBegin");
-#endif
 			SoundEngine.PlaySound(SoundID.MenuOpen);
 			if (AkDiag.Enabled)
 				AkDiag.Log("ComboPanel slot-capture START slot=" + slot + " padNav=" + ComboPanelGamePadNavigation.IsPadNavVisible);
@@ -7126,28 +6731,6 @@ namespace AdvancedKeybinds.UI
 
 			if (!SupportsHold)
 			{
-#if AK_DIAGNOSTICS
-				try
-				{
-					bool registrationWait = _awaitingSlotKey || SlotCapture.IsCapturing;
-					ComboPanelRegistrationWaitDiag.NoteHoldToggleRequest(
-						"mouse",
-						"HoldWhileHeld",
-						requestedValue: "toggle",
-						accepted: false,
-						deniedReason: "UnsupportedBinding",
-						registrationWait,
-						_capturingSlot,
-						_awaitingSlotKey,
-						SlotCapture.IsCapturing,
-						SlotCapture.DiagCapturePhase,
-						ComboPanelGamePadNavigation.Focus.ToString(),
-						ComboPanelGamePadNavigation.IsPadNavVisible,
-						ComboPanelGamePadNavigation.CaptureReleaseGateActiveRaw,
-						FnaGamePadProvider.IsDown(GamePadToken.A));
-				}
-				catch { /* ignore */ }
-#endif
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				return;
 			}
@@ -7168,28 +6751,6 @@ namespace AdvancedKeybinds.UI
 
 			if (!SupportsHold)
 			{
-#if AK_DIAGNOSTICS
-				try
-				{
-					bool registrationWait = _awaitingSlotKey || SlotCapture.IsCapturing;
-					ComboPanelRegistrationWaitDiag.NoteHoldToggleRequest(
-						"mouse",
-						"HoldOnRelease",
-						requestedValue: "toggle",
-						accepted: false,
-						deniedReason: "UnsupportedBinding",
-						registrationWait,
-						_capturingSlot,
-						_awaitingSlotKey,
-						SlotCapture.IsCapturing,
-						SlotCapture.DiagCapturePhase,
-						ComboPanelGamePadNavigation.Focus.ToString(),
-						ComboPanelGamePadNavigation.IsPadNavVisible,
-						ComboPanelGamePadNavigation.CaptureReleaseGateActiveRaw,
-						FnaGamePadProvider.IsDown(GamePadToken.A));
-				}
-				catch { /* ignore */ }
-#endif
 				SoundEngine.PlaySound(SoundID.MenuTick);
 				return;
 			}
@@ -7320,9 +6881,6 @@ namespace AdvancedKeybinds.UI
 				ComboPanelCloseInputConsumeGate.Arm(token, "Save");
 				_blockOpenUntilEpochInclusive = epoch;
 
-				#if AK_DIAGNOSTICS
-				PadConfirmAfterComboSaveDiagSystem.ObserveBeforeComboSave(action, ComboPanelGamePadNavigation.Focus.ToString());
-				#endif
 
 				Close(
 					save: true,
@@ -7338,12 +6896,6 @@ namespace AdvancedKeybinds.UI
 				bool actionCleared = string.IsNullOrEmpty(CurrentActionId);
 				bool parentOpen = ControlsUiHost.IsManageControlsOpen();
 
-				#if AK_DIAGNOSTICS
-				PadConfirmAfterComboSaveDiagSystem.ObserveComboSaveAccepted(action, epoch);
-				#endif
-				#if AK_DIAGNOSTICS
-				PadConfirmAfterComboSaveDiagSystem.ObserveAfterComboSave(stillOpen, parentPointAfter);
-				#endif
 
 				GamePadProbeSystem.LogPanelSaveCloseEnd(
 					stillOpen,
@@ -7398,12 +6950,6 @@ namespace AdvancedKeybinds.UI
 				ArmPadBackCloseGate(token);
 				ArmGamePadParentUiBlockAfterCapture(token);
 				ApplyGamePadParentUiTriggerSuppress("PadCancelOrBack.beforeClose");
-#if AK_DIAGNOSTICS
-				KeybindEscapeDiagSystem.NoteCancelConsume(
-					"ComboPanel.PadCancelOrBack",
-					"CloseComboPanel",
-					consumed: true);
-#endif
 
 				GamePadProbeSystem.LogPanelPadCancel(token);
 

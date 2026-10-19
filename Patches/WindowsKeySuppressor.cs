@@ -12,25 +12,10 @@ using Terraria.ModLoader;
 namespace AdvancedKeybinds.Patches
 {
 	/// <summary>
-	/// Installs a low-level keyboard hook (WH_KEYBOARD_LL) that swallows the Windows key, Ctrl+Esc
-	/// (Start-menu equivalent), and toggle-lock keys (CapsLock / NumLock / ScrollLock) while tModLoader
-	/// owns the foreground window. This stops the Start menu / focus loss and, because the key never
-	/// key never reaches the OS or the game, we track its state ourselves so it can still be used as a
-	/// combo binding key (see <see cref="AdvancedKeybinds.Binding.KeyToken"/>).
-	///
-	/// Swallowing the Windows key also breaks Windows' own screenshot shortcuts. Windows deliberately
-	/// ignores *synthetic* (SendInput) key events for its system screenshot hotkeys, so re-injecting a
-	/// Win+Shift+S chord never triggers the snip overlay. Instead we detect Win+Shift+S and launch the
-	/// snip tool directly through its shell protocol (ms-screenclip:) - exactly what the hotkey does
-	/// internally - which is not subject to the synthetic-input restriction. The launch is deferred to
-	/// the game's main update tick via <see cref="FlushDeferredWinActions"/> so we never call
-	/// Process.Start from inside the hook callback.
-	///
-	/// Win+Shift+Left / Win+Shift+Right cannot be re-triggered via SendInput (Windows ignores injected
-	/// system hotkeys, same as Win+Shift+S). Instead we move the game window across monitors ourselves.
-	/// In borderless mode we also call Main.SetResolution to match the destination display size.
-	/// Win+Ctrl+Left / Win+Ctrl+Right briefly drop RIDEV_NOHOTKEYS and re-inject so OS virtual-desktop
-	/// switching works while physical Win remains swallowed.
+	/// Preserves physical Win-down delivery to Windows and AK's existing key acquisition.
+	/// For a qualified foreground press, only Win-up may be replaced by an ordered
+	/// menu-mask helper and Win-up batch. OFF/inactive and failed sends forward the
+	/// original event. Ctrl+Esc and toggle-lock acquisition keep their existing rules.
 	/// </summary>
 	internal static class WindowsKeySuppressor
 	{
@@ -122,10 +107,14 @@ namespace AdvancedKeybinds.Patches
 		// Keep managed references so delegates passed to native code aren't garbage collected.
 		private static LowLevelKeyboardProc _proc;
 		private static LowLevelKeyboardProc _threadProc;
+		private static WinInputReleaseCandidate.WinNativeCallbackLease? _procLease, _threadProcLease;
+		private static bool _uninstallPending;
 		private static IntPtr _hookId = IntPtr.Zero;
 		private static IntPtr _threadHookId = IntPtr.Zero;
 		private static bool _attempted;
 		private static uint _hookThreadId;
+		private static WinInputReleaseCandidate.WinMaskReleaseCoordinator? _maskOwner;
+		private static readonly WinInputReleaseCandidate.WinMaskRegistrationPool MaskRegistrations = new WinInputReleaseCandidate.WinMaskRegistrationPool();
 
 		public static bool IsLeftWindowsDown { get; private set; }
 		public static bool IsRightWindowsDown { get; private set; }
@@ -201,6 +190,7 @@ namespace AdvancedKeybinds.Patches
 
 		public static bool IsScrollLockPhysicallyDown { get; private set; }
 		public static bool IsInstalled => _hookId != IntPtr.Zero;
+		internal static bool IsThreadKeyboardHookInstalled => _threadHookId != IntPtr.Zero;
 
 		/// <summary>While a combo slot is listening, toggle-lock keys pass through instead of being swallowed.</summary>
 		public static bool IsSlotCapturePassthrough { get; private set; }
@@ -276,6 +266,105 @@ namespace AdvancedKeybinds.Patches
 		private static long _pendingPhysicalCaptureTick;
 		private static readonly HashSet<string> _gameplayPhysicalEdges = new(StringComparer.OrdinalIgnoreCase);
 		private const int PhysicalCaptureLatchMaxAgeMs = 500;
+
+		private static readonly object _physicalInputGate = new();
+		private static object _physicalInputFocusBoundaryToken;
+		private static readonly Dictionary<GenericScanId, object> _physicalScanRevisions = new();
+		private static readonly Dictionary<uint, object> _physicalVkRevisions = new();
+
+		public static void RequestFocusLossInputReset()
+			=> global::AdvancedKeybinds.Features.DoubleTap.DoubleTapNativeInput.Session.MarkFocusBoundary();
+
+		// Called only under the group gate. A marker never waits for this gate.
+		private static object SynchronizePhysicalInputFocusBoundaryLocked()
+		{
+			object token = global::AdvancedKeybinds.Features.DoubleTap.DoubleTapNativeInput.Session.FocusBoundaryToken;
+			if (!object.ReferenceEquals(token, _physicalInputFocusBoundaryToken))
+			{
+				ClearPhysicalInputGroupLocked();
+				_physicalInputFocusBoundaryToken = token;
+			}
+			return token;
+		}
+
+		private static void ClearPhysicalCaptureEdgesLocked()
+		{
+			_pendingPhysicalCaptureToken = null;
+			_pendingPhysicalCaptureTick = 0;
+			_pendingWin32KeysCaptureToken = null;
+			_pendingWin32KeysCaptureTick = 0;
+			_gameplayPhysicalEdges.Clear();
+		}
+
+		private static void ClearPhysicalInputGroupLocked()
+		{
+			_genericScanHeld.Clear();
+			_genericScanDownSinceMs.Clear();
+			_fallbackVkHeld.Clear();
+			_vkMeasuredScan.Clear();
+			_vkLastMeasuredEvent.Clear();
+			_eventSequenceUnifier.Clear();
+			_physicalScanRevisions.Clear();
+			_physicalVkRevisions.Clear();
+			ClearPhysicalCaptureEdgesLocked();
+		}
+
+		private static object BeginPhysicalKeyMutationLocked(GenericScanId id, uint vk, out object token)
+		{
+			token = SynchronizePhysicalInputFocusBoundaryLocked();
+			object revision = new object();
+			_physicalScanRevisions[id] = revision;
+			if (PhysicalKeyToken.IsValidVirtualKey(vk))
+				_physicalVkRevisions[vk] = revision;
+			return revision;
+		}
+
+		private static bool IsPhysicalKeyMutationCurrentLocked(GenericScanId id, uint vk, object token, object revision)
+		{
+			return object.ReferenceEquals(SynchronizePhysicalInputFocusBoundaryLocked(), token)
+				&& _physicalScanRevisions.TryGetValue(id, out object scanRevision)
+				&& object.ReferenceEquals(scanRevision, revision)
+				&& (!PhysicalKeyToken.IsValidVirtualKey(vk)
+					|| (_physicalVkRevisions.TryGetValue(vk, out object vkRevision)
+						&& object.ReferenceEquals(vkRevision, revision)));
+		}
+
+		private static void QueuePhysicalCaptureEdgeLocked(string token, long now)
+		{
+			_pendingPhysicalCaptureToken = token;
+			_pendingPhysicalCaptureTick = now;
+			_pendingWin32KeysCaptureToken = token;
+			_pendingWin32KeysCaptureTick = now;
+			if (!Main.gameMenu)
+				_gameplayPhysicalEdges.Add(token);
+		}
+
+		private readonly struct PhysicalScanReconcileSnapshot
+		{
+			public readonly GenericScanId Id;
+			public readonly object Revision;
+			public readonly uint[] VirtualKeys;
+
+			public PhysicalScanReconcileSnapshot(GenericScanId id, object revision, uint[] virtualKeys)
+			{
+				Id = id;
+				Revision = revision;
+				VirtualKeys = virtualKeys;
+			}
+		}
+
+		private static void FlushPhysicalUnifierDiagnostics(List<string> lines, Action<string> sink, bool diagEnabled)
+		{
+			if (lines == null)
+				return;
+			foreach (string line in lines)
+			{
+				if (sink != null)
+					sink(line);
+				else if (diagEnabled)
+					AkDiag.Log("EventSequence " + line);
+			}
+		}
 		/// <summary>Make/break held bit for 「カタカナ／ひらがな」(GetAsyncKeyState is unreliable for NLS).</summary>
 		private static bool _kanaPhysicallyDown;
 		private static long _kanaPhysicalDownSinceMs;
@@ -368,20 +457,22 @@ namespace AdvancedKeybinds.Patches
 		private static bool _winPressActiveWhileSuppressing;
 		/// <summary>Win press began while Terraria truly owned fg (not grace-only).</summary>
 		private static bool _winPressStartedWhileFgCore;
-		private static int _winPhysicalUpFrames;
+		private const int WinOwnerUp = 0;
+		private const int WinOwnerOs = 1;
+		private const int WinOwnerAk = 2;
+		private static int _leftWinOwner;
+		private static int _rightWinOwner;
+		private static int _leftWinPhysicalUpFrames;
+		private static int _rightWinPhysicalUpFrames;
+		private static bool _leftAkUpPending;
+		private static bool _rightAkUpPending;
 
 		// Win+Shift+S sets this from the hook; the main tick launches the snip overlay and clears it.
 		// A short cooldown stops keyboard auto-repeat from opening the overlay several times.
 		private static volatile bool _snipRequested;
-		private static long _lastSnipRequestTick;
-		private const long SnipCooldownMs = 1200;
 
 		// Debounce latches so a held Win+Shift+Arrow (monitor) or Win+Ctrl+Arrow (virtual desktop)
 		// fires once per press (not once per keyboard auto-repeat).
-		private static bool _leftMoveActive;
-		private static bool _rightMoveActive;
-		private static bool _leftVirtualDesktopActive;
-		private static bool _rightVirtualDesktopActive;
 		private static volatile uint _pendingArrowChordVk;
 		private static volatile uint _pendingArrowChordWinVk;
 		private static volatile bool _pendingArrowChordWithShift;
@@ -456,6 +547,8 @@ namespace AdvancedKeybinds.Patches
 
 		[DllImport("user32.dll")]
 		private static extern IntPtr GetForegroundWindow();
+		[DllImport("user32.dll", EntryPoint = "GetMessageExtraInfo", ExactSpelling = true, CallingConvention = CallingConvention.Winapi, SetLastError = false)]
+		private static extern IntPtr GetMessageExtraInfo();
 
 		[DllImport("user32.dll")]
 		private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -576,24 +669,22 @@ namespace AdvancedKeybinds.Patches
 		{
 			if (!OperatingSystem.IsWindows())
 				return;
+			if (_uninstallPending)
+			{
+				UninstallHookCore();
+				if (_uninstallPending) return;
+			}
 
 			uint threadId = GetCurrentThreadId();
 
 			if (_hookId != IntPtr.Zero && _hookThreadId != threadId)
 			{
-#if AK_DIAGNOSTICS
-				StartMenuDiag.LogInstall(
-					"hook wrong thread hookTid=0x" + _hookThreadId.ToString("X")
-					+ " currentTid=0x" + threadId.ToString("X") + " reinstalling");
-#endif
 				UninstallHookCore();
+				if (_uninstallPending) return;
 			}
 
 			if (_hookId == IntPtr.Zero && _attempted && _hookThreadId != 0 && _hookThreadId != threadId)
 			{
-#if AK_DIAGNOSTICS
-				StartMenuDiag.LogInstall("hook prior attempt on worker thread; retrying on main");
-#endif
 				_attempted = false;
 			}
 
@@ -605,35 +696,46 @@ namespace AdvancedKeybinds.Patches
 
 			if (_attempted)
 				return;
+			if (!MaskRegistrations.TryDrainRetired(true, SendOwnedMaskBatch))
+				return;
 
 			_attempted = true;
 
 			try
 			{
 				IntPtr module = GetModuleHandle(null);
-				_proc = HookCallback;
+				// Each native registration keeps its own permanently-retirable owner.
+				var maskOwner = MaskRegistrations.TryCreate(IsPhysicalKeyDown(VK_LWIN), IsPhysicalKeyDown(VK_RWIN));
+				if (maskOwner == null) { _attempted = false; return; }
+				System.Threading.Volatile.Write(ref _maskOwner, maskOwner);
+				Func<int, IntPtr, IntPtr, IntPtr> callback = (n, w, l) => maskOwner.IsRetired
+					? CallNextHookEx(IntPtr.Zero, n, w, l)
+					: WinInputReleaseCandidate.WinMaskCallbackScope.Invoke(maskOwner, n, w, l, HookCallback);
+				WinInputReleaseCandidate.WinNativeCallbackLease? lease = null;
+				_proc = (n, w, l) => lease!.Invoke(n, w, l, callback);
+				lease = new WinInputReleaseCandidate.WinNativeCallbackLease(_proc);
+				_procLease = lease;
 				_hookId = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, module, 0);
 
 				if (_hookId == IntPtr.Zero)
 				{
-					_proc = null;
+					MaskRegistrations.Retire(maskOwner);
+					if (lease.TryReleaseUnregistered()) { _procLease = null; _proc = null; }
 					AdvancedKeybinds.Instance?.Logger.Warn(
 						"Advanced Keybinds could not install the Windows-key hook (error " + Marshal.GetLastWin32Error() + ").");
 				}
 				else
 				{
 					_hookThreadId = threadId;
+					maskOwner.NoteHooksInstalled();
 					EnsureThreadKeyboardHook(threadId);
-#if AK_DIAGNOSTICS
-					string threadNote = _threadHookId != IntPtr.Zero ? " threadHook=ok" : " threadHook=fail:" + Marshal.GetLastWin32Error();
-					StartMenuDiag.LogInstall("keyboard hook installed tid=0x" + threadId.ToString("X") + threadNote);
-#endif
 					GameWindowInputHook.EnsureInstalledIfNeeded();
 				}
 			}
 			catch (Exception ex)
 			{
-				_proc = null;
+				UninstallHookCore();
+				_attempted = true;
 				AdvancedKeybinds.Instance?.Logger.Warn("Advanced Keybinds failed to install the Windows-key hook: " + ex.Message);
 			}
 		}
@@ -643,63 +745,92 @@ namespace AdvancedKeybinds.Patches
 			if (!OperatingSystem.IsWindows())
 				return;
 
-			if (_threadHookId != IntPtr.Zero)
+			if (_threadHookId != IntPtr.Zero || _threadProcLease != null)
 				return;
 
-			_threadProc = ThreadKeyboardHookCallback;
-			_threadHookId = SetWindowsHookEx(WH_KEYBOARD, _threadProc, GetModuleHandle(null), threadId);
+			var maskOwner = System.Threading.Volatile.Read(ref _maskOwner);
+			if (maskOwner == null || maskOwner.IsRetired) return;
+			IntPtr module = GetModuleHandle(null);
+			Func<int, IntPtr, IntPtr, IntPtr> callback = (n, w, l) => maskOwner.IsRetired
+				? CallNextHookEx(IntPtr.Zero, n, w, l)
+				: WinInputReleaseCandidate.WinMaskCallbackScope.Invoke(maskOwner, n, w, l, ThreadKeyboardHookCallback);
+			WinInputReleaseCandidate.WinNativeCallbackLease? lease = null;
+			_threadProc = (n, w, l) => lease!.Invoke(n, w, l, callback);
+			lease = new WinInputReleaseCandidate.WinNativeCallbackLease(_threadProc);
+			_threadProcLease = lease;
+			_threadHookId = SetWindowsHookEx(WH_KEYBOARD, _threadProc, module, threadId);
+			if (_threadHookId == IntPtr.Zero && lease.TryReleaseUnregistered())
+			{
+				_threadProcLease = null;
+				_threadProc = null;
+			}
 		}
 
 		private static void UninstallHookCore()
 		{
+			var maskOwner = System.Threading.Volatile.Read(ref _maskOwner);
+			if (maskOwner != null) MaskRegistrations.Retire(maskOwner);
+			MaskRegistrations.TryDrainRetired(OperatingSystem.IsWindows(), SendOwnedMaskBatch);
 			// Nothing was ever hooked off Windows; never touch UnhookWindowsHookEx there.
 			if (!OperatingSystem.IsWindows())
 			{
-				_threadHookId = IntPtr.Zero;
-				_hookId = IntPtr.Zero;
-				_proc = null;
-				_threadProc = null;
-				_attempted = false;
-				_hookThreadId = 0;
+				_uninstallPending = _hookId != IntPtr.Zero || _threadHookId != IntPtr.Zero || _procLease != null || _threadProcLease != null;
+				_attempted = _uninstallPending;
+				if (!_uninstallPending) _hookThreadId = 0;
 				return;
 			}
 
 			if (_threadHookId != IntPtr.Zero)
 			{
+				IntPtr hook = _threadHookId;
+				bool removed = false;
 				try
 				{
-					UnhookWindowsHookEx(_threadHookId);
+					removed = _threadProcLease != null
+						? _threadProcLease.TryUnhook(() => UnhookWindowsHookEx(hook))
+						: UnhookWindowsHookEx(hook);
 				}
 				catch
 				{
 				}
 
-				_threadHookId = IntPtr.Zero;
+				if (removed) { _threadHookId = IntPtr.Zero; _threadProcLease = null; _threadProc = null; }
 			}
 
 			if (_hookId != IntPtr.Zero)
 			{
+				IntPtr hook = _hookId;
+				bool removed = false;
 				try
 				{
-					UnhookWindowsHookEx(_hookId);
+					removed = _procLease != null
+						? _procLease.TryUnhook(() => UnhookWindowsHookEx(hook))
+						: UnhookWindowsHookEx(hook);
 				}
 				catch
 				{
 				}
 
-				_hookId = IntPtr.Zero;
+				if (removed) { _hookId = IntPtr.Zero; _procLease = null; _proc = null; }
 			}
 
-			_proc = null;
-			_threadProc = null;
-			_attempted = false;
-			_hookThreadId = 0;
+			// False/exception (including an uncertain SetHook result) retains both the root and handle.
+			// Retired callbacks only forward; a replacement is blocked until removal is confirmed.
+			_uninstallPending = _hookId != IntPtr.Zero || _threadHookId != IntPtr.Zero || _procLease != null || _threadProcLease != null;
+			_attempted = _uninstallPending;
+			if (!_uninstallPending) _hookThreadId = 0;
 		}
 
 		public static void Uninstall()
 		{
 			IsLeftWindowsDown = false;
 			IsRightWindowsDown = false;
+			_leftWinOwner = WinOwnerUp;
+			_rightWinOwner = WinOwnerUp;
+			_leftWinPhysicalUpFrames = 0;
+			_rightWinPhysicalUpFrames = 0;
+			_leftAkUpPending = false;
+			_rightAkUpPending = false;
 			IsShellBlockedEscapeDown = false;
 			IsCapsLockPhysicallyDown = false;
 			IsNumLockPhysicallyDown = false;
@@ -707,21 +838,8 @@ namespace AdvancedKeybinds.Patches
 			_capsPhysicalDownSinceMs = 0;
 			_numPhysicalDownSinceMs = 0;
 			_scrollPhysicalDownSinceMs = 0;
-			_leftMoveActive = false;
-			_rightMoveActive = false;
-			_leftVirtualDesktopActive = false;
-			_rightVirtualDesktopActive = false;
 
-			if (_hookId != IntPtr.Zero)
-			{
-				UninstallHookCore();
-			}
-			else
-			{
-				_proc = null;
-				_attempted = false;
-				_hookThreadId = 0;
-			}
+			UninstallHookCore();
 			_pendingToggleLockCaptureToken = null;
 			_pendingToggleLockCaptureTick = 0;
 			IsSlotCapturePassthrough = false;
@@ -836,6 +954,11 @@ namespace AdvancedKeybinds.Patches
 		/// <summary>Called when the user turns Win suppression off in Mod Config.</summary>
 		internal static void OnSuppressionDisabled()
 		{
+			InvalidateWinMaskOwnership();
+			if (_leftWinOwner == WinOwnerAk)
+				_leftWinOwner = WinOwnerOs;
+			if (_rightWinOwner == WinOwnerAk)
+				_rightWinOwner = WinOwnerOs;
 			ReleaseWinSuppressionState();
 			_modalWindowsKeySuppress = false;
 			GameWindowInputHook.RefreshRawInputForWinSuppressSetting();
@@ -847,9 +970,6 @@ namespace AdvancedKeybinds.Patches
 
 		private static void BeginWinPressSwallow()
 		{
-			_winPressActiveWhileSuppressing = true;
-			_winPhysicalUpFrames = 0;
-			_winPressStartedWhileFgCore = IsGameForegroundCore();
 		}
 
 		private static void ReleaseWinSuppressionState()
@@ -858,16 +978,16 @@ namespace AdvancedKeybinds.Patches
 			IsLeftWindowsDown = false;
 			IsRightWindowsDown = false;
 			_swallowWinUntilPhysicalUp = false;
-			_leftMoveActive = false;
-			_rightMoveActive = false;
-			_leftVirtualDesktopActive = false;
-			_rightVirtualDesktopActive = false;
 			_snipRequested = false;
 			_pendingArrowChordVk = 0;
 			_pendingArrowChordWinVk = 0;
 			_pendingArrowChordWithShift = false;
 			_pendingArrowChordVirtualDesktop = false;
 			IsShellBlockedEscapeDown = false;
+			_leftWinPhysicalUpFrames = 0;
+			_rightWinPhysicalUpFrames = 0;
+			_leftAkUpPending = false;
+			_rightAkUpPending = false;
 		}
 
 		private static void EndWinPressSwallow()
@@ -875,7 +995,6 @@ namespace AdvancedKeybinds.Patches
 			_winPressActiveWhileSuppressing = false;
 			_winPressStartedWhileFgCore = false;
 			_swallowWinUntilPhysicalUp = false;
-			_winPhysicalUpFrames = 0;
 		}
 
 		private static bool ShouldBlockWindowsKey()
@@ -884,15 +1003,7 @@ namespace AdvancedKeybinds.Patches
 			if (_syntheticChordDepth > 0)
 				return false;
 
-			if (ShouldSuppressShellInput())
-				return true;
-
-			// Finish the same physical Win press if it began while fgCore (Start stole fg mid-press).
-			// Do not require GetAsyncKeyState here — swallowing can clear the OS down-bit early.
-			if (_winPressActiveWhileSuppressing && _winPressStartedWhileFgCore)
-				return true;
-
-			return false;
+			return ShouldSuppressShellInput();
 		}
 
 		/// <summary>True when shell Start-menu shortcuts (e.g. Ctrl+Esc) should be swallowed.</summary>
@@ -904,7 +1015,9 @@ namespace AdvancedKeybinds.Patches
 
 		/// <summary>Custom Win chord handling only while we swallow the Win key (Terraria is fgCore).</summary>
 		private static bool ShouldUseCustomWinChordHandling()
-			=> IsWinKeySuppressionEnabled() && IsGameForegroundCore();
+			=> IsWinKeySuppressionEnabled()
+				&& IsGameForegroundCore()
+				&& (_leftWinOwner == WinOwnerAk || _rightWinOwner == WinOwnerAk);
 
 		private static bool IsWinHeldForChord()
 			=> AnyWindowsDown || IsAnyWinPhysicallyDown() || _winPressActiveWhileSuppressing;
@@ -931,162 +1044,24 @@ namespace AdvancedKeybinds.Patches
 		public static bool TryHandleWinChordPassthrough(uint vk, bool isDown, string path, out bool swallowed)
 		{
 			swallowed = false;
-			if (!isDown)
-				return false;
-
-			// Do not re-intercept keys we are currently synthesizing for the shell.
-			if (_syntheticChordDepth > 0)
-				return false;
-
-			if (!ShouldUseCustomWinChordHandling())
-			{
-#if AK_DIAGNOSTICS
-				WinChordDiag.Log(path, vk, "native", "reason=inactive");
-#endif
-				return false;
-			}
-
-			if (!IsWinHeldForChord())
-			{
-#if AK_DIAGNOSTICS
-				WinChordDiag.Log(path, vk, "skip", "reason=no-win-held");
-#endif
-				return false;
-			}
-
-			if (vk == VK_S && IsShiftDownForDiag())
-				return TryRequestSnip(path, out swallowed);
-
-			if (vk == VK_LEFT || vk == VK_RIGHT)
-			{
-				// Shift takes priority over Ctrl when both are held.
-				if (IsShiftDownForDiag())
-					return TryRequestMonitorMove(vk, path, out swallowed);
-
-				if (IsControlDown())
-					return TryRequestVirtualDesktopSwitch(vk, path, out swallowed);
-
-				return false;
-			}
-
+			// Native Windows shortcuts receive the original physical Win-down.
+			// Never queue shell protocols, window moves, or replayed chords here.
 			return false;
-		}
-
-		private static bool TryRequestSnip(string path, out bool swallowed)
-		{
-			swallowed = false;
-			long now = Environment.TickCount64;
-			if (now - _lastSnipRequestTick < SnipCooldownMs)
-			{
-#if AK_DIAGNOSTICS
-				WinChordDiag.Log(path, VK_S, "snip-cooldown", "ms=" + (now - _lastSnipRequestTick));
-#endif
-				return false;
-			}
-
-			_lastSnipRequestTick = now;
-			_snipRequested = true;
-			swallowed = true;
-#if AK_DIAGNOSTICS
-			WinChordDiag.Log(path, VK_S, "snip-request", "queued");
-#endif
-			return true;
-		}
-
-		private static bool TryRequestMonitorMove(uint vk, string path, out bool swallowed)
-		{
-			swallowed = false;
-			if (!IsShiftDownForDiag())
-				return false;
-
-			bool isLeft = vk == VK_LEFT;
-			bool latch = isLeft ? _leftMoveActive : _rightMoveActive;
-			if (latch)
-			{
-				swallowed = true;
-				return true;
-			}
-
-			if (isLeft)
-				_leftMoveActive = true;
-			else
-				_rightMoveActive = true;
-
-			uint chordWinVk = ResolveChordWinVk();
-			RequestArrowChord(vk, chordWinVk, monitorMove: true, virtualDesktop: false);
-			swallowed = true;
-#if AK_DIAGNOSTICS
-			WinChordDiag.Log(path, vk, "move-request", "win=0x" + chordWinVk.ToString("X"));
-#endif
-			return true;
-		}
-
-		private static bool TryRequestVirtualDesktopSwitch(uint vk, string path, out bool swallowed)
-		{
-			swallowed = false;
-			if (!IsControlDown())
-				return false;
-
-			bool isLeft = vk == VK_LEFT;
-			bool latch = isLeft ? _leftVirtualDesktopActive : _rightVirtualDesktopActive;
-			if (latch)
-			{
-				swallowed = true;
-				return true;
-			}
-
-			if (isLeft)
-				_leftVirtualDesktopActive = true;
-			else
-				_rightVirtualDesktopActive = true;
-
-			uint chordWinVk = ResolveChordWinVk();
-			RequestArrowChord(vk, chordWinVk, monitorMove: false, virtualDesktop: true);
-			swallowed = true;
-#if AK_DIAGNOSTICS
-			WinChordDiag.Log(path, vk, "vd-request", "win=0x" + chordWinVk.ToString("X"));
-#endif
-			return true;
 		}
 
 		private static uint ResolveChordWinVk()
 		{
-			uint chordWinVk = IsLeftWindowsDown ? VK_LWIN : VK_RWIN;
-			if (!IsLeftWindowsDown && IsRightWindowsDown)
-				chordWinVk = VK_RWIN;
-			else if (!AnyWindowsDown && IsAnyWinPhysicallyDown())
-				chordWinVk = IsPhysicalKeyDown(VK_RWIN) ? VK_RWIN : VK_LWIN;
-			return chordWinVk;
+			if (_leftWinOwner == WinOwnerAk)
+				return VK_LWIN;
+			if (_rightWinOwner == WinOwnerAk)
+				return VK_RWIN;
+			return 0;
 		}
 
 		public static bool TryFinishMonitorMoveArrowUp(uint vk, bool isUp, out bool swallowed)
 		{
 			swallowed = false;
-			if (!ShouldUseCustomWinChordHandling())
-				return false;
-
-			if (!isUp || (vk != VK_LEFT && vk != VK_RIGHT))
-				return false;
-
-			bool isLeft = vk == VK_LEFT;
-			bool moveLatch = isLeft ? _leftMoveActive : _rightMoveActive;
-			bool vdLatch = isLeft ? _leftVirtualDesktopActive : _rightVirtualDesktopActive;
-			if (!moveLatch && !vdLatch)
-				return false;
-
-			if (isLeft)
-			{
-				_leftMoveActive = false;
-				_leftVirtualDesktopActive = false;
-			}
-			else
-			{
-				_rightMoveActive = false;
-				_rightVirtualDesktopActive = false;
-			}
-
-			swallowed = true;
-			return true;
+			return false;
 		}
 
 		private static void SetShellBlockedEscapeDown(bool down)
@@ -1199,54 +1174,107 @@ namespace AdvancedKeybinds.Patches
 			if (vk != VK_LWIN && vk != VK_RWIN)
 				return false;
 
-			if (!ShouldBlockWindowsKey())
+			if (_syntheticChordDepth > 0)
 			{
-				if (vk == VK_LWIN)
-					IsLeftWindowsDown = false;
-				else
-					IsRightWindowsDown = false;
-
-#if AK_DIAGNOSTICS
-				StartMenuDiag.LogWndProc((uint)(isUp ? WM_KEYUP : WM_KEYDOWN), vk, blocked: false, "win reason=" + DescribeWhyNotBlocking());
-#endif
 				return true;
 			}
 
-			blocked = true;
-			ApplyWindowsKeyState(vk, isDown, isUp);
+			blocked = ApplyWindowsKeyState(vk, isDown, isUp);
+			if (blocked && isDown && IsGameForegroundCore())
+			{
+				if (IsSlotCapturePassthrough)
+					QueueWinKeyCapture(vk);
+				else
+					QueueGameplayWinEdge(vk);
+			}
 
-			if (IsSlotCapturePassthrough && isDown)
-				QueueWinKeyCapture(vk);
-			else if (isDown && IsGameForeground())
-				QueueGameplayWinEdge(vk);
-
-#if AK_DIAGNOSTICS
-			StartMenuDiag.LogWndProc((uint)(isUp ? WM_KEYUP : WM_KEYDOWN), vk, blocked: true, "win");
-#endif
 
 			return true;
 		}
 
-		private static void ApplyWindowsKeyState(uint vk, bool isDown, bool isUp)
+		private static bool ApplyWindowsKeyState(uint vk, bool isDown, bool isUp)
 		{
-			if (vk == VK_LWIN)
-				IsLeftWindowsDown = isDown || (!isUp && IsLeftWindowsDown);
-			else
-				IsRightWindowsDown = isDown || (!isUp && IsRightWindowsDown);
-
-			if (isDown)
+			bool left = vk == VK_LWIN;
+			int owner = left ? _leftWinOwner : _rightWinOwner;
+			bool pending = left ? _leftAkUpPending : _rightAkUpPending;
+			bool blocked = false;
+			bool gameDown = left ? IsLeftWindowsDown : IsRightWindowsDown;
+			bool repeatArmed = left ? _leftWinRepeatArmed : _rightWinRepeatArmed;
+			int frames = left ? _leftWinPhysicalUpFrames : _rightWinPhysicalUpFrames;
+			if (!IsWinKeySuppressionEnabled())
 			{
-				_swallowWinUntilPhysicalUp = true;
-				BeginWinPressSwallow();
+				if (isDown)
+					owner = WinOwnerOs;
+				else if (isUp)
+				{
+					owner = WinOwnerUp;
+					repeatArmed = true;
+				}
+
+				gameDown = false;
+				pending = false;
+				frames = 0;
+			}
+			else if (isDown)
+			{
+				pending = false;
+				frames = 0;
+				if (!IsGameForegroundCore() || owner == WinOwnerOs)
+				{
+					owner = WinOwnerOs;
+					gameDown = false;
+				}
+				else
+				{
+					if (owner == WinOwnerUp && (left ? _rightWinOwner : _leftWinOwner) != WinOwnerAk)
+					{
+					}
+					owner = WinOwnerAk;
+					blocked = true;
+					gameDown = true;
+					_swallowWinUntilPhysicalUp = true;
+					BeginWinPressSwallow();
+				}
 			}
 			else if (isUp)
 			{
-				if (vk == VK_LWIN)
-					_leftWinRepeatArmed = true;
-				else if (vk == VK_RWIN)
-					_rightWinRepeatArmed = true;
-				EndWinPressSwallow();
+				if (owner == WinOwnerAk || (owner == WinOwnerUp && pending))
+					blocked = true;
+				owner = WinOwnerUp;
+				gameDown = false;
+				repeatArmed = true;
+				pending = false;
+				frames = 0;
 			}
+
+			if (left)
+			{
+				_leftWinOwner = owner;
+				IsLeftWindowsDown = gameDown;
+				_leftWinRepeatArmed = repeatArmed;
+				_leftAkUpPending = pending;
+				_leftWinPhysicalUpFrames = frames;
+			}
+			else
+			{
+				_rightWinOwner = owner;
+				IsRightWindowsDown = gameDown;
+				_rightWinRepeatArmed = repeatArmed;
+				_rightAkUpPending = pending;
+				_rightWinPhysicalUpFrames = frames;
+			}
+
+			SyncSharedWinOwnership();
+			return blocked;
+		}
+
+		private static void SyncSharedWinOwnership()
+		{
+			bool anyAk = _leftWinOwner == WinOwnerAk || _rightWinOwner == WinOwnerAk;
+			_winPressActiveWhileSuppressing = anyAk;
+			_winPressStartedWhileFgCore = anyAk;
+			if (!anyAk)
+				_swallowWinUntilPhysicalUp = false;
 		}
 
 		/// <summary>After binding Win, keep swallowing until the user physically releases the key.</summary>
@@ -1263,48 +1291,83 @@ namespace AdvancedKeybinds.Patches
 
 			GameWindowInputHook.EnsureInstalledIfNeeded();
 
-			if (!IsGameForegroundCore())
+			bool foreground = IsGameForegroundCore();
+			var maskOwner = System.Threading.Volatile.Read(ref _maskOwner);
+			if (!foreground) InvalidateWinMaskOwnership();
+			bool leftDown = false, rightDown = false;
+			if (foreground || maskOwner?.HasHoldEvidence(VK_LWIN) == true || maskOwner?.HasHoldEvidence(VK_RWIN) == true)
 			{
-				// After virtual-desktop switch, focus leaves the game while physical Win may still be held.
-				// Keep swallowing that press so the shell does not see a half-held Win on the new desktop.
-				if (_winPressActiveWhileSuppressing && _winPressStartedWhileFgCore && IsAnyWinPhysicallyDown())
-				{
-					_winPhysicalUpFrames = 0;
-					_snipRequested = false;
-					_pendingArrowChordVk = 0;
-					_pendingArrowChordWinVk = 0;
-					_pendingArrowChordWithShift = false;
-					_pendingArrowChordVirtualDesktop = false;
-					return;
-				}
+				leftDown = IsPhysicalKeyDown(VK_LWIN);
+				rightDown = IsPhysicalKeyDown(VK_RWIN);
+				maskOwner?.ObservePhysicalSnapshot(leftDown, rightDown);
+			}
 
-				if (AnyWindowsDown || _winPressActiveWhileSuppressing || _swallowWinUntilPhysicalUp
-					|| _snipRequested || _pendingArrowChordVk != 0)
-				{
-					ReleaseWinSuppressionState();
-#if AK_DIAGNOSTICS
-					WinChordDiag.Log("poll", 0, "released", "reason=inactive");
-#endif
-				}
-
+			if (!foreground)
+			{
+				_snipRequested = false;
+				_pendingArrowChordVk = 0;
+				_pendingArrowChordWinVk = 0;
+				_pendingArrowChordWithShift = false;
+				_pendingArrowChordVirtualDesktop = false;
+				_leftWinPhysicalUpFrames = 0;
+				_rightWinPhysicalUpFrames = 0;
 				return;
 			}
 
-			bool leftDown = IsPhysicalKeyDown(VK_LWIN);
-			bool rightDown = IsPhysicalKeyDown(VK_RWIN);
-			bool anyPhysicalDown = leftDown || rightDown;
+			ObserveSidePhysical(true, leftDown);
+			ObserveSidePhysical(false, rightDown);
+			SyncSharedWinOwnership();
+		}
 
-			if (anyPhysicalDown)
-				_winPhysicalUpFrames = 0;
-			else if (_winPressActiveWhileSuppressing)
-				_winPhysicalUpFrames++;
+		private static void ObserveSidePhysical(bool left, bool physicalDown)
+		{
+			if (physicalDown)
+			{
+				if (left)
+					_leftWinPhysicalUpFrames = 0;
+				else
+					_rightWinPhysicalUpFrames = 0;
+				return;
+			}
 
-			// Require a few frames of physical-up before ending — GetAsyncKeyState can flicker after swallow.
-			if (_winPressActiveWhileSuppressing && !anyPhysicalDown && _winPhysicalUpFrames >= 3)
-				EndWinPressSwallow();
+			int owner = left ? _leftWinOwner : _rightWinOwner;
+			if (owner == WinOwnerUp)
+			{
+				if (left)
+					_leftWinPhysicalUpFrames = 0;
+				else
+					_rightWinPhysicalUpFrames = 0;
+				return;
+			}
 
-			if (_swallowWinUntilPhysicalUp && !leftDown && !rightDown)
-				SyncWindowsKeyStateFromOs();
+			int frames = left ? _leftWinPhysicalUpFrames : _rightWinPhysicalUpFrames;
+			if (frames < 3)
+				frames++;
+			if (frames < 3)
+			{
+				if (left)
+					_leftWinPhysicalUpFrames = frames;
+				else
+					_rightWinPhysicalUpFrames = frames;
+				return;
+			}
+
+			if (left)
+			{
+				_leftAkUpPending = owner == WinOwnerAk;
+				_leftWinOwner = WinOwnerUp;
+				IsLeftWindowsDown = false;
+				_leftWinRepeatArmed = true;
+				_leftWinPhysicalUpFrames = 0;
+			}
+			else
+			{
+				_rightAkUpPending = owner == WinOwnerAk;
+				_rightWinOwner = WinOwnerUp;
+				IsRightWindowsDown = false;
+				_rightWinRepeatArmed = true;
+				_rightWinPhysicalUpFrames = 0;
+			}
 		}
 
 		public static bool TryConsumeEscChordCapture(out string token)
@@ -1583,7 +1646,8 @@ namespace AdvancedKeybinds.Patches
 			_lastHankakuBindEdgeMs = now;
 			_pendingHankakuCaptureToken = BindingRestrictions.HankakuZenkakuToken;
 			_pendingHankakuCaptureTick = now;
-			_gameplayHankakuEdges.Add(BindingRestrictions.HankakuZenkakuToken);
+			if (!Main.gameMenu)
+				_gameplayHankakuEdges.Add(BindingRestrictions.HankakuZenkakuToken);
 			if (AkDiag.Enabled)
 			{
 				AkDiag.Log(
@@ -1667,7 +1731,8 @@ namespace AdvancedKeybinds.Patches
 			_lastKanaEdgeMs = now;
 			_pendingKanaCaptureToken = "Kana";
 			_pendingKanaCaptureTick = now;
-			_gameplayKanaEdges.Add("Kana");
+			if (!Main.gameMenu)
+				_gameplayKanaEdges.Add("Kana");
 			if (AkDiag.Enabled)
 			{
 				AkDiag.Log(
@@ -1721,53 +1786,46 @@ namespace AdvancedKeybinds.Patches
 			if (string.IsNullOrEmpty(token))
 				return;
 
-			if (!IsSlotCapturePassthrough && !KeyboardDiagMode.IsActive)
+			var id = new GenericScanId(scan, extended);
+			object boundaryToken;
+			object revision;
+			lock (_physicalInputGate)
+				revision = BeginPhysicalKeyMutationLocked(id, vk, out boundaryToken);
+
+			if (!IsSlotCapturePassthrough)
 				return;
 
 			long now = Environment.TickCount64;
-			_pendingPhysicalCaptureToken = token;
-			_pendingPhysicalCaptureTick = now;
-			_pendingWin32KeysCaptureToken = token;
-			_pendingWin32KeysCaptureTick = now;
-			_gameplayPhysicalEdges.Add(token);
-
-			KeyboardDiagMode.NotifyPhysicalKeyEvent(
-				vk,
-				scan,
-				extended,
-				captureToken: token,
-				captureSuccess: true,
-				captureFailReason: null,
-				source: source);
-
-			if (AkDiag.Enabled)
+			lock (_physicalInputGate)
 			{
-				AkDiag.Log(
-				"PhysicalCapture edge token=" + token
-				+ " vk=0x" + vk.ToString("X2")
-				+ " scan=0x" + (scan & 0xFF).ToString("X2")
-				+ " extended=" + extended
-				+ " src=" + source
-				+ " " + KeyboardLayoutHelper.FormatPhysicalKeyCaptureDiag(
-				vk,
-				adoptedToken: token,
-				eventScan: scan,
-				eventExtended: extended));
+				if (!IsPhysicalKeyMutationCurrentLocked(id, vk, boundaryToken, revision))
+					return;
+				QueuePhysicalCaptureEdgeLocked(token, now);
 			}
 		}
 
 		public static bool TryConsumePhysicalCapture(out string token)
 		{
-			token = _pendingPhysicalCaptureToken ?? _pendingWin32KeysCaptureToken;
-			if (token == null)
-				return false;
-
-			long tick = _pendingPhysicalCaptureToken != null
-				? _pendingPhysicalCaptureTick
-				: _pendingWin32KeysCaptureTick;
+			long now = Environment.TickCount64;
 			int maxAge = PhysicalCaptureLatchMaxAgeMs;
-
-			if (Environment.TickCount64 - tick > maxAge)
+			bool expired;
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				token = _pendingPhysicalCaptureToken ?? _pendingWin32KeysCaptureToken;
+				if (token == null)
+					return false;
+				long tick = _pendingPhysicalCaptureToken != null
+					? _pendingPhysicalCaptureTick : _pendingWin32KeysCaptureTick;
+				expired = now - tick > maxAge;
+				_pendingPhysicalCaptureToken = null;
+				_pendingPhysicalCaptureTick = 0;
+				_pendingWin32KeysCaptureToken = null;
+				_pendingWin32KeysCaptureTick = 0;
+				if (!expired)
+					_gameplayPhysicalEdges.Remove(token);
+			}
+			if (expired)
 			{
 				if (AkDiag.Enabled)
 				{
@@ -1776,19 +1834,10 @@ namespace AdvancedKeybinds.Patches
 					+ " token=" + token
 					+ " capture=" + IsSlotCapturePassthrough);
 				}
-				_pendingPhysicalCaptureToken = null;
-				_pendingPhysicalCaptureTick = 0;
-				_pendingWin32KeysCaptureToken = null;
-				_pendingWin32KeysCaptureTick = 0;
 				token = null;
 				return false;
 			}
 
-			_pendingPhysicalCaptureToken = null;
-			_pendingPhysicalCaptureTick = 0;
-			_pendingWin32KeysCaptureToken = null;
-			_pendingWin32KeysCaptureTick = 0;
-			_gameplayPhysicalEdges.Remove(token);
 			if (AkDiag.Enabled)
 			{
 				AkDiag.Log(
@@ -1798,16 +1847,33 @@ namespace AdvancedKeybinds.Patches
 			return true;
 		}
 
+		public static void DiscardPendingGameplayEdges()
+		{
+			if (!Main.gameMenu)
+				return;
+
+			_gameplayWinEdges.Clear();
+			_gameplayToggleEdges.Clear();
+			_gameplayKanaEdges.Clear();
+			_gameplayHankakuEdges.Clear();
+			_gameplayJisIntlEdges.Clear();
+			lock (_physicalInputGate)
+				_gameplayPhysicalEdges.Clear();
+		}
+
 		/// <summary>One-frame gameplay edges for VK/SC fallback tokens.</summary>
 		public static IReadOnlyCollection<string> DrainGameplayPhysicalEdges()
 		{
-			if (_gameplayPhysicalEdges.Count == 0)
-				return Array.Empty<string>();
-
-			string[] edges = new string[_gameplayPhysicalEdges.Count];
-			_gameplayPhysicalEdges.CopyTo(edges);
-			_gameplayPhysicalEdges.Clear();
-			return edges;
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				if (_gameplayPhysicalEdges.Count == 0)
+					return Array.Empty<string>();
+				string[] edges = new string[_gameplayPhysicalEdges.Count];
+				_gameplayPhysicalEdges.CopyTo(edges);
+				_gameplayPhysicalEdges.Clear();
+				return edges;
+			}
 		}
 
 		public static bool IsGenericScanTokenDown(string token)
@@ -1815,7 +1881,11 @@ namespace AdvancedKeybinds.Patches
 			if (!PhysicalKeyToken.TryParseScan(token, out ushort scan, out bool extended))
 				return false;
 
-			return _genericScanHeld.TryGetValue(new GenericScanId(scan, extended), out bool down) && down;
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				return _genericScanHeld.TryGetValue(new GenericScanId(scan, extended), out bool down) && down;
+			}
 		}
 
 		public static void SupplementGenericScanTokens(HashSet<string> pressed)
@@ -1823,7 +1893,13 @@ namespace AdvancedKeybinds.Patches
 			if (pressed == null)
 				return;
 
-			foreach (KeyValuePair<GenericScanId, bool> pair in _genericScanHeld)
+			Dictionary<GenericScanId, bool> held;
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				held = new Dictionary<GenericScanId, bool>(_genericScanHeld);
+			}
+			foreach (KeyValuePair<GenericScanId, bool> pair in held)
 			{
 				if (!pair.Value)
 					continue;
@@ -1844,10 +1920,21 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		public static void SupplementSpecialOrOrphanFallbackTokens(HashSet<string> pressed)
 		{
-			if (pressed == null || _fallbackVkHeld.Count == 0)
+			if (pressed == null)
 				return;
 
-			foreach (uint heldVk in _fallbackVkHeld)
+			uint[] heldVks;
+			Dictionary<uint, GenericScanId> measuredScans;
+			Dictionary<uint, MeasuredPhysicalKeyEvent> measuredEvents;
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				heldVks = new uint[_fallbackVkHeld.Count];
+				_fallbackVkHeld.CopyTo(heldVks);
+				measuredScans = new Dictionary<uint, GenericScanId>(_vkMeasuredScan);
+				measuredEvents = new Dictionary<uint, MeasuredPhysicalKeyEvent>(_vkLastMeasuredEvent);
+			}
+			foreach (uint heldVk in heldVks)
 			{
 				if (!PhysicalKeyToken.IsValidVirtualKey(heldVk))
 					continue;
@@ -1874,13 +1961,13 @@ namespace AdvancedKeybinds.Patches
 				bool measuredExt = false;
 				bool sameEvent = false;
 				long lastSeq = 0;
-				if (_vkMeasuredScan.TryGetValue(heldVk, out GenericScanId measured))
+				if (measuredScans.TryGetValue(heldVk, out GenericScanId measured))
 				{
 					measuredScan = measured.Scan;
 					measuredExt = measured.Extended;
 				}
 
-				if (_vkLastMeasuredEvent.TryGetValue(heldVk, out MeasuredPhysicalKeyEvent lastEv)
+				if (measuredEvents.TryGetValue(heldVk, out MeasuredPhysicalKeyEvent lastEv)
 					&& lastEv.HasMeasuredScan
 					&& lastEv.IsDown)
 				{
@@ -1906,10 +1993,17 @@ namespace AdvancedKeybinds.Patches
 
 		public static void SupplementFallbackVkTokens(HashSet<string> pressed)
 		{
-			if (pressed == null || _fallbackVkHeld.Count == 0)
+			if (pressed == null)
 				return;
 
-			foreach (uint heldVk in _fallbackVkHeld)
+			uint[] heldVks;
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				heldVks = new uint[_fallbackVkHeld.Count];
+				_fallbackVkHeld.CopyTo(heldVks);
+			}
+			foreach (uint heldVk in heldVks)
 			{
 				if (!PhysicalKeyToken.IsValidVirtualKey(heldVk))
 					continue;
@@ -1920,7 +2014,15 @@ namespace AdvancedKeybinds.Patches
 
 		/// <summary>True while a KEYDOWN for this VK was seen and KEYUP has not yet cleared it.</summary>
 		public static bool IsFallbackVkHeld(uint vk)
-			=> PhysicalKeyToken.IsValidVirtualKey(vk) && _fallbackVkHeld.Contains(vk);
+		{
+			if (!PhysicalKeyToken.IsValidVirtualKey(vk))
+				return false;
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				return _fallbackVkHeld.Contains(vk);
+			}
+		}
 
 		/// <summary>
 		/// Soft reconcile for scan-held ghosts when KEYUP was missed.
@@ -1928,44 +2030,54 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		public static void ReconcileGenericScanHeldGhosts()
 		{
-			if (_genericScanHeld.Count == 0)
-				return;
-
 			long now = Environment.TickCount64;
-			List<GenericScanId> stale = null;
-			foreach (KeyValuePair<GenericScanId, bool> pair in _genericScanHeld)
+			object token;
+			var snapshots = new List<PhysicalScanReconcileSnapshot>();
+			lock (_physicalInputGate)
 			{
-				if (!pair.Value)
-					continue;
-
-				if (!_genericScanDownSinceMs.TryGetValue(pair.Key, out long sinceMs))
+				token = SynchronizePhysicalInputFocusBoundaryLocked();
+				foreach (KeyValuePair<GenericScanId, bool> pair in _genericScanHeld)
 				{
-					_genericScanDownSinceMs[pair.Key] = now;
-					continue;
+					if (!pair.Value)
+						continue;
+					if (!_genericScanDownSinceMs.TryGetValue(pair.Key, out long sinceMs))
+					{
+						_genericScanDownSinceMs[pair.Key] = now;
+						continue;
+					}
+					if (now - sinceMs < 3000)
+						continue;
+					if (!_physicalScanRevisions.TryGetValue(pair.Key, out object revision))
+					{
+						revision = new object();
+						_physicalScanRevisions[pair.Key] = revision;
+					}
+					var virtualKeys = new List<uint>();
+					foreach (KeyValuePair<uint, GenericScanId> measured in _vkMeasuredScan)
+						if (measured.Value.Equals(pair.Key))
+							virtualKeys.Add(measured.Key);
+					snapshots.Add(new PhysicalScanReconcileSnapshot(pair.Key, revision, virtualKeys.ToArray()));
 				}
-
-				// 3s without KEYUP: treat as missed break (capture clears separately).
-				if (now - sinceMs < 3000)
-					continue;
-
-				if (KeepExpiredGenericScanIfPhysicallyDown(pair.Key))
-					continue;
-
-				stale ??= new List<GenericScanId>();
-				stale.Add(pair.Key);
 			}
 
-			if (stale == null)
-				return;
-
-			for (int i = 0; i < stale.Count; i++)
+			foreach (PhysicalScanReconcileSnapshot snapshot in snapshots)
 			{
-				_genericScanHeld.Remove(stale[i]);
-				_genericScanDownSinceMs.Remove(stale[i]);
+				if (KeepExpiredGenericScanIfPhysicallyDown(snapshot.VirtualKeys))
+					continue;
+				lock (_physicalInputGate)
+				{
+					if (!object.ReferenceEquals(SynchronizePhysicalInputFocusBoundaryLocked(), token)
+						|| !_physicalScanRevisions.TryGetValue(snapshot.Id, out object revision)
+						|| !object.ReferenceEquals(revision, snapshot.Revision))
+						continue;
+					_genericScanHeld.Remove(snapshot.Id);
+					_genericScanDownSinceMs.Remove(snapshot.Id);
+					_physicalScanRevisions[snapshot.Id] = new object();
+				}
 			}
 		}
 
-		private static bool KeepExpiredGenericScanIfPhysicallyDown(GenericScanId id)
+		private static bool KeepExpiredGenericScanIfPhysicallyDown(uint[] measuredVirtualKeys)
 		{
 			try
 			{
@@ -1996,15 +2108,9 @@ namespace AdvancedKeybinds.Patches
 				if (IsSlotCapturePassthrough)
 					return false;
 
-				if (KeyboardDiagMode.IsActive)
-					return false;
-
-				foreach (KeyValuePair<uint, GenericScanId> measured in _vkMeasuredScan)
+				foreach (uint vk in measuredVirtualKeys)
 				{
-					if (!measured.Value.Equals(id))
-						continue;
-
-					if (IsPhysicalKeyDown(measured.Key))
+					if (IsPhysicalKeyDown(vk))
 						return true;
 				}
 
@@ -2033,21 +2139,52 @@ namespace AdvancedKeybinds.Patches
 
 			scan = (ushort)(scan & 0xFF);
 			var id = new GenericScanId(scan, extended);
+			long now = Environment.TickCount64;
+			object boundaryToken;
+			object revision;
+			bool scanRising = false;
+			lock (_physicalInputGate)
+			{
+				revision = BeginPhysicalKeyMutationLocked(id, vk, out boundaryToken);
+				if (isDown)
+				{
+					scanRising = !_genericScanHeld.TryGetValue(id, out bool wasScanDown) || !wasScanDown;
+				}
+			}
+			bool diagEnabled = AkDiag.Enabled;
 
 			if (!isDown)
 			{
-				_genericScanHeld.Remove(id);
-				_genericScanDownSinceMs.Remove(id);
-				if (PhysicalKeyToken.IsValidVirtualKey(vk))
+				EventSequenceUnifyResult upResult;
+				List<string> upLines;
+				Action<string> upSink;
+				lock (_physicalInputGate)
 				{
-					_fallbackVkHeld.Remove(vk);
-					_vkMeasuredScan.Remove(vk);
-					_vkLastMeasuredEvent.Remove(vk);
+					if (!IsPhysicalKeyMutationCurrentLocked(id, vk, boundaryToken, revision))
+						return;
+					_genericScanHeld.Remove(id);
+					_genericScanDownSinceMs.Remove(id);
+					if (PhysicalKeyToken.IsValidVirtualKey(vk))
+					{
+						_fallbackVkHeld.Remove(vk);
+						_vkMeasuredScan.Remove(vk);
+						_vkLastMeasuredEvent.Remove(vk);
+					}
+					long upSeq = ++_physicalKeyEventSequence;
+					upSink = _eventSequenceUnifier.DiagSink;
+					upLines = diagEnabled || upSink != null ? new List<string>() : null;
+					try
+					{
+						_eventSequenceUnifier.DiagSink = upLines == null ? null : new Action<string>(upLines.Add);
+						upResult = _eventSequenceUnifier.ObserveUp(scan, extended, vk, upSeq);
+					}
+					finally
+					{
+						_eventSequenceUnifier.DiagSink = upSink;
+					}
 				}
 
-				long upSeq = ++_physicalKeyEventSequence;
-				EventSequenceUnifyResult upResult = _eventSequenceUnifier.ObserveUp(
-					scan, extended, vk, upSeq);
+				FlushPhysicalUnifierDiagnostics(upLines, upSink, diagEnabled);
 				if (AkDiag.Enabled)
 				{
 					AkDiag.Log(
@@ -2058,22 +2195,21 @@ namespace AdvancedKeybinds.Patches
 						+ " vk=0x" + vk.ToString("X2"));
 				}
 
-				if (JisOemInGameDiagnostic.IsSessionActive)
-				{
-					JisOemInGameDiagnostic.ObserveKeyUp(
-						vk, scan, extended, source, FormatHeldDiagSnapshot(),
-						eventSequence: upResult.EventSequence);
-				}
-
 				return;
 			}
 
-			bool scanRising = !_genericScanHeld.TryGetValue(id, out bool wasScanDown) || !wasScanDown;
-			_genericScanHeld[id] = true;
-			_genericScanDownSinceMs[id] = Environment.TickCount64;
-
-			if (!IsGameForegroundCore() && !KeyboardDiagMode.IsActive)
+			if (!IsGameForegroundCore())
+			{
+				lock (_physicalInputGate)
+				{
+					if (IsPhysicalKeyMutationCurrentLocked(id, vk, boundaryToken, revision))
+					{
+						_genericScanHeld[id] = true;
+						_genericScanDownSinceMs[id] = now;
+					}
+				}
 				return;
+			}
 
 			if (IsKanaPhysicalKey(vk, scan)
 				|| IsHankakuZenkakuPhysicalKey(vk, scan)
@@ -2086,9 +2222,16 @@ namespace AdvancedKeybinds.Patches
 				|| scan == SC_CAPITAL
 				|| scan == SC_SCROLL)
 			{
-				// Pause/Break never use GetAsyncKeyState — keep make/break VK held for Snapshot.
-				if (IsPauseOrBreakVk(vk) && PhysicalKeyToken.IsValidVirtualKey(vk))
-					_fallbackVkHeld.Add(vk);
+				lock (_physicalInputGate)
+				{
+					if (!IsPhysicalKeyMutationCurrentLocked(id, vk, boundaryToken, revision))
+						return;
+					_genericScanHeld[id] = true;
+					_genericScanDownSinceMs[id] = now;
+					// Pause/Break never use GetAsyncKeyState — keep make/break VK held for Snapshot.
+					if (IsPauseOrBreakVk(vk) && PhysicalKeyToken.IsValidVirtualKey(vk))
+						_fallbackVkHeld.Add(vk);
+				}
 				return;
 			}
 
@@ -2100,14 +2243,13 @@ namespace AdvancedKeybinds.Patches
 
 			if (!resolved.Success)
 			{
-				KeyboardDiagMode.NotifyPhysicalKeyEvent(
-					vk,
-					scan,
-					extended,
-					captureToken: null,
-					captureSuccess: false,
-					captureFailReason: resolved.FailReason,
-					source: source);
+				lock (_physicalInputGate)
+				{
+					if (!IsPhysicalKeyMutationCurrentLocked(id, vk, boundaryToken, revision))
+						return;
+					_genericScanHeld[id] = true;
+					_genericScanDownSinceMs[id] = now;
+				}
 				if (AkDiag.Enabled)
 				{
 					AkDiag.Log(
@@ -2120,46 +2262,10 @@ namespace AdvancedKeybinds.Patches
 							eventExtended: extended));
 				}
 
-				if (JisOemInGameDiagnostic.IsSessionActive)
-				{
-					JisOemInGameDiagnostic.Observe(
-						vk, scan, extended, isDown: true, source, resolved,
-						beforeCandidates: null,
-						afterCandidates: null,
-						captureResolverInput: null,
-						chooseMeasuredToken: null,
-						finalOrReject: "resolver-reject");
-				}
-
 				return;
 			}
 
-			// Always track VK make/break so old Keys/VK bindings can match via PhysicalKeyIdentity.
-			long seq = ++_physicalKeyEventSequence;
-			MeasuredPhysicalKeyEvent measuredEv = MeasuredPhysicalKeyEvent.FromKeyDown(
-				vk, scan, extended, source, resolved.Token, seq);
-
 			bool isKeyRepeat = !scanRising;
-			if (AkDiag.Enabled)
-				_eventSequenceUnifier.DiagSink ??= static line => AkDiag.Log("EventSequence " + line);
-
-			EventSequenceUnifyResult unify = _eventSequenceUnifier.ObserveDown(measuredEv, isKeyRepeat);
-
-			if (PhysicalKeyToken.IsValidVirtualKey(vk))
-			{
-				_fallbackVkHeld.Add(vk);
-				if (measuredEv.HasMeasuredScan)
-				{
-					_vkMeasuredScan[vk] = id;
-					_vkLastMeasuredEvent[vk] = measuredEv;
-				}
-				else
-				{
-					_vkMeasuredScan.Remove(vk);
-					_vkLastMeasuredEvent.Remove(vk);
-				}
-			}
-
 			MeasuredPhysicalKeyEdgePolicy.Decision edge =
 				MeasuredPhysicalKeyEdgePolicy.DecideDown(
 					vk,
@@ -2167,23 +2273,68 @@ namespace AdvancedKeybinds.Patches
 					extended,
 					resolved.Token,
 					scanRising);
+			var gameplayEdges = edge.CollectGameplayEdgeTokens();
+			bool gameplay = !IsSlotCapturePassthrough;
+			long captureNow = Environment.TickCount64;
+			long seq;
+			MeasuredPhysicalKeyEvent measuredEv;
+			EventSequenceUnifyResult unify;
+			string canonicalToken;
+			bool latch;
+			List<string> downLines;
+			Action<string> downSink;
+			lock (_physicalInputGate)
+			{
+				if (!IsPhysicalKeyMutationCurrentLocked(id, vk, boundaryToken, revision))
+					return;
+				_genericScanHeld[id] = true;
+				_genericScanDownSinceMs[id] = now;
+				// Always track VK make/break so old Keys/VK bindings can match via PhysicalKeyIdentity.
+				seq = ++_physicalKeyEventSequence;
+				measuredEv = MeasuredPhysicalKeyEvent.FromKeyDown(vk, scan, extended, source, resolved.Token, seq);
+				downSink = _eventSequenceUnifier.DiagSink;
+				downLines = diagEnabled || downSink != null ? new List<string>() : null;
+				try
+				{
+					_eventSequenceUnifier.DiagSink = downLines == null ? null : new Action<string>(downLines.Add);
+					unify = _eventSequenceUnifier.ObserveDown(measuredEv, isKeyRepeat);
+				}
+				finally
+				{
+					_eventSequenceUnifier.DiagSink = downSink;
+				}
+				if (PhysicalKeyToken.IsValidVirtualKey(vk))
+				{
+					_fallbackVkHeld.Add(vk);
+					if (measuredEv.HasMeasuredScan)
+					{
+						_vkMeasuredScan[vk] = id;
+						_vkLastMeasuredEvent[vk] = measuredEv;
+					}
+					else
+					{
+						_vkMeasuredScan.Remove(vk);
+						_vkLastMeasuredEvent.Remove(vk);
+					}
+				}
 
 			// Registration / edges: EventSequence-unified canonical (SC when measured).
-			string canonicalToken = !string.IsNullOrEmpty(unify.CanonicalToken)
+				canonicalToken = !string.IsNullOrEmpty(unify.CanonicalToken)
 				? unify.CanonicalToken
 				: (!string.IsNullOrEmpty(measuredEv.CanonicalToken)
 					? measuredEv.CanonicalToken
 					: edge.CanonicalToken);
-
-			bool jisDiag = JisOemInGameDiagnostic.IsSessionActive;
-			string[] beforePreview = null;
-			string[] afterPreview = null;
-			if (jisDiag || AkDiag.Enabled)
-			{
-				beforePreview = BuildPreNormalizeCandidatePreview(vk, scan, extended, resolved.Token);
-				List<string> reg = SameEventAliasPolicy.BuildRegistrationNewcomers(measuredEv);
-				afterPreview = reg.Count == 0 ? Array.Empty<string>() : reg.ToArray();
+				latch = !gameplay && edge.LatchCapture && unify.AddedAsNewcomer && !unify.IgnoredAsRepeat;
+				if (gameplay && !Main.gameMenu)
+				{
+					foreach (string edgeToken in gameplayEdges)
+						_gameplayPhysicalEdges.Add(edgeToken);
+				}
+				else if (latch && !string.IsNullOrEmpty(canonicalToken))
+					QueuePhysicalCaptureEdgeLocked(canonicalToken, captureNow);
 			}
+			FlushPhysicalUnifierDiagnostics(downLines, downSink, diagEnabled);
+
 
 			if (AkDiag.Enabled)
 			{
@@ -2201,91 +2352,12 @@ namespace AdvancedKeybinds.Patches
 					+ " ignoreRepeat=" + unify.IgnoredAsRepeat);
 			}
 
-			bool gameplay = !IsSlotCapturePassthrough && !KeyboardDiagMode.IsActive;
-
 			if (gameplay)
 			{
-				foreach (string edgeToken in edge.CollectGameplayEdgeTokens())
-					_gameplayPhysicalEdges.Add(edgeToken);
-
-				KeyboardDiagMode.NotifyPhysicalKeyEvent(
-					vk,
-					scan,
-					extended,
-					captureToken: canonicalToken,
-					captureSuccess: true,
-					captureFailReason: null,
-					source: source);
-				if (jisDiag)
-				{
-					JisOemInGameDiagnostic.Observe(
-						vk, scan, extended, isDown: true, source, resolved,
-						beforeCandidates: beforePreview,
-						afterCandidates: afterPreview,
-						captureResolverInput: null,
-						chooseMeasuredToken: canonicalToken,
-						finalOrReject: "gameplay-edges:[" + string.Join(",", edge.CollectGameplayEdgeTokens()) + "]",
-						eventSequence: seq,
-						unifyNote: FormatUnifyNote(unify));
-				}
-
 				return;
 			}
 
-			// Autorepeat / EventSequence unifier: do not re-latch capture for same physical hold.
-			bool latch = edge.LatchCapture && unify.AddedAsNewcomer && !unify.IgnoredAsRepeat;
-			if (latch)
-				QueuePhysicalCaptureEdge(canonicalToken, vk, scan, extended, source);
 
-			if (jisDiag)
-			{
-				JisOemInGameDiagnostic.Observe(
-					vk, scan, extended, isDown: true, source, resolved,
-					beforeCandidates: beforePreview,
-					afterCandidates: afterPreview,
-					captureResolverInput: afterPreview,
-					chooseMeasuredToken: canonicalToken,
-					finalOrReject: latch
-						? "capture-edge:" + canonicalToken
-						: (unify.IgnoredAsRepeat
-							? "capture-repeat-ignored:" + canonicalToken
-							: "capture-same-seq:" + canonicalToken),
-					eventSequence: seq,
-					unifyNote: FormatUnifyNote(unify));
-			}
-		}
-
-		private static string FormatUnifyNote(EventSequenceUnifyResult unify)
-		{
-			return "seq=" + unify.EventSequence
-				+ ";added=" + unify.AddedAsNewcomer
-				+ ";suppressed=" + (unify.ExcludedAlias ?? "-")
-				+ ";replacedSc=" + unify.ReplacedFallbackWithScan
-				+ ";repeat=" + unify.IgnoredAsRepeat;
-		}
-
-		private static string FormatHeldDiagSnapshot()
-		{
-			var parts = new List<string>();
-			foreach (var pair in _genericScanHeld)
-			{
-				if (pair.Value)
-					parts.Add(PhysicalKeyToken.FormatScan(pair.Key.Scan, pair.Key.Extended));
-			}
-
-			return "[" + string.Join(",", parts) + "]";
-		}
-
-		private static string[] BuildPreNormalizeCandidatePreview(uint vk, ushort scan, bool extended, string resolverToken)
-		{
-			var list = new List<string>(3);
-			if (!string.IsNullOrEmpty(resolverToken))
-				list.Add(resolverToken);
-			if (PhysicalKeyToken.IsValidVirtualKey(vk))
-				list.Add(PhysicalKeyToken.FormatVk(vk));
-			if (scan != 0)
-				list.Add(PhysicalKeyToken.FormatScan(scan, extended));
-			return list.ToArray();
 		}
 
 		/// <summary>Latch FNA-missing Keys token from WndProc/WM_INPUT KEYDOWN (legacy alias).</summary>
@@ -2387,7 +2459,8 @@ namespace AdvancedKeybinds.Patches
 			_lastJisIntlScanEdgeMs = now;
 			_pendingJisIntlCaptureToken = token;
 			_pendingJisIntlCaptureTick = now;
-			_gameplayJisIntlEdges.Add(token);
+			if (!Main.gameMenu)
+				_gameplayJisIntlEdges.Add(token);
 			if (AkDiag.Enabled)
 			{
 				AkDiag.Log(
@@ -2637,9 +2710,24 @@ namespace AdvancedKeybinds.Patches
 					_kanaPhysicalDownSinceMs = 0;
 				}
 				else if (PhysicalKeyToken.TryParseVk(token, out uint ghostVk))
-					_fallbackVkHeld.Remove(ghostVk);
+				{
+					lock (_physicalInputGate)
+					{
+						SynchronizePhysicalInputFocusBoundaryLocked();
+						_fallbackVkHeld.Remove(ghostVk);
+						_physicalVkRevisions[ghostVk] = new object();
+					}
+				}
 				else if (PhysicalKeyToken.TryParseScan(token, out ushort ghostScan, out bool ghostExtended))
-					_genericScanHeld.Remove(new GenericScanId(ghostScan, ghostExtended));
+				{
+					lock (_physicalInputGate)
+					{
+						SynchronizePhysicalInputFocusBoundaryLocked();
+						var ghostId = new GenericScanId(ghostScan, ghostExtended);
+						_genericScanHeld.Remove(ghostId);
+						_physicalScanRevisions[ghostId] = new object();
+					}
+				}
 			}
 
 			ClearJisIntlPendingEdges();
@@ -2669,14 +2757,12 @@ namespace AdvancedKeybinds.Patches
 			_hankakuPhysicalDownSinceMs = 0;
 			_kanaPhysicallyDown = false;
 			_kanaPhysicalDownSinceMs = 0;
-			_genericScanHeld.Clear();
-			_genericScanDownSinceMs.Clear();
-			_fallbackVkHeld.Clear();
-			_vkMeasuredScan.Clear();
-			_vkLastMeasuredEvent.Clear();
-			_eventSequenceUnifier.Clear();
-			_eventSequenceUnifier.DiagSink = null;
-			_gameplayPhysicalEdges.Clear();
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				ClearPhysicalInputGroupLocked();
+				_eventSequenceUnifier.DiagSink = null;
+			}
 			ClearJisIntlPendingEdges();
 			ClearHankakuBindEdges();
 			_pendingKanaCaptureToken = null;
@@ -3085,6 +3171,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static void QueueGameplayToggleLockEdge(string token)
 		{
+			if (Main.gameMenu)
+				return;
+
 			if (string.IsNullOrEmpty(token))
 				return;
 
@@ -3107,6 +3196,9 @@ namespace AdvancedKeybinds.Patches
 
 		private static void QueueGameplayWinEdge(uint vkCode)
 		{
+			if (Main.gameMenu)
+				return;
+
 			string token = vkCode == VK_LWIN ? "LeftWindows" : "RightWindows";
 			bool armed = vkCode == VK_LWIN ? _leftWinRepeatArmed : _rightWinRepeatArmed;
 			if (!armed)
@@ -3200,6 +3292,13 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		public static void DiscardAllPendingCaptureEdges()
 		{
+			lock (_physicalInputGate)
+			{
+				SynchronizePhysicalInputFocusBoundaryLocked();
+				ClearPhysicalCaptureEdgesLocked();
+				_physicalScanRevisions.Clear();
+				_physicalVkRevisions.Clear();
+			}
 			_pendingToggleLockCaptureToken = null;
 			_pendingToggleLockCaptureTick = 0;
 			_pendingWinCaptureToken = null;
@@ -3331,31 +3430,6 @@ namespace AdvancedKeybinds.Patches
 			JpCapsLockDetector.Reset();
 
 			// Discarded: GetKeyboardState / IME Caps synthesis is not a Microsoft keystroke path.
-			if (!Win32KeyboardAcquisitionPolicy.KeystrokeMessagesOnly)
-			{
-				JpCapsLockDetector.Poll(allowImeEdges);
-
-				foreach (string edge in JpCapsLockDetector.DrainEdges())
-				{
-					if (string.Equals(edge, "CapsLock", StringComparison.OrdinalIgnoreCase)
-						&& ShouldSuppressImeFalseCapsLock())
-					{
-						if (AkDiag.Enabled) AkDiag.Log("IME→Caps fake discarded (hankaku window) src=JpCaps");
-						continue;
-					}
-
-					token = edge;
-					if (AkDiag.Enabled)
-					{
-						AkDiag.Log(
-						"Toggle-lock JP edge: " + token
-						+ (string.Equals(token, "CapsLock", StringComparison.OrdinalIgnoreCase)
-						? " src=JpCaps(imeOrScan)"
-						: ""));
-					}
-					return true;
-				}
-			}
 
 			token = null;
 			return false;
@@ -3462,6 +3536,8 @@ namespace AdvancedKeybinds.Patches
 				bool isUp = (lp & 0x80000000) != 0;
 				bool isDown = !isUp;
 				uint threadScan = (uint)((lp >> 16) & 0xFF);
+				if (IsOwnMaskKeyMessage(vk, isDown, isUp))
+					return CallNextHookEx(_threadHookId, nCode, wParam, lParam);
 
 				// 「半角／全角」 must always reach OS/IME — never swallow on the thread hook.
 				// Acquisition is Microsoft keystroke messages only.
@@ -3473,58 +3549,36 @@ namespace AdvancedKeybinds.Patches
 				if (IsGameForegroundCore())
 					_lastGameForegroundMs = Environment.TickCount64;
 
-				if (!Win32KeyboardAcquisitionPolicy.KeystrokeMessagesOnly)
-				{
-					if (IsKanaPhysicalKey(vk, threadScan))
-					{
-						ApplyKanaPhysical(
-							vk,
-							threadScan,
-							isDown,
-							"thread vk=0x" + vk.ToString("X2") + " scan=0x" + threadScan.ToString("X2"));
-					}
-
-					ApplyJisIntlScan(threadScan, isDown, "thread vk=0x" + vk.ToString("X2"));
-				}
-#if AK_DIAGNOSTICS
-				if (isDown && vk == VK_ESCAPE && IsControlDown())
-				{
-					bool suppress = ShouldBlockCtrlEscForShell()
-						|| (IsSlotCapturePassthrough && IsGameForegroundCore());
-					StartMenuDiag.LogThread(vk, isDown, suppress, suppress ? "ctrl+esc" : "ctrl+esc reason=" + DescribeWhyNotBlocking());
-				}
-#endif
 
 				if (TryHandleCtrlEscChord(vk, isDown, out bool blockCtrlEsc) && blockCtrlEsc)
 				{
-#if AK_DIAGNOSTICS
-					StartMenuDiag.LogThread(vk, isDown, blocked: true, IsSlotCapturePassthrough ? "ctrl+esc-capture" : "ctrl+esc-chord");
-#endif
 					return (IntPtr)1;
 				}
 
 				if (vk == VK_LWIN || vk == VK_RWIN)
 				{
-					if (ShouldBlockWindowsKey())
+					if (_syntheticChordDepth <= 0)
 					{
-						if (isDown)
+						if (nCode == 0)
 						{
+							global::AdvancedKeybinds.Features.DoubleTap.DoubleTapNativeInput.NotifyThreadWindowsKey(vk, (ushort)threadScan, (lp & 0x01000000L) != 0, isDown, isUp, (lp & 0x40000000L) != 0, IsGameForegroundCore());
+						}
+						bool winBlocked = ApplyWindowsKeyState(vk, isDown, isUp);
+						if (winBlocked && isDown && IsGameForegroundCore())
+						{
+							TryPulseInitialThreadWin(nCode, vk, lParam);
 							if (IsSlotCapturePassthrough)
 								QueueWinKeyCapture(vk);
 							else
 								QueueGameplayWinEdge(vk);
 						}
 
-						ApplyWindowsKeyState(vk, isDown, isUp);
-#if AK_DIAGNOSTICS
-						StartMenuDiag.LogThread(vk, isDown, blocked: true, "win");
-#endif
-						return (IntPtr)1;
+						if (winBlocked)
+						{
+							return (IntPtr)1;
+						}
 					}
 
-#if AK_DIAGNOSTICS
-					StartMenuDiag.LogThread(vk, isDown, blocked: false, "win reason=" + DescribeWhyNotBlocking());
-#endif
 				}
 				else if (TryHandleWinChordPassthrough(vk, isDown, "thread", out bool swallowChord) && swallowChord)
 					return (IntPtr)1;
@@ -3543,21 +3597,7 @@ namespace AdvancedKeybinds.Patches
 				KBDLLHOOKSTRUCT data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
 				bool isDown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
 				bool isUp = msg == WM_KEYUP || msg == WM_SYSKEYUP;
-				bool hookInjected = (data.flags & LLKHF_INJECTED) != 0
-					|| data.dwExtraInfo == InjectedMarker;
 				bool gameForegroundForDiagnostic = IsGameForegroundCore();
-				if (gameForegroundForDiagnostic
-					&& (isDown || isUp)
-					&& AdvancedKeybindsDiagnosticEvents.HasKeyMessageSubscribers)
-				{
-					DiagnosticEventPublisher.PublishHook(
-						data.vkCode,
-						(ushort)(data.scanCode & 0xFF),
-						(data.flags & LLKHF_EXTENDED) != 0,
-						isDown,
-						isRepeat: false,
-						hookInjected);
-				}
 
 				// Let our own injected events straight through, untouched.
 				if (data.dwExtraInfo == InjectedMarker)
@@ -3603,51 +3643,18 @@ namespace AdvancedKeybinds.Patches
 					if (AkDiag.Enabled) AkDiag.Log($"Slot capture hook keydown vk=0x{data.vkCode:X2} scan=0x{scan:X2}{hint}");
 				}
 
-				if (!Win32KeyboardAcquisitionPolicy.KeystrokeMessagesOnly)
-				{
-					if (IsKanaPhysicalKey(data.vkCode, data.scanCode))
-					{
-						ApplyKanaPhysical(
-							data.vkCode,
-							data.scanCode,
-							isDown,
-							"hook vk=0x" + data.vkCode.ToString("X2")
-								+ " scan=0x" + (data.scanCode & 0xFF).ToString("X2"));
-					}
-
-					ApplyJisIntlScan(data.scanCode, isDown, "hook vk=0x" + data.vkCode.ToString("X2"));
-
-					bool hookExtended = (data.flags & LLKHF_EXTENDED) != 0;
-					ApplyPhysicalKeyEvent(
-						data.vkCode,
-						(ushort)(data.scanCode & 0xFF),
-						hookExtended,
-						isDown,
-						"hook vk=0x" + data.vkCode.ToString("X2"));
-				}
-#if AK_DIAGNOSTICS
-				if (isDown && data.vkCode == VK_ESCAPE && IsControlDown())
-				{
-					bool suppress = ShouldBlockCtrlEscForShell()
-						|| (IsSlotCapturePassthrough && IsGameForegroundCore());
-					string reason = suppress ? "ctrl+esc" : "ctrl+esc reason=" + DescribeWhyNotBlocking();
-					StartMenuDiag.LogHook(VK_ESCAPE, true, suppress, reason);
-				}
-#endif
 
 				if (TryHandleCtrlEscChord(data.vkCode, isDown, out bool blockCtrlEsc) && blockCtrlEsc)
 				{
-#if AK_DIAGNOSTICS
-					StartMenuDiag.LogHook(data.vkCode, isDown, blocked: true, IsSlotCapturePassthrough ? "ctrl+esc-capture" : "ctrl+esc-chord");
-#endif
 					return (IntPtr)1;
 				}
 
 				if (TryResolveWindowsVk(data, out uint winVk))
 				{
-					if (ShouldBlockWindowsKey())
+					if (_syntheticChordDepth <= 0)
 					{
-						if (isDown)
+						bool winBlocked = ApplyWindowsKeyState(winVk, isDown, isUp);
+						if (winBlocked && isDown && IsGameForegroundCore())
 						{
 							if (IsSlotCapturePassthrough)
 								QueueWinKeyCapture(winVk);
@@ -3655,20 +3662,14 @@ namespace AdvancedKeybinds.Patches
 								QueueGameplayWinEdge(winVk);
 						}
 
-						ApplyWindowsKeyState(winVk, isDown, isUp);
-#if AK_DIAGNOSTICS
-						StartMenuDiag.LogHook(winVk, isDown, blocked: true, "win");
-#endif
-						return (IntPtr)1;
+						if (winBlocked)
+						{
+						}
 					}
 
-#if AK_DIAGNOSTICS
-					StartMenuDiag.LogHook(winVk, isDown, blocked: false, "win reason=" + DescribeWhyNotBlocking());
-#endif
-					if (winVk == VK_LWIN)
-						IsLeftWindowsDown = false;
-					else
-						IsRightWindowsDown = false;
+					if (TryRelayOwnedWinRelease(nCode, wParam, lParam, data.vkCode, data.flags, isDown, isUp, out IntPtr maskResult))
+						return maskResult;
+
 				}
 				else if (TryResolveToggleLockEvent(data, out uint toggleVk))
 				{
@@ -3704,17 +3705,71 @@ namespace AdvancedKeybinds.Patches
 			return CallNextHookEx(_hookId, nCode, wParam, lParam);
 		}
 
+		// Game acquisition and DT have already processed the physical event before this
+		// boundary. Only this registration's non-injected HC_ACTION Win-up may be replaced.
+		private static bool TryRelayOwnedWinRelease(int nCode, IntPtr wParam, IntPtr lParam,
+			uint vk, uint flags, bool isDown, bool isUp, out IntPtr result)
+		{
+			result = IntPtr.Zero;
+			if (nCode != 0 || (flags & 0x12u) != 0 || isDown == isUp || (vk != VK_LWIN && vk != VK_RWIN)) return false;
+			var owner = WinInputReleaseCandidate.WinMaskCallbackScope.Current;
+			if (owner == null) return false;
+			bool windows = OperatingSystem.IsWindows();
+			bool on = windows && IsWinKeySuppressionEnabled();
+			bool active = windows && IsGameForegroundCore();
+			if (isDown)
+			{
+				owner.ObserveNonInjectedDown(vk, on, active);
+				return false;
+			}
+			IntPtr forwarded = IntPtr.Zero;
+			var delivered = owner.TryDeliverPhysicalUp(windows, on, active, vk, SendOwnedMaskBatch,
+				() => forwarded = CallNextHookEx(_hookId, nCode, wParam, lParam));
+			result = delivered.Accepted ? (IntPtr)1 : forwarded;
+			return true;
+		}
+
+		internal static bool IsOwnMaskKeyMessage(uint vk, bool isDown, bool isUp)
+		{
+			if (!OperatingSystem.IsWindows()) return false;
+			return WinInputReleaseCandidate.WinMaskNativeBatchAdapter.IsNativeEcho(
+				vk, isDown, isUp, unchecked((ulong)GetMessageExtraInfo().ToInt64()));
+		}
+
+		internal static void InvalidateWinMaskOwnership()
+		{
+			var owner = System.Threading.Volatile.Read(ref _maskOwner);
+			if (owner == null) return;
+			owner.InvalidateOwnership();
+			owner.TryDrainCleanup(OperatingSystem.IsWindows(), SendOwnedMaskBatch);
+		}
+
+		private static int SendOwnedMaskBatch(uint[] keys, uint[] flags, ulong marker)
+		{
+			bool windows = OperatingSystem.IsWindows();
+			// Cleanup must remain possible after OFF, focus loss, and retirement, without
+			// touching tML configuration during unload. The adapter still validates shape.
+			bool normal = keys != null && keys.Length == 3;
+			return WinInputReleaseCandidate.WinMaskNativeBatchAdapter.Send(windows,
+				windows && normal && IsWinKeySuppressionEnabled(),
+				windows && normal && IsGameForegroundCore(), keys, flags, marker, SendMappedMaskBatch);
+		}
+
+		private static int SendMappedMaskBatch(uint[] keys, uint[] flags, ulong marker)
+		{
+			INPUT[] batch = new INPUT[keys.Length];
+			for (int i = 0; i < keys.Length; i++) batch[i] = KeyEvent(keys[i], true);
+			for (int i = 0; i < keys.Length; i++) batch[i].u.ki.dwFlags = flags[i];
+			return unchecked((int)SendInput((uint)batch.Length, batch, Marshal.SizeOf<INPUT>()));
+		}
+
 		/// <summary>
 		/// Runs deferred Win chord work on the main thread (snip overlay, window move/snap).
 		/// Must not call SendInput from inside the keyboard hook callback.
 		/// </summary>
 		public static void FlushDeferredWinActions()
 		{
-			if (!OperatingSystem.IsWindows())
-				return;
-
-			FlushScreenshotRequests();
-			FlushPendingArrowChords();
+			// The native shortcut path has no deferred shell action to replay.
 		}
 
 		private static void RequestArrowChord(uint arrowVk, uint winVk, bool monitorMove, bool virtualDesktop)
@@ -3723,60 +3778,6 @@ namespace AdvancedKeybinds.Patches
 			_pendingArrowChordWinVk = winVk;
 			_pendingArrowChordWithShift = monitorMove;
 			_pendingArrowChordVirtualDesktop = virtualDesktop;
-#if AK_DIAGNOSTICS
-			WinChordDiag.Log(
-				"request",
-				arrowVk,
-				"arrow-queued",
-				"win=0x" + winVk.ToString("X")
-					+ " monitor=" + monitorMove
-					+ " vd=" + virtualDesktop);
-#endif
-		}
-
-		private static void FlushPendingArrowChords()
-		{
-			uint arrowVk = _pendingArrowChordVk;
-			if (arrowVk == 0)
-				return;
-
-			uint winVk = _pendingArrowChordWinVk;
-			bool monitorMove = _pendingArrowChordWithShift;
-			bool virtualDesktop = _pendingArrowChordVirtualDesktop;
-			_pendingArrowChordVk = 0;
-			_pendingArrowChordWinVk = 0;
-			_pendingArrowChordWithShift = false;
-			_pendingArrowChordVirtualDesktop = false;
-
-			if (monitorMove)
-			{
-				bool toRight = arrowVk == VK_RIGHT;
-				bool moved = TryMoveGameWindowToAdjacentMonitor(toRight);
-#if AK_DIAGNOSTICS
-				WinChordDiag.Log(
-					"flush",
-					arrowVk,
-					moved ? "monitor-move-ok" : "monitor-move-fail",
-					"dir=" + (toRight ? "right" : "left"));
-#endif
-				return;
-			}
-
-			if (virtualDesktop)
-			{
-				uint sent = 0;
-				// RIDEV_NOHOTKEYS blocks OS Win+Ctrl+Arrow (virtual desktop). Drop it briefly for inject.
-				GameWindowInputHook.RunWithOsWinHotkeysEnabled(() => {
-					sent = EmitWinCtrlArrowChord(arrowVk, winVk);
-				});
-#if AK_DIAGNOSTICS
-				WinChordDiag.Log(
-					"flush",
-					arrowVk,
-					sent > 0 ? "vd-inject-ok" : "vd-inject-fail",
-					"win=0x" + winVk.ToString("X") + " sent=" + sent);
-#endif
-			}
 		}
 
 		/// <summary>
@@ -4041,27 +4042,6 @@ namespace AdvancedKeybinds.Patches
 			return list;
 		}
 
-		private static void FlushScreenshotRequests()
-		{
-			if (!_snipRequested)
-				return;
-
-			_snipRequested = false;
-
-			try
-			{
-				Process.Start(new ProcessStartInfo("ms-screenclip:") { UseShellExecute = true });
-#if AK_DIAGNOSTICS
-				WinChordDiag.Log("flush", VK_S, "snip-launched", "ok");
-#endif
-				if (AkDiag.Enabled) AkDiag.Log("Launched ms-screenclip: for Win+Shift+S.");
-			}
-			catch (Exception ex)
-			{
-				AdvancedKeybinds.Instance?.Logger.Warn("Advanced Keybinds failed to launch the snip overlay: " + ex.Message);
-			}
-		}
-
 		/// <summary>
 		/// Re-inject Win+Ctrl+←/→ so the OS virtual-desktop switch runs while our hook is swallowing Win.
 		/// </summary>
@@ -4151,6 +4131,713 @@ namespace AdvancedKeybinds.Patches
 
 			// Start menu can take fg between hook and WndProc on the same Win press.
 			return Environment.TickCount64 - _lastGameForegroundMs < ForegroundGraceMs;
+		}
+		private static void TryPulseInitialThreadWin(int nCode, uint vk, IntPtr lParam)
+		{
+			try
+			{
+				bool windows = OperatingSystem.IsWindows();
+				if (!windows)
+					return;
+				var owner = WinInputReleaseCandidate.WinMaskCallbackScope.Current;
+				if (owner == null)
+					return;
+				owner.TryPulseInitialThreadWin(windows, IsWinKeySuppressionEnabled(), IsGameForegroundCore(), nCode, vk, lParam.ToInt64(), IsInitialThreadWinPulseAllowed, SendOwnedPulseBatch);
+			}
+			catch (System.Exception)
+			{
+			}
+		}
+
+		private static bool IsInitialThreadWinPulseAllowed()
+		{
+			return OperatingSystem.IsWindows() && IsWinKeySuppressionEnabled() && IsGameForegroundCore();
+		}
+
+		private static int SendOwnedPulseBatch(uint[] keys, uint[] flags, ulong marker)
+		{
+			bool windows = OperatingSystem.IsWindows();
+			bool normal = keys != null && keys.Length == 2;
+			return WinInputReleaseCandidate.WinMaskPulseBatchAdapter.Send(windows,
+				windows && normal && IsWinKeySuppressionEnabled(),
+				windows && normal && IsGameForegroundCore(), keys, flags, marker, SendMappedMaskBatch);
+		}
+	}
+}
+namespace WinInputReleaseCandidate
+{
+	public sealed class WinKeyReleaseRelay
+	{
+		public const ulong Marker = 0x11AC0DEEUL;
+
+		private int _busy;
+		private int _pending;
+
+		public WinKeyReleaseRelay()
+		{
+		}
+
+		public bool HasPendingAuxUp
+		{
+			get { return System.Threading.Volatile.Read(ref _pending) != 0; }
+		}
+
+		public bool RelayWindowsKeyUp(bool isWindows, bool requestMask, uint windowsVk, System.Func<uint[], uint[], ulong, int>? sendBatch, System.Action forwardOriginal)
+		{
+			if (forwardOriginal == null)
+				throw new System.ArgumentNullException("forwardOriginal");
+			if (System.Threading.Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+			{
+				forwardOriginal();
+				return false;
+			}
+			bool accepted = false;
+			try
+			{
+				try
+				{
+					if (RelayOwned(isWindows, requestMask, windowsVk, sendBatch))
+						accepted = true;
+				}
+				finally
+				{
+					if (!accepted)
+						forwardOriginal();
+				}
+			}
+			finally
+			{
+				System.Threading.Volatile.Write(ref _busy, 0);
+			}
+			return accepted;
+		}
+
+		public bool TryCleanupAux(bool isWindows, System.Func<uint[], uint[], ulong, int>? sendBatch)
+		{
+			if (System.Threading.Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+				return false;
+			try
+			{
+				if (System.Threading.Volatile.Read(ref _pending) == 0)
+					return true;
+				if (!isWindows || sendBatch == null)
+					return false;
+				return CleanupOwned(sendBatch);
+			}
+			finally
+			{
+				System.Threading.Volatile.Write(ref _busy, 0);
+			}
+		}
+
+		private bool RelayOwned(bool isWindows, bool requestMask, uint windowsVk, System.Func<uint[], uint[], ulong, int>? sendBatch)
+		{
+			if (!isWindows || !IsWindowsVk(windowsVk) || sendBatch == null)
+				return false;
+			if (System.Threading.Volatile.Read(ref _pending) != 0 && !CleanupOwned(sendBatch))
+				return false;
+			if (!requestMask)
+				return false;
+			return SendNormal(sendBatch, windowsVk);
+		}
+
+		private bool CleanupOwned(System.Func<uint[], uint[], ulong, int> sendBatch)
+		{
+			uint[] vk = new uint[] { 0xE8u };
+			uint[] flags = new uint[] { 2u };
+			int count;
+			try
+			{
+				count = sendBatch(vk, flags, Marker);
+			}
+			catch (System.Exception)
+			{
+				System.Threading.Volatile.Write(ref _pending, 1);
+				return false;
+			}
+			if (count == 1)
+			{
+				System.Threading.Volatile.Write(ref _pending, 0);
+				return true;
+			}
+			System.Threading.Volatile.Write(ref _pending, 1);
+			return false;
+		}
+
+		private bool SendNormal(System.Func<uint[], uint[], ulong, int> sendBatch, uint windowsVk)
+		{
+			uint[] vk = new uint[] { 0xE8u, 0xE8u, windowsVk };
+			uint[] flags = new uint[] { 0u, 2u, 3u };
+			int count;
+			try
+			{
+				count = sendBatch(vk, flags, Marker);
+			}
+			catch (System.Exception)
+			{
+				System.Threading.Volatile.Write(ref _pending, 1);
+				return false;
+			}
+			if (count == 3)
+			{
+				System.Threading.Volatile.Write(ref _pending, 0);
+				return true;
+			}
+			if (count == 1 || count < 0 || count > 3)
+			{
+				System.Threading.Volatile.Write(ref _pending, 1);
+				return false;
+			}
+			System.Threading.Volatile.Write(ref _pending, 0);
+			return false;
+		}
+
+		private static bool IsWindowsVk(uint windowsVk)
+		{
+			return windowsVk == 91u || windowsVk == 92u;
+		}
+public bool TryPulseAux(bool isWindows, bool requestPulse, System.Func<bool>? commitAllowed, System.Func<uint[], uint[], ulong, int>? sendBatch)
+		{
+			if (!isWindows || !requestPulse || commitAllowed == null || sendBatch == null)
+				return false;
+			if (System.Threading.Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+				return false;
+			try
+			{
+				if (System.Threading.Volatile.Read(ref _pending) != 0 && !CleanupOwned(sendBatch))
+					return false;
+				bool allowed;
+				try
+				{
+					allowed = commitAllowed();
+				}
+				catch (System.Exception)
+				{
+					return false;
+				}
+				if (!allowed)
+					return false;
+				uint[] keys = new uint[] { 0xE8u, 0xE8u };
+				uint[] flags = new uint[] { 0u, 2u };
+				int count;
+				try
+				{
+					count = sendBatch(keys, flags, Marker);
+				}
+				catch (System.Exception)
+				{
+					System.Threading.Volatile.Write(ref _pending, 1);
+					CleanupOwned(sendBatch);
+					return false;
+				}
+				if (count == 2)
+				{
+					System.Threading.Volatile.Write(ref _pending, 0);
+					return true;
+				}
+				if (count == 0)
+				{
+					System.Threading.Volatile.Write(ref _pending, 0);
+					return false;
+				}
+				System.Threading.Volatile.Write(ref _pending, 1);
+				CleanupOwned(sendBatch);
+				return false;
+			}
+			finally
+			{
+				System.Threading.Volatile.Write(ref _busy, 0);
+			}
+		}
+	}
+}
+
+namespace WinInputReleaseCandidate
+{
+    public readonly struct MaskDeliveryResult
+    {
+        public MaskDeliveryResult(bool applies, bool accepted, bool forwarded)
+        {
+            Applies = applies;
+            Accepted = accepted;
+            Forwarded = forwarded;
+        }
+        public bool Applies { get; }
+        public bool Accepted { get; }
+        public bool Forwarded { get; }
+    }
+
+    // Dev-only candidate: native integration has its own acceptance gates.
+    public sealed class WinMaskReleaseCoordinator
+    {
+        private readonly object _gate = new object();
+        private readonly WinKeyReleaseRelay _relay;
+        private readonly bool[] _held = new bool[2];
+        private readonly bool[] _owned = new bool[2];
+        private bool _installed, _retired, _cleanupWanted;
+        private ulong _epoch;
+        private readonly ulong[] _pressGeneration = new ulong[2];
+        private readonly int[] _physicalUpFrames = new int[2];
+        private int _inFlight;
+        private bool _draining;
+
+        public WinMaskReleaseCoordinator(WinKeyReleaseRelay relay)
+        {
+            _relay = relay ?? throw new System.ArgumentNullException(nameof(relay));
+        }
+
+        public void NoteHooksInstalled()
+        {
+            lock (_gate) { if (!_retired) _installed = true; }
+        }
+
+        public void OnUninstalled()
+        {
+            lock (_gate)
+            {
+                _retired = true;
+                _installed = false;
+                InvalidateLocked();
+            }
+        }
+
+        public void InvalidateOwnership()
+        {
+            lock (_gate) { InvalidateLocked(); }
+        }
+
+        private void InvalidateLocked()
+        {
+            unchecked { _epoch++; }
+            _owned[0] = false;
+            _owned[1] = false;
+            _cleanupWanted = true;
+        }
+
+        public void ObserveNonInjectedDown(uint windowsVk, bool suppressionOn, bool gameActive)
+        {
+            int side = Side(windowsVk);
+            if (side < 0) return;
+            lock (_gate)
+            {
+                if (!suppressionOn || !gameActive) InvalidateLocked();
+                _physicalUpFrames[side] = 0;
+                if (_held[side]) return;
+                unchecked { _pressGeneration[side]++; }
+                _held[side] = true;
+                _owned[side] = _installed && !_retired && suppressionOn && gameActive;
+            }
+        }
+
+        public void ObservePhysicalSnapshot(bool leftDown, bool rightDown)
+        {
+            lock (_gate)
+            {
+                for (int side = 0; side < 2; side++)
+                {
+                    bool down = side == 0 ? leftDown : rightDown;
+                    if (down || !_held[side]) { _physicalUpFrames[side] = 0; continue; }
+                    if (++_physicalUpFrames[side] < 3) continue;
+                    _physicalUpFrames[side] = 0;
+                    _held[side] = false;
+                    _owned[side] = false;
+                    unchecked { _pressGeneration[side]++; }
+                }
+            }
+        }
+
+        public bool IsRetired { get { lock (_gate) return _retired; } }
+
+        public MaskDeliveryResult TryDeliverPhysicalUp(bool isWindows, bool suppressionOn, bool gameActive,
+            uint windowsVk, System.Func<uint[], uint[], ulong, int>? sendBatch, System.Action forwardOriginal)
+        {
+            int side = Side(windowsVk);
+            if (side < 0) return new MaskDeliveryResult(false, false, false);
+            if (forwardOriginal == null) throw new System.ArgumentNullException(nameof(forwardOriginal));
+            bool requestMask, directForward;
+            ulong epoch, generation;
+            lock (_gate)
+            {
+                if (!isWindows || !suppressionOn || !gameActive) InvalidateLocked();
+                requestMask = _owned[side] && _installed && !_retired && isWindows && suppressionOn && gameActive;
+                epoch = _epoch;
+                generation = _pressGeneration[side];
+                _held[side] = false;
+                _owned[side] = false;
+                _physicalUpFrames[side] = 0;
+                if (_relay.HasPendingAuxUp) _cleanupWanted = true;
+                // Claim and delivery registration share the same short state lock.
+                // A delivery arriving during cleanup forwards without occupying the relay.
+                directForward = !isWindows || _draining;
+                if (!directForward) _inFlight++;
+            }
+            if (directForward)
+            {
+                try { forwardOriginal(); }
+                catch { lock (_gate) { _cleanupWanted = true; } throw; }
+                return new MaskDeliveryResult(true, false, true);
+            }
+            bool completed = false;
+            try
+            {
+                System.Func<uint[], uint[], ulong, int>? qualifiedSender = sendBatch == null ? null :
+                    (keys, flags, marker) =>
+                    {
+                        if (keys.Length == 3)
+                        {
+                            // This is the commit boundary. Cancellation before here wins;
+                            // native sending after this point is already in flight.
+                            lock (_gate)
+                            {
+                                if (!requestMask || !_installed || _retired || _epoch != epoch || _pressGeneration[side] != generation)
+                                    return 0;
+                            }
+                        }
+                        // Never hold the state lock while calling external code.
+                        return sendBatch(keys, flags, marker);
+                    };
+                bool accepted = _relay.RelayWindowsKeyUp(true, requestMask, windowsVk, qualifiedSender, forwardOriginal);
+                completed = true;
+                return new MaskDeliveryResult(true, accepted, !accepted);
+            }
+            finally
+            {
+                bool drain;
+                lock (_gate)
+                {
+                    _inFlight--;
+                    if (!completed || _relay.HasPendingAuxUp) _cleanupWanted = true;
+                    drain = completed && _inFlight == 0 && _cleanupWanted;
+                }
+                // One final drain at the outermost normally completed delivery only.
+                // Relay may also have tried one cleanup before its normal batch.
+                if (drain) TryDrainCleanup(true, sendBatch);
+            }
+        }
+
+        public bool TryDrainCleanup(bool isWindows, System.Func<uint[], uint[], ulong, int>? sendBatch)
+        {
+            lock (_gate)
+            {
+                _cleanupWanted = true;
+                if (!isWindows || _draining || _inFlight != 0) return false;
+                if (!_relay.HasPendingAuxUp)
+                {
+                    _cleanupWanted = false;
+                    return true;
+                }
+                _draining = true;
+            }
+            bool cleaned = false, done = false;
+            try { cleaned = _relay.TryCleanupAux(true, sendBatch); }
+            finally
+            {
+                lock (_gate)
+                {
+                    _draining = false;
+                    done = cleaned && !_relay.HasPendingAuxUp;
+                    _cleanupWanted = !done;
+                }
+            }
+            return done;
+        }
+
+        public bool IsOwned(uint windowsVk)
+        {
+            int side = Side(windowsVk);
+            if (side < 0) return false;
+            lock (_gate) { return _owned[side]; }
+        }
+
+        public bool HasHoldEvidence(uint windowsVk)
+        {
+            int side = Side(windowsVk);
+            if (side < 0) return false;
+            lock (_gate) { return _held[side]; }
+        }
+
+        public bool CleanupWanted
+        {
+            get { lock (_gate) { return _cleanupWanted; } }
+        }
+
+        private static int Side(uint windowsVk) => windowsVk == 91u ? 0 : windowsVk == 92u ? 1 : -1;
+public bool TryPulseInitialThreadWin(bool isWindows, bool suppressionOn, bool gameActive, int nCode, uint windowsVk, long messageBits, System.Func<bool>? freshAllowed, System.Func<uint[], uint[], ulong, int>? sendBatch)
+        {
+            if (!WinFirstDownPulseGate.ShouldPulseInitialThreadWin(nCode, windowsVk, messageBits, isWindows, suppressionOn, gameActive) || freshAllowed == null || sendBatch == null)
+                return false;
+            int side = Side(windowsVk);
+            if (side < 0)
+                return false;
+            System.Func<bool> fresh = freshAllowed;
+            System.Func<uint[], uint[], ulong, int> send = sendBatch;
+            ulong epoch, generation;
+            lock (_gate)
+            {
+                if (!_installed || _retired || _draining)
+                    return false;
+                epoch = _epoch;
+                generation = _pressGeneration[side];
+                _inFlight++;
+            }
+            bool completed = false;
+            try
+            {
+                bool CombinedCommit()
+                {
+                    bool allowed;
+                    try { allowed = fresh(); }
+                    catch (System.Exception) { return false; }
+                    if (!allowed)
+                        return false;
+                    lock (_gate)
+                        return _installed && !_retired && !_draining && _epoch == epoch && _pressGeneration[side] == generation;
+                }
+                int QualifiedSender(uint[] keys, uint[] flags, ulong marker)
+                {
+                    if (keys != null && keys.Length == 1)
+                        return send(keys, flags, marker);
+                    if (keys != null && keys.Length == 2 && CombinedCommit())
+                        return send(keys, flags, marker);
+                    return 0;
+                }
+                bool accepted = _relay.TryPulseAux(true, true, CombinedCommit, QualifiedSender);
+                completed = true;
+                return accepted;
+            }
+            finally
+            {
+                bool drain;
+                lock (_gate)
+                {
+                    _inFlight--;
+                    if (!completed || _relay.HasPendingAuxUp)
+                        _cleanupWanted = true;
+                    drain = completed && _inFlight == 0 && _cleanupWanted;
+                }
+                if (drain)
+                    TryDrainCleanup(true, send);
+            }
+        }
+    }
+}
+
+namespace WinInputReleaseCandidate
+{
+    public static class WinMaskCallbackScope
+    {
+        [System.ThreadStatic]
+        private static WinMaskReleaseCoordinator? _current;
+
+        public static WinMaskReleaseCoordinator? Current => _current;
+
+        public static System.IntPtr Invoke(WinMaskReleaseCoordinator owner, int nCode,
+            System.IntPtr wParam, System.IntPtr lParam,
+            System.Func<int, System.IntPtr, System.IntPtr, System.IntPtr> callback)
+        {
+            if (owner == null) throw new System.ArgumentNullException(nameof(owner));
+            if (callback == null) throw new System.ArgumentNullException(nameof(callback));
+            WinMaskReleaseCoordinator? previous = _current;
+            _current = owner;
+            try { return callback(nCode, wParam, lParam); }
+            finally { _current = previous; }
+        }
+    }
+}
+
+namespace WinInputReleaseCandidate
+{
+    public static class WinMaskNativeBatchAdapter
+    {
+        public static bool IsNativeEcho(uint vk, bool isDown, bool isUp, ulong marker)
+        {
+            return marker == 0x11AC0DE5UL && isDown != isUp &&
+                (vk == 0xE8u || (isUp && (vk == 91u || vk == 92u)));
+        }
+
+        public static int Send(bool isWindows, bool suppressionOn, bool gameActive,
+            uint[]? keys, uint[]? flags, ulong marker,
+            System.Func<uint[], uint[], ulong, int>? nativeBatch)
+        {
+            if (!isWindows || nativeBatch == null || keys == null || flags == null ||
+                marker != 0x11AC0DEEUL || keys.Length != flags.Length ||
+                (keys.Length != 1 && keys.Length != 3)) return 0;
+
+            // Work only with bounded private snapshots: callers and the native boundary
+            // must not change each other's arrays after validation.
+            uint[] nativeKeys = (uint[])keys.Clone();
+            uint[] nativeFlags = (uint[])flags.Clone();
+            bool cleanup = nativeKeys.Length == 1 && nativeKeys[0] == 0xE8u && nativeFlags[0] == 2u;
+            bool normal = nativeKeys.Length == 3 && suppressionOn && gameActive &&
+                nativeKeys[0] == 0xE8u && nativeKeys[1] == 0xE8u &&
+                (nativeKeys[2] == 91u || nativeKeys[2] == 92u) &&
+                nativeFlags[0] == 0u && nativeFlags[1] == 2u && nativeFlags[2] == 3u;
+            if (!cleanup && !normal) return 0;
+
+            // Preserve count uncertainty and exceptions for the relay's cleanup policy.
+            // E5 is the existing native self-injection marker; EE stays pure/internal.
+            return nativeBatch(nativeKeys, nativeFlags, 0x11AC0DE5UL);
+        }
+    }
+}
+
+namespace WinInputReleaseCandidate
+{
+    // Retired registrations keep exclusive ownership of their own relay until its
+    // finite cleanup attempt succeeds. A replacement cannot erase that evidence.
+    public sealed class WinMaskRegistrationPool
+    {
+        private readonly object _gate = new object();
+        private readonly System.Collections.Generic.List<WinMaskReleaseCoordinator> _retired = new System.Collections.Generic.List<WinMaskReleaseCoordinator>();
+        private WinMaskReleaseCoordinator? _active;
+
+        public WinMaskReleaseCoordinator? TryCreate(bool leftHeld, bool rightHeld)
+        {
+            lock (_gate)
+            {
+                if (_active != null || _retired.Count != 0) return null;
+                var owner = new WinMaskReleaseCoordinator(new WinKeyReleaseRelay());
+                if (leftHeld) owner.ObserveNonInjectedDown(91u, false, false);
+                if (rightHeld) owner.ObserveNonInjectedDown(92u, false, false);
+                _active = owner;
+                return owner;
+            }
+        }
+
+        public void Retire(WinMaskReleaseCoordinator owner)
+        {
+            if (owner == null) throw new System.ArgumentNullException(nameof(owner));
+            lock (_gate)
+            {
+                owner.OnUninstalled();
+                if (System.Object.ReferenceEquals(_active, owner)) _active = null;
+                if (!_retired.Contains(owner)) _retired.Add(owner);
+            }
+        }
+
+        public bool TryDrainRetired(bool isWindows, System.Func<uint[], uint[], ulong, int>? sender)
+        {
+            WinMaskReleaseCoordinator[] snapshot;
+            lock (_gate) snapshot = _retired.ToArray();
+            foreach (var owner in snapshot)
+            {
+                // No sender/forward/native call runs under the pool's state lock.
+                if (owner.TryDrainCleanup(isWindows, sender))
+                    lock (_gate) _retired.Remove(owner);
+            }
+            lock (_gate) return _retired.Count == 0;
+        }
+    }
+}
+
+namespace WinInputReleaseCandidate
+{
+    public sealed class WinNativeCallbackLease
+    {
+        private readonly object _gate = new object();
+        private System.Runtime.InteropServices.GCHandle _root;
+        private bool _unhooked, _busy;
+        private int _callbacks;
+
+        public WinNativeCallbackLease(System.Delegate callback)
+        {
+            if (callback == null) throw new System.ArgumentNullException(nameof(callback));
+            _root = System.Runtime.InteropServices.GCHandle.Alloc(callback,
+                System.Runtime.InteropServices.GCHandleType.Normal);
+        }
+
+        public bool TryUnhook(System.Func<bool> unhook)
+        {
+            if (unhook == null) throw new System.ArgumentNullException(nameof(unhook));
+            lock (_gate)
+            {
+                if (_unhooked) return true;
+                if (_busy) return false;
+                _busy = true;
+            }
+            bool success = false;
+            try { success = unhook(); }
+            catch (System.Exception) { success = false; }
+            finally
+            {
+                lock (_gate)
+                {
+                    _busy = false;
+                    if (success) _unhooked = true;
+                    TryFreeLocked();
+                }
+            }
+            return success;
+        }
+
+        public bool TryReleaseUnregistered()
+        {
+            lock (_gate)
+            {
+                if (_busy || _callbacks != 0) return false;
+                _unhooked = true;
+                TryFreeLocked();
+                return true;
+            }
+        }
+
+        public System.IntPtr Invoke(int nCode, System.IntPtr wParam, System.IntPtr lParam,
+            System.Func<int, System.IntPtr, System.IntPtr, System.IntPtr> callback)
+        {
+            if (callback == null) throw new System.ArgumentNullException(nameof(callback));
+            lock (_gate) _callbacks++;
+            try { return callback(nCode, wParam, lParam); }
+            finally { lock (_gate) { _callbacks--; TryFreeLocked(); } }
+        }
+
+        private void TryFreeLocked()
+        {
+            if (_unhooked && !_busy && _callbacks == 0 && _root.IsAllocated) _root.Free();
+        }
+    }
+}
+
+namespace WinInputReleaseCandidate
+{
+    public static class WinRawKeyboardRegistration
+    {
+        public static bool Register(bool isWindows, System.IntPtr hwnd, System.Func<uint, System.IntPtr, bool>? register)
+        {
+            if (!isWindows) return false;
+            if (register == null) throw new System.ArgumentNullException(nameof(register));
+            // Default foreground delivery; no hotkey, legacy-message, or background suppression.
+            if (hwnd != System.IntPtr.Zero && register(0, hwnd)) return true;
+            return register(0, System.IntPtr.Zero);
+        }
+    }
+}
+namespace WinInputReleaseCandidate
+{
+	public static class WinFirstDownPulseGate
+	{
+		public static bool ShouldPulseInitialThreadWin(int nCode, uint vk, long messageBits, bool isWindows, bool suppressionOn, bool gameActive)
+		{
+			return isWindows && suppressionOn && gameActive && nCode == 0 &&
+				(vk == 91u || vk == 92u) && (messageBits & 0xC0000000L) == 0L;
+		}
+	}
+
+	public static class WinMaskPulseBatchAdapter
+	{
+		public static int Send(bool isWindows, bool suppressionOn, bool gameActive, uint[]? keys, uint[]? flags, ulong marker, System.Func<uint[], uint[], ulong, int>? nativeBatch)
+		{
+			if (!isWindows || nativeBatch == null || keys == null || flags == null ||
+				marker != 0x11AC0DEEUL || keys.Length != flags.Length)
+				return 0;
+			uint[] nativeKeys = (uint[])keys.Clone();
+			uint[] nativeFlags = (uint[])flags.Clone();
+			bool cleanup = nativeKeys.Length == 1 && nativeKeys[0] == 0xE8u && nativeFlags[0] == 2u;
+			bool pulse = nativeKeys.Length == 2 && suppressionOn && gameActive &&
+				nativeKeys[0] == 0xE8u && nativeKeys[1] == 0xE8u &&
+				nativeFlags[0] == 0u && nativeFlags[1] == 2u;
+			if (!cleanup && !pulse)
+				return 0;
+			return nativeBatch(nativeKeys, nativeFlags, 0x11AC0DE5UL);
 		}
 	}
 }

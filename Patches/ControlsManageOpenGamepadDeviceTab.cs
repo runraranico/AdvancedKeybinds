@@ -66,19 +66,9 @@ namespace AdvancedKeybinds.Patches
 				if (border2 != null)
 					border2.Color = Color.Silver;
 
-				if (AkDiag.Enabled
-					&& ControlsManageOpenGamepadDeviceTabPolicy.NeedsForceGamepadDeviceTab(isSteamDeck, current))
-				{
-					AkDiag.Log("ControlsManageOpenGamepadDeviceTab: forced OnKeyboard=false (Steam Deck).");
-				}
 			}
-			catch (Exception ex)
+			catch (Exception)
 			{
-#if AK_DIAGNOSTICS
-				if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-					AdvancedKeybinds.Instance?.Logger.Debug(
-						"ControlsManageOpenGamepadDeviceTab: " + ex.GetType().Name + ": " + ex.Message);
-#endif
 			}
 		}
 

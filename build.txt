@@ -1,6 +1,6 @@
 displayName = Advanced Keybinds
 author = runohito
-version = 6.1.1
-includeSource = true
+version = 6.2.0
+includeSource = false
 side = Client
-buildIgnore = _developer\*, .cursor\*, .git\*, .gitignore, .gitattributes, .editorconfig, .vs\*, bin\*, obj\*, *.csproj, *.sln, *.user, *.suo, *.md, LICENSE, .ak-enable-diagnostics, .ak-inventory-esc-live-verify
+buildIgnore = _developer\*, *.md, icon_workshop.png

@@ -151,12 +151,6 @@ namespace AdvancedKeybinds.Core
 			}
 
 			GamePadProbeSystem.LogPanelPadCaptureConsumeBegin(canonical, slot, accepted);
-			#if AK_DIAGNOSTICS
-			GamePadCaptureAR2Diag.NoteReleaseGate(
-				"NotifyPadCaptureConsumed",
-				canonical,
-				accepted ? "accepted" : "rejected");
-			#endif
 		}
 
 		/// <summary>
@@ -180,9 +174,6 @@ namespace AdvancedKeybinds.Core
 				// Clear BEFORE any diagnostic: NoteReleaseGate snapshots must not re-enter this method
 				// while the gate is still marked active (stack overflow 0xc00000fd).
 				ClearCaptureReleaseGate(logEnd: true);
-				#if AK_DIAGNOSTICS
-				GamePadCaptureAR2Diag.NoteReleaseGate("end", tok, reason);
-				#endif
 				return false;
 			}
 

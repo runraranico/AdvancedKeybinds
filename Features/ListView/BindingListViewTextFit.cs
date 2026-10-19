@@ -40,7 +40,6 @@ namespace AdvancedKeybinds.Features.ListView
 
 		public static Vector2 MeasureAtStandard(string text)
 		{
-			BindingListViewOpenPerfDiag.NoteMeasureCall();
 			if (string.IsNullOrEmpty(text))
 				return Vector2.Zero;
 			return ChatManager.GetStringSize(FontAssets.MouseText.Value, text, new Vector2(StandardScale));
@@ -48,7 +47,6 @@ namespace AdvancedKeybinds.Features.ListView
 
 		public static Vector2 MeasureAtScale(string text, float scale)
 		{
-			BindingListViewOpenPerfDiag.NoteMeasureCall();
 			if (string.IsNullOrEmpty(text))
 				return Vector2.Zero;
 			float s = scale > 0.01f ? scale : MinUniformScale;
@@ -327,7 +325,6 @@ namespace AdvancedKeybinds.Features.ListView
 			if (sb == null || cell.Width <= 4 || cell.Height <= 2)
 				return;
 
-			BindingListViewOpenPerfDiag.NoteDrawFittedCall();
 
 			string raw = text ?? string.Empty;
 			if (raw.Length == 0)

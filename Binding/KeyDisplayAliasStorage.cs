@@ -87,11 +87,6 @@ namespace AdvancedKeybinds.Binding
 					return;
 
 				Aliases.Remove(key);
-				if (AkDiag.Enabled)
-				{
-					AkDiag.Log("KeyDisplayAlias removed key=" + key + " was=" + DisplayResolveDiag.FormatShown(removed));
-					DisplayResolveDiag.LogAliasChange(key, removed, null);
-				}
 
 				SaveToFile();
 				return;
@@ -102,13 +97,6 @@ namespace AdvancedKeybinds.Binding
 				return;
 
 			Aliases[key] = display;
-			if (AkDiag.Enabled)
-			{
-				AkDiag.Log(
-					"KeyDisplayAlias set key=" + key
-					+ " display=" + DisplayResolveDiag.FormatShown(display));
-				DisplayResolveDiag.LogAliasChange(key, previous, display);
-			}
 
 			SaveToFile();
 		}
@@ -121,7 +109,6 @@ namespace AdvancedKeybinds.Binding
 				return 0;
 
 			Aliases.Clear();
-			if (AkDiag.Enabled) AkDiag.Log("KeyDisplayAlias ClearAll removed=" + count);
 			SaveToFile();
 			return count;
 		}
@@ -160,8 +147,6 @@ namespace AdvancedKeybinds.Binding
 					}
 				}
 
-				if (AkDiag.Enabled)
-					DisplayResolveDiag.LogAliasesLoaded(Aliases.Count, Aliases);
 			}
 			catch (Exception ex)
 			{

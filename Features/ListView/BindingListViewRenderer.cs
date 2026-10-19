@@ -40,11 +40,6 @@ namespace AdvancedKeybinds.Features.ListView
 			if (spriteBatch == null || state == null || !state.IsOpen)
 				return;
 
-			BindingListViewOpenPerfDiag.OnFirstDrawEnter();
-			BindingListViewTextFitAudit.TryRunOnce();
-			BindingListViewLayoutRectDiag.TryRunOnce(state);
-			BindingListViewVisualAlignDiag.TryRunOnce(state);
-			BindingListViewPathCompareDiag.TryRunOnce(state);
 
 			BindingListViewLayout.ClampToScreen(state);
 			Rectangle title = BindingListViewLayout.TitleBarRect(state);
@@ -57,7 +52,6 @@ namespace AdvancedKeybinds.Features.ListView
 
 			if (!state.IsMaximized)
 			{
-				BindingListViewOpenPerfDiag.OnFirstDrawExit();
 				return;
 			}
 
@@ -75,7 +69,6 @@ namespace AdvancedKeybinds.Features.ListView
 			Rectangle rowsView = BindingListViewLayout.RowsViewportRect(state);
 			DrawRowsClipped(spriteBatch, state, rowsView, rows, modSort);
 			DrawScrollbar(spriteBatch, state, rowsView);
-			BindingListViewOpenPerfDiag.OnFirstDrawExit();
 		}
 
 		/// <summary>

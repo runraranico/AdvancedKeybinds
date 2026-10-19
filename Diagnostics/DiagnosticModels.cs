@@ -74,14 +74,4 @@ namespace AdvancedKeybinds.Diagnostics
 		public string RelevantRule { get; set; }
 	}
 
-	public sealed class DiagnosticEnvironmentInfo
-	{
-		public bool? PhysicalJis { get; set; }
-		public string PhysicalLayoutStatus { get; set; }
-		public string PhysicalLayoutEvidence { get; set; }
-		public bool? CapsHoldViable { get; set; }
-		public string LayoutId { get; set; }
-		public string Hkl { get; set; }
-		public string InputLanguage { get; set; }
-	}
 }

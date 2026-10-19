@@ -64,16 +64,9 @@ namespace AdvancedKeybinds.Patches
 				if (border2 != null)
 					border2.Color = Color.Black;
 
-				if (AkDiag.Enabled && ControlsManageOpenGameplayTabPolicy.NeedsForceGameplayTab(current))
-					AkDiag.Log("ControlsManageOpenGameplayTab: forced OnGameplay=true (was Menu Controls).");
 			}
-			catch (Exception ex)
+			catch (Exception)
 			{
-#if AK_DIAGNOSTICS
-				if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-					AdvancedKeybinds.Instance?.Logger.Debug(
-						"ControlsManageOpenGameplayTab: " + ex.GetType().Name + ": " + ex.Message);
-#endif
 			}
 		}
 

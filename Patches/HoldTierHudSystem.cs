@@ -91,12 +91,6 @@ namespace AdvancedKeybinds.Patches
 		private const int CenterXSnapRadiusPx = 80;
 		/// <summary>Minimum center-X magnet half-width as a fraction of UI width.</summary>
 		private const float CenterXSnapMinScreenFraction = 0.06f;
-		/// <summary>
-		/// Last follow/commit origin written by NotifyUiDragFollow (magnet applied).
-		/// Draw must use this while dragging — GetBarOrigin can still reflect pre-snap mouse Left.
-		/// </summary>
-		private static Vector2 _dragFollowOrigin;
-		private static bool _hasDragFollowOrigin;
 
 		/// <summary>Custom-only: middle-drag in viewport pixel space (not UIElement / UIScale).</summary>
 		private static bool _customPixelDragActive;
@@ -138,9 +132,6 @@ namespace AdvancedKeybinds.Patches
 		private HoldTierHudDragUiState _dragUiState;
 		private static HoldTierHudDragHandle _dragHandle;
 		private GameTime _lastUiGameTime;
-		private static uint _lastClampLogUpdate;
-		private static uint _lastUnstableClampLogUpdate;
-		private static uint _lastMismatchClampLogUpdate;
 		private static uint _lastTransientRejectLogUpdate;
 		private static bool _loggedPollAlive;
 		private static bool _prevHasFocus;
@@ -159,7 +150,6 @@ namespace AdvancedKeybinds.Patches
 		private static int _candidateScreenH;
 		private static int _candidateStableFrames;
 		private static string _candidateReason;
-		private static uint _lastCandidateLogUpdate;
 		/// <summary>Skip clamp/remap writes while the client surface is in a transient junk size.</summary>
 		private const int MinStableScreenW = 640;
 		private const int MinStableScreenH = 480;
@@ -190,19 +180,12 @@ namespace AdvancedKeybinds.Patches
 			_lastUiGameTime = null;
 			IsDragging = false;
 			_centerXSnapped = false;
-			_hasDragFollowOrigin = false;
 			_customPixelDragActive = false;
 			_prevCustomMiddleDown = false;
 		}
 
 		public override void UpdateUI(GameTime gameTime)
 		{
-			#if AK_DIAGNOSTICS
-			AkCpuMeasureSystem.TickPhase("HoldUpdateUI");
-			#endif
-			#if AK_DIAGNOSTICS
-			AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdHoldHudUpdateUI);
-			#endif
 			try
 			{
 			_lastUiGameTime = gameTime;
@@ -226,9 +209,6 @@ namespace AdvancedKeybinds.Patches
 			}
 			finally
 			{
-				#if AK_DIAGNOSTICS
-				AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdHoldHudUpdateUI);
-				#endif
 			}
 		}
 
@@ -315,9 +295,6 @@ namespace AdvancedKeybinds.Patches
 
 		public override void PostUpdateInput()
 		{
-			#if AK_DIAGNOSTICS
-			AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdHoldHudPostUpdateInput);
-			#endif
 			try
 			{
 				if (Main.gameMenu || Main.drawingPlayerChat || Main.editSign || Main.editChest)
@@ -380,9 +357,6 @@ namespace AdvancedKeybinds.Patches
 			}
 			finally
 			{
-				#if AK_DIAGNOSTICS
-				AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdHoldHudPostUpdateInput);
-				#endif
 			}
 		}
 
@@ -493,10 +467,6 @@ namespace AdvancedKeybinds.Patches
 
 			if (IsDragging && !_customPixelDragActive)
 			{
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.Log(
-					"ANOMALY stale-ui-drag-on-feet-or-mouse anchor=" + config.HoldTierHudAnchor);
-				#endif
 				RestorePreDragAndEnd(save: false, reason: "stale-ui-drag-cleared");
 			}
 
@@ -508,14 +478,6 @@ namespace AdvancedKeybinds.Patches
 			_prevCustomMiddleDown = middleDown;
 			if (middleEdge && allowDrag)
 			{
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.LogDragCheck(
-					"anchor-not-custom",
-					false,
-					"anchor=" + config.HoldTierHudAnchor
-					+ " allowDrag=true enabled=" + config.HoldTierHudEnabled
-					+ " preferCustom=" + ClientPrefs.HoldHudPreferCustom);
-				#endif
 			}
 
 			NormalizeCustomPositionIfNeeded(config);
@@ -588,16 +550,6 @@ namespace AdvancedKeybinds.Patches
 				bool over = hitRect.Contains((int)mouse.X, (int)mouse.Y);
 				_mouseOverBar = over;
 
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.LogHitTest(
-					drawRect,
-					hitRect,
-					mouse,
-					mouseUi,
-					config,
-					drawBranch: "custom-Identity",
-					hitBranch: "custom-pixel-hit");
-				#endif
 
 				if (!allowDrag)
 				{
@@ -649,41 +601,19 @@ namespace AdvancedKeybinds.Patches
 
 					if (config.HoldTierHudAnchor != HoldTierHudAnchor.Custom && !_customPixelDragActive)
 						{
-							#if AK_DIAGNOSTICS
-							HoldHudProbe.LogDragCheck("anchor-not-custom", false, detail);
-							#endif
 						}
 					else if (IsDragging || _customPixelDragActive)
 						{
-							#if AK_DIAGNOSTICS
-							HoldHudProbe.LogDragCheck("stale-drag-state", false, detail);
-							#endif
 						}
 					else if (!over)
 						{
-							#if AK_DIAGNOSTICS
-							HoldHudProbe.LogDragCheck("mouse-not-over-hitbox", false, detail);
-							#endif
 						}
 					else if (IsFeetResetKeyHeld())
 						{
-							#if AK_DIAGNOSTICS
-							HoldHudProbe.LogDragCheck("feet-reset-chord", false, detail);
-							#endif
 						}
 					else
 					{
-						#if AK_DIAGNOSTICS
-						HoldHudProbe.LogDragCheck("true", true, detail);
-						#endif
 						BeginCustomPixelDrag(config, origin, mouse);
-						#if AK_DIAGNOSTICS
-						HoldHudProbe.Log(
-							"DRAG-BEGIN origin=" + FormatVec(origin)
-							+ " mouse=" + FormatVec(mouse)
-							+ " grabOff=" + FormatVec(_customGrabOffsetPixel)
-							+ " " + detail);
-						#endif
 					}
 				}
 			}
@@ -693,14 +623,6 @@ namespace AdvancedKeybinds.Patches
 				ClearFeetResetHold();
 				if (middleDown && !_prevCustomMiddleDown)
 				{
-					#if AK_DIAGNOSTICS
-					HoldHudProbe.LogDragCheck(
-						"origin-unresolved",
-						false,
-						"anchor=" + config.HoldTierHudAnchor
-						+ " norm=(" + config.HoldTierHudCustomPositionX.ToString("0.###") + ","
-						+ config.HoldTierHudCustomPositionY.ToString("0.###") + ")");
-					#endif
 				}
 			}
 
@@ -715,21 +637,11 @@ namespace AdvancedKeybinds.Patches
 		{
 			if (config == null || config.HoldTierHudAnchor != HoldTierHudAnchor.Custom)
 			{
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.LogDragCheck(
-					"anchor-not-custom",
-					false,
-					"anchor=" + (config?.HoldTierHudAnchor.ToString() ?? "null")
-					+ " path=BeginCustomPixelDrag");
-				#endif
 				return;
 			}
 
 			if (!IsHudDragAllowed(config))
 			{
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.LogDragCheck("allowDrag-false", false, "path=BeginCustomPixelDrag");
-				#endif
 				if (AkDiag.Enabled)
 				{
 					AkDiag.Log(
@@ -750,7 +662,6 @@ namespace AdvancedKeybinds.Patches
 			_centerXSnapped = false;
 			_customDragOriginPixel = originPixel;
 			_customGrabOffsetPixel = mousePixel - originPixel;
-			_hasDragFollowOrigin = false;
 
 			GetCustomPixelSurfaceSize(out int vw, out int vh);
 			float barW = ResolveCustomBarWidthPixel(config);
@@ -771,16 +682,6 @@ namespace AdvancedKeybinds.Patches
 				+ " UIScale=" + Main.UIScale.ToString("0.###")
 				+ " matrix=Identity");
 			}
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogSurface("drag-start");
-			#endif
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"DRAG start origin=" + FormatVec(originPixel)
-				+ " mouse=" + FormatVec(mousePixel)
-				+ " grabOff=" + FormatVec(_customGrabOffsetPixel)
-				+ " fromAnchor=" + _preDragAnchor);
-			#endif
 		}
 
 		private static void CommitCustomPixelDrag(AdvancedKeybindsConfig config)
@@ -788,9 +689,6 @@ namespace AdvancedKeybinds.Patches
 			if (!_customPixelDragActive)
 				return;
 
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogSurface("drag-commit-before");
-			#endif
 			GetCustomPixelSurfaceSize(out int vw, out int vh);
 			Vector2 pixelBeforeSnap = _customDragOriginPixel;
 			Vector2 pixel = SnapCustomOriginXToViewportCenter(_customDragOriginPixel, vw, out bool snapped);
@@ -800,7 +698,6 @@ namespace AdvancedKeybinds.Patches
 			IsDragging = false;
 			_customPixelDragActive = false;
 			_centerXSnapped = false;
-			_hasDragFollowOrigin = false;
 
 			if (IsStableHudScreen(vw, vh))
 				StoreNormalizedCustomPosition(config, pixel, vw, vh, "custom-pixel-commit");
@@ -810,24 +707,6 @@ namespace AdvancedKeybinds.Patches
 				config.HoldTierHudCustomPositionY,
 				vw,
 				vh);
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogCoordPipeline(
-				"custom-pixel-commit",
-				pixelBeforeSnap,
-				config.HoldTierHudCustomPositionX,
-				config.HoldTierHudCustomPositionY,
-				roundTrip,
-				vw,
-				vh);
-			#endif
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"COMMIT snapX=" + snapped
-				+ " beforeSnap=(" + pixelBeforeSnap.X.ToString("0.#") + "," + pixelBeforeSnap.Y.ToString("0.#") + ")"
-				+ " afterSnap=(" + pixel.X.ToString("0.#") + "," + pixel.Y.ToString("0.#") + ")"
-				+ " mouse=" + FormatVec(GetCustomPixelMouse())
-				+ " preferCustom=" + ClientPrefs.HoldHudPreferCustom);
-			#endif
 
 			_suppressConfigClamp = true;
 			try
@@ -840,25 +719,6 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			AlignTrackedCustomViewport("PostCustomPixelDrag");
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogState("drag-commit-after-save", config);
-			#endif
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"DRAG-END reason=custom-pixel-commit"
-				+ " anchor=" + config.HoldTierHudAnchor
-				+ " allowDrag=" + config.HoldTierHudAllowDrag
-				+ " enabled=" + config.HoldTierHudEnabled
-				+ " preferCustom=" + ClientPrefs.HoldHudPreferCustom
-				+ " isDragging=" + IsDragging
-				+ " customPixelDrag=" + _customPixelDragActive
-				+ " norm=(" + config.HoldTierHudCustomPositionX.ToString("0.###") + ","
-				+ config.HoldTierHudCustomPositionY.ToString("0.###") + ")"
-				+ " originPixel=(" + pixel.X.ToString("0.#") + "," + pixel.Y.ToString("0.#") + ")"
-				+ " surface=" + vw + "x" + vh
-				+ " screenNow=" + Main.screenWidth + "x" + Main.screenHeight
-				+ " uiZoomPolluted=" + HoldHudCoords.IsUiZoomScreenPolluted());
-			#endif
 			if (AkDiag.Enabled)
 			{
 				AkDiag.Log(
@@ -988,20 +848,8 @@ namespace AdvancedKeybinds.Patches
 		public static bool TryBeginUiDrag(Vector2 barOrigin)
 		{
 			AdvancedKeybindsConfig config = AdvancedKeybindsConfig.Instance;
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogDragCheck(
-				"anchor-not-custom",
-				false,
-				"anchor=" + (config?.HoldTierHudAnchor.ToString() ?? "null")
-				+ " path=TryBeginUiDrag-abolished"
-				+ " originUi=" + FormatVec(barOrigin));
-			#endif
 			if (config != null && config.HoldTierHudAnchor != HoldTierHudAnchor.Custom)
 			{
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.Log(
-					"ANOMALY feet-or-mouse-ui-drag-attempted anchor=" + config.HoldTierHudAnchor);
-				#endif
 			}
 			return false;
 		}
@@ -1009,11 +857,6 @@ namespace AdvancedKeybinds.Patches
 		/// <summary>UI handle follow — abolished (Custom uses pixel drag).</summary>
 		public static void NotifyUiDragFollow(Vector2 desiredOrigin)
 		{
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"ANOMALY NotifyUiDragFollow-called-after-abolish desiredUi=" + FormatVec(desiredOrigin)
-				+ " anchor=" + (AdvancedKeybindsConfig.Instance?.HoldTierHudAnchor.ToString() ?? "null"));
-			#endif
 		}
 
 		/// <summary>
@@ -1029,13 +872,6 @@ namespace AdvancedKeybinds.Patches
 		public static void NotifyUiDragCommit()
 		{
 			AdvancedKeybindsConfig config = AdvancedKeybindsConfig.Instance;
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"ANOMALY NotifyUiDragCommit-called-after-abolish"
-				+ " anchor=" + (config?.HoldTierHudAnchor.ToString() ?? "null")
-				+ " isDragging=" + IsDragging
-				+ " preferCustom=" + ClientPrefs.HoldHudPreferCustom);
-			#endif
 			if (IsDragging && !_customPixelDragActive)
 				RestorePreDragAndEnd(save: false, reason: "UiCommit-abolished");
 		}
@@ -1178,14 +1014,6 @@ namespace AdvancedKeybinds.Patches
 			GetHudScreenSize(out int sw, out int sh);
 			Rectangle hitRect = MakeEdgeAwareHitRect(drawRect, padX, padY, sw, sh);
 			return new HudBarLayout(origin, drawRect, hitRect);
-		}
-
-		private static HudBarLayout LayoutFromOrigin(Vector2 origin, float barWidth, float barHeight)
-		{
-			AdvancedKeybindsConfig config = AdvancedKeybindsConfig.Instance;
-			bool allowDrag = config != null && config.HoldTierHudAllowDrag;
-			GetHitPads(allowDrag, out int padX, out int padY);
-			return LayoutFromOrigin(origin, barWidth, barHeight, padX, padY);
 		}
 
 		/// <summary>
@@ -1384,7 +1212,6 @@ namespace AdvancedKeybinds.Patches
 				IsDragging = false;
 				_customPixelDragActive = false;
 				_centerXSnapped = false;
-				_hasDragFollowOrigin = false;
 				_dragHandle?.CancelUiDrag();
 			}
 
@@ -1425,25 +1252,6 @@ namespace AdvancedKeybinds.Patches
 			float nx = config.HoldTierHudCustomPositionX;
 			float ny = config.HoldTierHudCustomPositionY;
 			Vector2 roundTrip = DenormalizeCustomPosition(nx, ny, vw, vh);
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogCustomInit(
-				reason: "explicit-reset-to-head",
-				saved: true,
-				playerTopWorld: headWorld,
-				playerCenterWorld: Main.LocalPlayer?.Center,
-				screenPosition: Main.screenPosition,
-				worldToScreenGamePx: headAfterMatrix,
-				barSize: new Vector2(barW, barH),
-				headGap: CustomHeadGapPixel,
-				beforeClampGamePx: beforeClamp,
-				afterClampGamePx: fitted,
-				surfaceW: vw,
-				surfaceH: vh,
-				surfaceSource: HoldHudCoords.GamePixelSurfaceSource,
-				storedNorm: new Vector2(nx, ny),
-				roundTripPx: roundTrip,
-				roundTripErr: roundTrip - fitted);
-			#endif
 
 			Rectangle drawRect = GetCustomPixelDrawRect(fitted, barW, barH);
 			GetCustomPixelHitPads(out int padX, out int padY);
@@ -1481,9 +1289,6 @@ namespace AdvancedKeybinds.Patches
 				return;
 
 			ClientPrefs.SetHoldHudPreferCustom(false);
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogState("NotifyPresetAnchorChosen", config);
-			#endif
 
 			if (IsDragging)
 			{
@@ -1537,14 +1342,6 @@ namespace AdvancedKeybinds.Patches
 			}
 			else
 			{
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.LogCustomInit(
-					reason: "existing-valid-placement",
-					saved: false,
-					storedNorm: new Vector2(
-						config.HoldTierHudCustomPositionX,
-						config.HoldTierHudCustomPositionY));
-				#endif
 			}
 
 			_hasLastDrawnLayout = false;
@@ -1637,7 +1434,6 @@ namespace AdvancedKeybinds.Patches
 			IsDragging = false;
 			_customPixelDragActive = false;
 			_centerXSnapped = false;
-			_hasDragFollowOrigin = false;
 			_dragHandle?.CancelUiDrag();
 			if (AkDiag.Enabled)
 			{
@@ -1670,29 +1466,6 @@ namespace AdvancedKeybinds.Patches
 
 			config.HoldTierHudCustomPositionX = desiredCenter.X;
 			config.HoldTierHudCustomPositionY = desiredCenter.Y;
-		}
-
-		/// <summary>
-		/// When bar top-center X is within the magnet radius of UI width÷2, lock X to that
-		/// midpoint (origin is top-center, so visual bar center == origin.X). Y is never modified.
-		/// Center comes from the drag UI parent width when available so it shares the handle's
-		/// coordinate space (avoids GetHudScreenSize vs Main.mouseX mismatches).
-		/// </summary>
-		private static Vector2 SnapOriginXToScreenCenter(Vector2 origin, out bool snapped)
-		{
-			snapped = false;
-			if (float.IsNaN(origin.X) || float.IsNaN(origin.Y)
-				|| float.IsInfinity(origin.X) || float.IsInfinity(origin.Y))
-				return origin;
-
-			float centerX = GetUiCenterX();
-			float radius = GetCenterXSnapRadiusHud();
-			if (radius < 1f || Math.Abs(origin.X - centerX) > radius)
-				return origin;
-
-			snapped = true;
-			origin.X = centerX;
-			return origin;
 		}
 
 		/// <summary>
@@ -1780,33 +1553,6 @@ namespace AdvancedKeybinds.Patches
 		}
 
 		/// <summary>
-		/// After a drag commit: store as screen-normalized fractions (no edge pull-back).
-		/// </summary>
-		private static void NormalizeCustomPositionForCommit(AdvancedKeybindsConfig config)
-		{
-			GetCustomPixelSurfaceSize(out int vw, out int vh);
-			if (!IsStableHudScreen(vw, vh))
-				return;
-
-			Vector2 raw = new(config.HoldTierHudCustomPositionX, config.HoldTierHudCustomPositionY);
-			if (IsCustomPositionUnset(raw) || IsStoredNormalized(raw.X, raw.Y))
-				return;
-			if (IsClearlyOffscreen(raw, vw, vh))
-			{
-				if (AkDiag.Enabled)
-				{
-					AkDiag.Log(
-					"HoldHud commit-normalize ABORTED offscreen"
-					+ " raw=(" + raw.X.ToString("0.#") + "," + raw.Y.ToString("0.#") + ")"
-					+ " viewport=" + vw + "x" + vh);
-				}
-				return;
-			}
-
-			StoreNormalizedCustomPosition(config, raw, vw, vh, "commit");
-		}
-
-		/// <summary>
 		/// Quietly migrate legacy absolute Custom px → normalized 0–1 when the client is stable.
 		/// Does not Save — commit / OnChanged / Sync own persistence when needed.
 		/// </summary>
@@ -1848,20 +1594,6 @@ namespace AdvancedKeybinds.Patches
 			// those clamps permanently corrupts Custom coords.
 			if (!IsStableHudScreen(clampW, clampH))
 			{
-				uint nowSkip = Main.GameUpdateCount;
-				if (nowSkip - _lastUnstableClampLogUpdate >= 60)
-				{
-					_lastUnstableClampLogUpdate = nowSkip;
-					if (AkDiag.Enabled)
-					{
-						AkDiag.Log(
-						"HoldHud clamp skipped unstable viewport desired=("
-						+ desiredStoredOrPx.X.ToString("0.###") + "," + desiredStoredOrPx.Y.ToString("0.###")
-						+ ") stored=(" + oldX.ToString("0.###") + "," + oldY.ToString("0.###")
-						+ ") viewport=" + clampW + "x" + clampH
-						+ " UIScale=" + Main.UIScale.ToString("0.###"));
-					}
-				}
 				return;
 			}
 
@@ -1869,20 +1601,6 @@ namespace AdvancedKeybinds.Patches
 			if (IsStableHudScreen(_trackedCustomViewportW, _trackedCustomViewportH)
 				&& (clampW != _trackedCustomViewportW || clampH != _trackedCustomViewportH))
 			{
-				uint nowMis = Main.GameUpdateCount;
-				if (nowMis - _lastMismatchClampLogUpdate >= 60)
-				{
-					_lastMismatchClampLogUpdate = nowMis;
-					if (AkDiag.Enabled)
-					{
-						AkDiag.Log(
-						"HoldHud clamp deferred viewport-mismatch tracked="
-						+ _trackedCustomViewportW + "x" + _trackedCustomViewportH
-						+ " desired=(" + desiredStoredOrPx.X.ToString("0.###") + ","
-						+ desiredStoredOrPx.Y.ToString("0.###") + ") UIScale="
-						+ Main.UIScale.ToString("0.###") + " viewport=" + clampW + "x" + clampH);
-					}
-				}
 				return;
 			}
 
@@ -1913,24 +1631,6 @@ namespace AdvancedKeybinds.Patches
 
 			StoreNormalizedCustomPosition(config, pixel, clampW, clampH, "clamp-migrate");
 
-			uint now = Main.GameUpdateCount;
-			if (now - _lastClampLogUpdate >= 30)
-			{
-				_lastClampLogUpdate = now;
-				if (AkDiag.Enabled)
-				{
-					AkDiag.Log(
-					"HoldHud clamp-migrate"
-					+ " pixel=(" + pixel.X.ToString("0.#") + "," + pixel.Y.ToString("0.#")
-					+ ") stored=(" + oldX.ToString("0.###") + "," + oldY.ToString("0.###")
-					+ ") -> norm=("
-					+ config.HoldTierHudCustomPositionX.ToString("0.###") + ","
-					+ config.HoldTierHudCustomPositionY.ToString("0.###")
-					+ ") viewport=" + clampW + "x" + clampH
-					+ " UIScale=" + Main.UIScale.ToString("0.###")
-					+ " " + screen.Format());
-				}
-			}
 		}
 
 		private static bool IsStableHudScreen(int w, int h)
@@ -1953,15 +1653,6 @@ namespace AdvancedKeybinds.Patches
 				{
 					_lastTransientRejectLogUpdate = nowPend;
 					HudScreenInfo pendingScreen = GetHudScreenInfo();
-					if (AkDiag.Enabled)
-					{
-						AkDiag.Log(
-						"HoldHud sync deferred borderless-pending=" + Main.screenBorderlessPendingResizes
-						+ " reason=" + reason
-						+ " tracked=" + _trackedScreenW + "x" + _trackedScreenH
-						+ " UIScale=" + Main.UIScale.ToString("0.###")
-						+ " " + pendingScreen.Format());
-					}
 				}
 				return;
 			}
@@ -1991,14 +1682,6 @@ namespace AdvancedKeybinds.Patches
 				if (nowRej - _lastTransientRejectLogUpdate >= 60)
 				{
 					_lastTransientRejectLogUpdate = nowRej;
-					if (AkDiag.Enabled)
-					{
-						AkDiag.Log(
-						"HoldHud sync rejected transient-inflated reason=" + reason
-						+ " tracked=" + _trackedScreenW + "x" + _trackedScreenH
-						+ " UIScale=" + Main.UIScale.ToString("0.###")
-						+ " " + screen.Format());
-					}
 				}
 				return;
 			}
@@ -2029,21 +1712,6 @@ namespace AdvancedKeybinds.Patches
 				_candidateScreenH = newH;
 				_candidateStableFrames = 1;
 				_candidateReason = reason;
-				uint nowCand = Main.GameUpdateCount;
-				if (nowCand - _lastCandidateLogUpdate >= 30)
-				{
-					_lastCandidateLogUpdate = nowCand;
-					if (AkDiag.Enabled)
-					{
-						AkDiag.Log(
-						"HoldHud screen candidate reason=" + reason
-						+ " " + _trackedScreenW + "x" + _trackedScreenH
-						+ " -> " + newW + "x" + newH
-						+ " (need " + ScreenChangeConfirmFrames + " frames) "
-						+ "UIScale=" + Main.UIScale.ToString("0.###") + " "
-						+ screen.Format());
-					}
-				}
 				return;
 			}
 
@@ -2118,44 +1786,6 @@ namespace AdvancedKeybinds.Patches
 				return true;
 
 			return false;
-		}
-
-		/// <summary>
-		/// After reload / init, legacy absolute Custom px may still be in a previous buffer-sized
-		/// space while Main.screen* is the logical client. Rescale when raw fits the backbuffer
-		/// but exceeds the current clamp box. Normalized 0–1 storage is left untouched.
-		/// </summary>
-		private static Vector2 TryRecoverCoordsFromMismatchedSpace(Vector2 raw, HudScreenInfo screen)
-		{
-			if (IsCustomPositionUnset(raw) || IsStoredNormalized(raw.X, raw.Y))
-				return raw;
-
-			int mainW = screen.Width;
-			int mainH = screen.Height;
-			float maxX = mainW - ScreenMargin;
-			float maxY = mainH - ScreenMargin;
-			bool exceedsMain = raw.X > maxX + 1f || raw.Y > maxY + 1f || raw.X < -1f || raw.Y < -1f;
-			if (!exceedsMain)
-				return raw;
-
-			int bbW = screen.BackBufferW;
-			int bbH = screen.BackBufferH;
-			if (bbW > mainW + 16 && bbH > mainH + 16
-				&& raw.X >= -bbW && raw.Y >= -bbH
-				&& raw.X <= bbW * 1.05f && raw.Y <= bbH * 1.05f)
-			{
-				return ClampBarCenter(
-					new Vector2(raw.X * mainW / (float)bbW, raw.Y * mainH / (float)bbH),
-					mainW,
-					mainH);
-			}
-
-			// Oversized vs current main with no usable bb hint: keep relative placement via clamp
-			// only if within 2× (IsClearlyOffscreen handles worse cases).
-			if (!IsClearlyOffscreen(raw, mainW, mainH))
-				return ClampBarCenter(raw, mainW, mainH);
-
-			return raw;
 		}
 
 		private static void ClearScreenChangeCandidate()
@@ -2330,17 +1960,6 @@ namespace AdvancedKeybinds.Patches
 			else
 				ClientPrefs.SetHoldHudCustomPlacement(nx, ny, preferCustom: null);
 
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"STORE norm reason=" + reason
-				+ " inputGamePx=(" + inputGamePx.X.ToString("0.#") + "," + inputGamePx.Y.ToString("0.#") + ")"
-				+ " -> customNorm=(" + nx.ToString("0.###") + "," + ny.ToString("0.###") + ")"
-				+ " gamePixelSurface=" + gamePixelSurfaceW + "x" + gamePixelSurfaceH
-				+ " source=" + HoldHudCoords.GamePixelSurfaceSource
-				+ " intentionalPrefer=" + intentionalCustom
-				+ " preferNow=" + ClientPrefs.HoldHudPreferCustom
-				+ " anchor=" + config.HoldTierHudAnchor);
-			#endif
 
 			HoldHudCoords.ValidateRoundTrip(
 				reason, inputGamePx, nx, ny, gamePixelSurfaceW, gamePixelSurfaceH);
@@ -2396,11 +2015,6 @@ namespace AdvancedKeybinds.Patches
 
 				if (prefer && config.HoldTierHudAnchor != HoldTierHudAnchor.Custom)
 				{
-					#if AK_DIAGNOSTICS
-					HoldHudProbe.Log(
-						"RECOVER force-Custom was=" + config.HoldTierHudAnchor
-						+ " prefer=true corrupt=" + corrupt);
-					#endif
 					config.HoldTierHudAnchor = HoldTierHudAnchor.Custom;
 					changed = true;
 				}
@@ -2594,9 +2208,6 @@ namespace AdvancedKeybinds.Patches
 
 		public override void PostDrawInterface(SpriteBatch spriteBatch)
 		{
-			#if AK_DIAGNOSTICS
-			AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdHoldHudPostDraw);
-			#endif
 			try
 			{
 			if (Main.gameMenu || Main.LocalPlayer == null || !Main.LocalPlayer.active)
@@ -2627,21 +2238,6 @@ namespace AdvancedKeybinds.Patches
 
 			bool customPixel = IsUsingCustomPixelSpace(config);
 			HoldHudCoords.LogPhaseSnapshot("PostDrawInterface", config);
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogDrawThrottle(
-				"MODE-PIPELINE anchor=" + config.HoldTierHudAnchor
-				+ " customPixelBranch=" + customPixel
-				+ " matrix=" + (customPixel ? "Identity" : "UIScaleMatrix")
-				+ " preferCustom=" + ClientPrefs.HoldHudPreferCustom
-				+ " allowDrag=" + config.HoldTierHudAllowDrag
-				+ " enabled=" + config.HoldTierHudEnabled
-				+ " uiZoomPolluted=" + HoldHudCoords.IsUiZoomScreenPolluted()
-				+ " screen=" + Main.screenWidth + "x" + Main.screenHeight
-				+ " stableSurface=" + HoldHudCoords.GamePixelSurfaceW + "x" + HoldHudCoords.GamePixelSurfaceH
-				+ " source=" + HoldHudCoords.GamePixelSurfaceSource
-				+ " customNorm=(" + config.HoldTierHudCustomPositionX.ToString("0.###") + ","
-				+ config.HoldTierHudCustomPositionY.ToString("0.###") + ")");
-			#endif
 			Matrix hudMatrix = customPixel ? Matrix.Identity : GetHudDrawMatrix();
 			spriteBatch.End();
 			spriteBatch.Begin(
@@ -2686,15 +2282,6 @@ namespace AdvancedKeybinds.Patches
 							float barH = ResolveCustomBarHeightPixel(IsHudDragAllowed(config));
 							UpdateCustomPixelDragTracking(origin, w, barH);
 							GetCustomPixelSurfaceSize(out int drawSw, out int drawSh);
-							#if AK_DIAGNOSTICS
-							HoldHudProbe.LogDrawThrottle(
-								"DRAW customPx=" + FormatVec(origin)
-								+ " norm=(" + config.HoldTierHudCustomPositionX.ToString("0.###") + ","
-								+ config.HoldTierHudCustomPositionY.ToString("0.###") + ")"
-								+ " surface=" + drawSw + "x" + drawSh
-								+ " dragging=" + _customPixelDragActive
-								+ " mouse=" + FormatVec(GetCustomPixelMouse()));
-							#endif
 							DrawGroup(spriteBatch, group, origin);
 							drewAny = true;
 						}
@@ -2708,13 +2295,6 @@ namespace AdvancedKeybinds.Patches
 						if (config.HoldTierHudAnchor == HoldTierHudAnchor.Feet && _hasLastDrawnLayout)
 						{
 							Rectangle dr = _lastDrawnLayout.DrawRect;
-							#if AK_DIAGNOSTICS
-							HoldHudProbe.LogDrawThrottle(
-								"DRAW feetUi=" + FormatVec(origin)
-								+ " drawRect=" + FormatRect(dr)
-								+ " matrix=UIScaleMatrix"
-								+ " customReferenced=false");
-							#endif
 						}
 						DrawGroup(spriteBatch, group, origin);
 						drewAny = true;
@@ -2755,9 +2335,6 @@ namespace AdvancedKeybinds.Patches
 			}
 			finally
 			{
-				#if AK_DIAGNOSTICS
-				AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdHoldHudPostDraw);
-				#endif
 			}
 		}
 
@@ -2888,11 +2465,7 @@ namespace AdvancedKeybinds.Patches
 
 			// Absolute UI units only while middle-dragging (Feet/Mouse UI handle).
 			// Custom uses TryResolveCustomOriginPixel / _customDragOriginPixel (viewport px).
-			if (IsDragging && !_customPixelDragActive && _hasDragFollowOrigin)
-			{
-				origin = _dragFollowOrigin;
-			}
-			else if (IsDragging && !_customPixelDragActive && _dragHandle != null)
+			if (IsDragging && !_customPixelDragActive && _dragHandle != null)
 			{
 				origin = _dragHandle.GetBarOrigin();
 			}
@@ -2973,7 +2546,6 @@ namespace AdvancedKeybinds.Patches
 			Vector2 transformAsUi = HoldHudCoords.GamePxToUi(transformPx);
 			float dx = transformAsUi.X - postUiScale.X;
 			float dy = transformAsUi.Y - postUiScale.Y;
-			bool customReferenced = false;
 			AdvancedKeybindsConfig config = AdvancedKeybindsConfig.Instance;
 			string anomaly = "";
 			if (config != null && config.HoldTierHudAnchor == HoldTierHudAnchor.Feet
@@ -2985,7 +2557,6 @@ namespace AdvancedKeybinds.Patches
 			if (config != null && config.HoldTierHudAnchor == HoldTierHudAnchor.Feet
 				&& IsUsingCustomPixelSpace(config))
 			{
-				customReferenced = true;
 				anomaly += " ANOMALY customBranchWhileFeet";
 			}
 
@@ -3007,30 +2578,6 @@ namespace AdvancedKeybinds.Patches
 			bool onScreen = finalDraw.X >= -50 && finalDraw.Y >= -50
 				&& finalDraw.X <= uiW + 50 && finalDraw.Y <= uiH + 50;
 
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogFeetCoordThrottle(
-				"FEET-COORD anchor=" + (config?.HoldTierHudAnchor.ToString() ?? "null")
-				+ " playerPos=(" + player.position.X.ToString("0.#") + "," + player.position.Y.ToString("0.#") + ")"
-				+ " playerCenter=(" + player.Center.X.ToString("0.#") + "," + player.Center.Y.ToString("0.#") + ")"
-				+ " playerBottomWorld=(" + feetWorld.X.ToString("0.#") + "," + feetWorld.Y.ToString("0.#") + ")"
-				+ " screenPosition=(" + Main.screenPosition.X.ToString("0.#") + "," + Main.screenPosition.Y.ToString("0.#") + ")"
-				+ " screen=" + Main.screenWidth + "x" + Main.screenHeight
-				+ " UIScale=" + Main.UIScale.ToString("0.###")
-				+ " gdViewport=" + vpW + "x" + vpH
-				+ " backbuffer=" + bbW + "x" + bbH
-				+ " worldMinusScreen=(" + worldMinusScreen.X.ToString("0.#") + "," + worldMinusScreen.Y.ToString("0.#") + ")"
-				+ " zoomScreenPx=(" + zoomScreenPx.X.ToString("0.#") + "," + zoomScreenPx.Y.ToString("0.#") + ")"
-				+ " transformPx=(" + transformPx.X.ToString("0.#") + "," + transformPx.Y.ToString("0.#") + ")"
-				+ " preScale=zoomScreenPx postScale=(" + postUiScale.X.ToString("0.#") + "," + postUiScale.Y.ToString("0.#") + ")"
-				+ " finalDraw=(" + finalDraw.X.ToString("0.#") + "," + finalDraw.Y.ToString("0.#") + ")"
-				+ " matrix=UIScaleMatrix"
-				+ " customNorm=(" + (config?.HoldTierHudCustomPositionX.ToString("0.###") ?? "?") + ","
-				+ (config?.HoldTierHudCustomPositionY.ToString("0.###") ?? "?") + ")"
-				+ " customReferenced=" + customReferenced
-				+ " onScreen=" + onScreen
-				+ " uiZoomPolluted=" + HoldHudCoords.IsUiZoomScreenPolluted()
-				+ anomaly);
-			#endif
 		}
 
 		// ---------------------------------------------------------------------------
@@ -3136,18 +2683,6 @@ namespace AdvancedKeybinds.Patches
 			return origin;
 		}
 
-		/// <summary>
-		/// Bridge Feet/Mouse UI-space origin into Custom viewport pixels at commit only.
-		/// Not used for ongoing Custom math.
-		/// </summary>
-		private static Vector2 UiSpaceOriginToCustomPixel(Vector2 originUi)
-		{
-			GetHudScreenSize(out int uiSurfaceW, out int uiSurfaceH);
-			GetCustomPixelSurfaceSize(out int gamePixelSurfaceW, out int gamePixelSurfaceH);
-			return HoldHudCoords.UiOriginToGamePx(
-				originUi, uiSurfaceW, uiSurfaceH, gamePixelSurfaceW, gamePixelSurfaceH);
-		}
-
 		private static void AlignTrackedCustomViewport(string reason)
 		{
 			GetCustomPixelSurfaceSize(out int vw, out int vh);
@@ -3238,12 +2773,6 @@ namespace AdvancedKeybinds.Patches
 
 			if (config.HoldTierHudAnchor != HoldTierHudAnchor.Custom)
 			{
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.Log(
-					"ANOMALY CUSTOM-INIT-from-non-custom anchor=" + config.HoldTierHudAnchor
-					+ " reason=" + storeReason
-					+ " preferCustom=" + ClientPrefs.HoldHudPreferCustom);
-				#endif
 				return false;
 			}
 
@@ -3252,12 +2781,6 @@ namespace AdvancedKeybinds.Patches
 			{
 				if (logExistingValid)
 				{
-					#if AK_DIAGNOSTICS
-					HoldHudProbe.LogCustomInit(
-						reason: "existing-valid-placement",
-						saved: false,
-						storedNorm: stored);
-					#endif
 				}
 				return false;
 			}
@@ -3295,25 +2818,6 @@ namespace AdvancedKeybinds.Patches
 			Vector2 roundTrip = DenormalizeCustomPosition(nx, ny, vw, vh);
 			Vector2 roundTripErr = roundTrip - originPixel;
 
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogCustomInit(
-				reason: "unset",
-				saved: true,
-				playerTopWorld: headWorld,
-				playerCenterWorld: playerCenter,
-				screenPosition: Main.screenPosition,
-				worldToScreenGamePx: afterMatrix,
-				barSize: new Vector2(barW, barH),
-				headGap: CustomHeadGapPixel,
-				beforeClampGamePx: beforeClamp,
-				afterClampGamePx: originPixel,
-				surfaceW: vw,
-				surfaceH: vh,
-				surfaceSource: HoldHudCoords.GamePixelSurfaceSource,
-				storedNorm: new Vector2(nx, ny),
-				roundTripPx: roundTrip,
-				roundTripErr: roundTripErr);
-			#endif
 
 			if (AkDiag.Enabled)
 			{
@@ -3425,14 +2929,6 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			return false;
-		}
-
-		/// <summary>Legacy name — delegates to <see cref="TryResolveCustomOriginPixel"/>.</summary>
-		private static Vector2 ResolveCustomPixelOrigin(AdvancedKeybindsConfig config)
-		{
-			if (TryResolveCustomOriginPixel(config, out Vector2 origin))
-				return origin;
-			return new Vector2(CustomPositionUnset, CustomPositionUnset);
 		}
 
 		private static void DrawGroup(SpriteBatch spriteBatch, ReleaseHoldHudGroup group, Vector2 origin)

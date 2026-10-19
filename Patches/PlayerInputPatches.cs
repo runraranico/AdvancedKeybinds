@@ -27,17 +27,8 @@ namespace AdvancedKeybinds.Patches
 			if (updateInput != null)
 			{
 				ModDetours.Apply(updateInput, (orig_Void orig) => {
-#if AK_DIAGNOSTICS
-					AkCpuMeasureSystem.TickPhase("PlayerInput");
-					AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdPlayerInputDetour);
-					ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.enter");
-#endif
 					try
 					{
-#if AK_DIAGNOSTICS
-					if (LiveInputDiagnosticSession.IsActive)
-						LiveInputDiagnosticSession.Poll();
-#endif
 					GameWindowInputHook.EnsureInstalledIfNeeded();
 					KeybindingUiPatches.SyncPhysicalRowMouseEdges();
 
@@ -47,54 +38,25 @@ namespace AdvancedKeybinds.Patches
 					// Independent GamePad subsystem tick (same UpdateInput timing; no keyboard internals).
 					FnaGamePadProvider.AdvanceInputTick();
 					GamePadProbeSystem.AdvanceProbeFromInputUpdate();
-#if AK_DIAGNOSTICS
-					GamePadCaptureAR2Diag.PollR2FromSnapshot();
-#endif
 
 					// Face-South (Pad:A) PRESS while a binding row is focused → direct ComboPanel open.
 					PendingGamePadRowConfirm.PollArmFromInputTick();
 					// Pad:A on SectionHeader → save StableId before list rebuild remaps PointIds.
 					ControlsGamepadAutoScrollPatches.PollSaveFocusOnSectionConfirm();
 
-#if AK_DIAGNOSTICS
-					InGameTriggerNavDiag.PollBeginOfInputTick();
-#endif
 
 					int dpadBefore = UILinkPointNavigator.CurrentPoint;
 					ControlsUiHost.EnsureInWorldGamepadUiModeForControls();
 
 					ComboPanel.BeginInputTickEscapeCaptureState();
-#if AK_DIAGNOSTICS
-					ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.afterBeginInputTick");
-					try
-					{
-						KeybindEscapeDiagSystem.BeginInputTick();
-						KeybindEscapeDiagSystem.ObservePhase("beforeHandleEscape", escapeEdgeHint: false);
-					}
-					catch { /* never break input */ }
-#endif
 
 					// HandleEscape must see Escape before any parent-menu swallow.
 					if (ComboPanel.IsOpen)
 					{
-#if AK_DIAGNOSTICS
-						ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.beforePollSlotCapture");
-#endif
 						ComboPanel.PollSlotCaptureIfActive();
-#if AK_DIAGNOSTICS
-						ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.afterPollSlotCapture");
-						ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.beforeHandleEscape");
-#endif
 						ComboPanel.HandleEscape();
-#if AK_DIAGNOSTICS
-						ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.afterHandleEscape", "open=" + (ComboPanel.IsOpen ? 1 : 0));
-#endif
 					}
 
-#if AK_DIAGNOSTICS
-					try { KeybindEscapeDiagSystem.ObservePhase("afterHandleEscape", escapeEdgeHint: false); }
-					catch { }
-#endif
 
 					if (ComboPanel.IsOpen)
 					{
@@ -105,51 +67,20 @@ namespace AdvancedKeybinds.Patches
 					if (ComboPanel.ShouldSwallowMenuEscape())
 						ComboPanel.PrepareParentMenuForEscape();
 
-#if AK_DIAGNOSTICS
-					try { KeybindEscapeDiagSystem.ObservePhase("afterPrepareParentEscape", escapeEdgeHint: false); }
-					catch { }
-#endif
 
 					ComboPanelCloseInputConsumeGate.PollAndSuppress();
 
-#if AK_DIAGNOSTICS
-					AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdWinKeySuppressorBlock);
-#endif
 					WindowsKeySuppressor.EnsureInstalled();
 					WindowsKeySuppressor.PollWinKeyReleaseGuard();
 					WindowsKeySuppressor.FlushDeferredWinActions();
-#if AK_DIAGNOSTICS
-					AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdWinKeySuppressorBlock);
-#endif
 
-#if AK_DIAGNOSTICS
-					ComboPanelEscPathDiag.Note("PlayerInput.beforeOrig");
-					ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.beforeOrig");
-#endif
 					orig();
-					InventoryEscLiveVerifySystem.NoteInventoryJpPhase("afterVanilla");
-#if AK_DIAGNOSTICS
-					ComboPanelEscPathDiag.Note("PlayerInput.afterOrig");
-					ComboPanelIdleEscPathDiag.Note("PlayerInputPatches.afterOrig");
-#endif
 					// After MouseInput may demote cursor: keep selection display while D-Pad/stick active.
 					ControlsUiHost.ReassertGamepadUiCursorAfterVanillaInput();
 					// Fixed Pad ↓ / Pad → → vanilla MouseLeft / Inventory for all GamePad UI (title…in-game).
 					FixedGamepadUiConfirmApplicator.ApplyAfterVanillaInput();
-#if AK_DIAGNOSTICS
-					AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterFixedGamepadInject");
-#endif
 
-#if AK_DIAGNOSTICS
-					InGameTriggerNavDiag.PollEndOfInputTick();
-#endif
-					GamePadControlTabProbe.ObserveAfterVanillaInputRebuild();
 					// Temporary NativeGamepadCursorModeProbe: remains stubbed (not restored).
-#if AK_DIAGNOSTICS
-					PadFaceMappingAutoDiagnosticSystem.ObserveAfterVanillaInput();
-					PadConfirmAfterComboSaveDiagSystem.ObserveAfterVanillaInput();
-					GamePadTwoKeyLiveFireDiagSystem.ObserveAfterVanillaInput();
-#endif
 
 					ComboPanel.SuppressEscapeAfterVanillaInputRebuild();
 					// Settings menus: Tab AdditionalOr must not ToggleInv-close (Escape only).
@@ -158,36 +89,15 @@ namespace AdvancedKeybinds.Patches
 					// After settings Escape leave: keep Inventory dead until Escape key-up.
 					ComboPanel.PollSettingsEscapeLeaveInventoryGate();
 					ComboPanel.PollWorldEscapeInventoryOneShotGate();
-#if AK_DIAGNOSTICS
-					AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterSuppressEscape");
-#endif
 					ComboPanel.SuppressGamePadParentUiAfterVanillaInputRebuild();
-#if AK_DIAGNOSTICS
-					AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterSuppressGamePadParent");
-#endif
 					ComboPanel.PollPadBackCloseGateAndSuppressParent();
-#if AK_DIAGNOSTICS
-					AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterPollPadBack");
-#endif
 					ComboPanelCloseInputConsumeGate.PollAndSuppress();
-#if AK_DIAGNOSTICS
-					AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterCloseConsume#1");
-					try { KeybindEscapeDiagSystem.ObservePhase("afterVanillaSuppress", escapeEdgeHint: false); }
-					catch { }
-					AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterVanillaSuppressDiag");
-#endif
 
 				ControlsPadBHoldCancelFocus.AfterPlayerInputTick();
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterControlsPadBHold");
-#endif
 				ControlsGamepadAutoScrollPatches.PollSectionConfirmRelease();
 				ControlsGamepadAutoScrollPatches.PollComboPanelParentRestore();
 				ControlsGamepadAutoScrollPatches.PollManualRightStickScroll();
 				ComboPanelCloseInputConsumeGate.PollAndSuppress();
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterCloseConsume#2");
-#endif
 
 				if (FnaGamePadProvider.WasJustPressed(GamePadToken.DPadDown))
 					ControlsUiHost.LogDpadEdgeIfNeeded(GamePadToken.DPadDown, dpadBefore);
@@ -204,12 +114,8 @@ namespace AdvancedKeybinds.Patches
 					ComboPanel.PrepareParentMenuForEscape();
 					ComboPanel.PollPadBackCloseGateAndSuppressParent();
 				}
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterGuardOrPrepareParent");
-#endif
 
 				ApplyAdvancedBindingsToTriggers();
-					InventoryEscLiveVerifySystem.NoteInventoryJpPhase("afterApply");
 					// Advanced OR may re-arm Inventory from Tab after vanilla suppress — clear again on menus.
 					ComboPanel.SuppressTabInventoryOnSettingsMenusIfNeeded();
 					// Same Escape press after settings leave must not re-open inventory.
@@ -218,10 +124,8 @@ namespace AdvancedKeybinds.Patches
 					// Settings / title Escape leave safety net (KeyStatus owns Escape but AK cleared edge).
 					// Product path — not diagnostics (title BackButtonInUse needs Inventory JP).
 					InventoryEscapeRearm.ApplyAfterAkSuppress();
-					InventoryEscLiveVerifySystem.NoteInventoryJpPhase("afterRearm");
 					// B1: releaseInventory stuck false after ComboPanel dismiss → Controls ESC dead.
 					ComboPanel.TryRestoreReleaseInventoryForSettingsEscapeLeave();
-					InventoryEscLiveVerifySystem.TickFromGameLoop("PlayerInput.afterRearm");
 					ComboPanel.PollSettingsEscapeLeaveInventoryGate();
 					ComboPanel.PollWorldEscapeInventoryOneShotGate();
 					ComboPanel.TryRestoreReleaseInventoryForSettingsEscapeLeave();
@@ -229,27 +133,9 @@ namespace AdvancedKeybinds.Patches
 					ComboPanel.PollIdleEscParentReleaseProtectAfterAdvanced();
 					// After Advanced apply: typed Jump/Throw/QuickMount etc. from display-name edit.
 					ComboPanel.PollPostTextEditGameplaySettle();
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteInventoryPhase("afterApplyAdvancedBindings");
-				PadFaceMappingAutoDiagnosticSystem.ObserveAfterApplyAdvanced();
-				GamePadTwoKeyLiveFireDiagSystem.ObserveAfterApplyAdvanced();
-				try
-				{
-					AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdZoomTick);
-					ZoomKeyLiveVerifySystem.TickFromGameLoop("PlayerInput");
-					AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdZoomTick);
-				}
-				catch (System.Exception)
-				{
-					// Never let investigation verifier break the input detour.
-				}
-#endif
 					}
 					finally
 					{
-#if AK_DIAGNOSTICS
-						AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdPlayerInputDetour);
-#endif
 					}
 				});
 			}
@@ -286,7 +172,7 @@ namespace AdvancedKeybinds.Patches
 					if (!ToggleInvSameFrameCoalescePolicy.ShouldInvokeOrigForContext(
 						gameUpdate,
 						FnaKeyboardProvider.InputTickEpoch,
-						!Main.gameMenu && (Main.inFancyUI || Main.ingameOptionsWindow),
+						!Main.gameMenu && (Main.gamePaused || Main.inFancyUI || Main.ingameOptionsWindow),
 						ref _toggleInvLastGameUpdate,
 						ref _toggleInvInvokedThisUpdate,
 						ref _toggleInvLastInputTickEpoch,
@@ -326,49 +212,19 @@ namespace AdvancedKeybinds.Patches
 
 		private static void ApplyAdvancedBindingsToTriggers()
 		{
-#if AK_DIAGNOSTICS
-			AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdBindingInputEngine);
-#endif
 			BindingInputEngine.Update();
-#if AK_DIAGNOSTICS
-			AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdBindingInputEngine);
-#endif
 
 			TriggersSet justPressed = PlayerInput.Triggers.JustPressed;
 			TriggersSet current = PlayerInput.Triggers.Current;
 			TriggersSet justReleased = PlayerInput.Triggers.JustReleased;
 
-#if AK_DIAGNOSTICS
-			bool jumpBefore = JumpApplyStageDiag.ReadTrigger(justPressed, "Jump");
-			bool mlBefore = JumpApplyStageDiag.ReadTrigger(justPressed, "MouseLeft");
-			bool padAJp = FnaGamePadProvider.WasJustPressed(GamePadToken.A);
-#endif
 
 			BindingInputEngine.ApplyResultsToTriggers(justPressed, current);
-#if AK_DIAGNOSTICS
-			bool jumpAfterResults = JumpApplyStageDiag.ReadTrigger(justPressed, "Jump");
-#endif
 
 			// AK-owned actions: discard vanilla/default edges for that action id only (not global keys).
 			BindingInputEngine.ApplyOwnershipToTriggers(justPressed, current, justReleased);
-#if AK_DIAGNOSTICS
-			bool jumpAfterOwnership = JumpApplyStageDiag.ReadTrigger(justPressed, "Jump");
-#endif
 
 			SuppressConflictingVanillaTriggers(justPressed);
-#if AK_DIAGNOSTICS
-			bool jumpAfterSuppress = JumpApplyStageDiag.ReadTrigger(justPressed, "Jump");
-			bool mlAfterSuppress = JumpApplyStageDiag.ReadTrigger(justPressed, "MouseLeft");
-
-			JumpApplyStageDiag.Observe(
-				jumpBefore,
-				jumpAfterResults,
-				jumpAfterOwnership,
-				jumpAfterSuppress,
-				mlBefore,
-				mlAfterSuppress,
-				padAJp);
-#endif
 			BindingInputEngine.PublishDecisionSnapshotsAfterApply(justPressed);
 		}
 
@@ -385,6 +241,13 @@ namespace AdvancedKeybinds.Patches
 			foreach (KeyValuePair<string, bool> pair in justPressed.KeyStatus)
 			{
 				if (!pair.Value)
+					continue;
+
+				// A paused world has fresh input ticks but a frozen combo snapshot.
+				// Do not erase a new Inventory edge using last world's consumed keys.
+				if (pair.Key == "Inventory" && (BindingInputEngine.ShouldPreservePausedInventoryTriggers()
+					|| PlayerInput.CurrentInputMode == InputMode.XBoxGamepad
+					|| PlayerInput.CurrentInputMode == InputMode.XBoxGamepadUI))
 					continue;
 
 				// TwoKey OR ActionIds: Terraria KeyStatus owns fire — do not suppress.

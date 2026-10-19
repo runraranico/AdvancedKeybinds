@@ -800,10 +800,6 @@ namespace AdvancedKeybinds.Patches
 
 				AdvancedKeybinds.Instance?.Logger?.Warn(msg);
 
-#if AK_DIAGNOSTICS
-				if (AkDiag.Enabled)
-					TryWriteDiagDetail(memberLine, ex);
-#endif
 			}
 			catch
 			{
@@ -811,24 +807,5 @@ namespace AdvancedKeybinds.Patches
 			}
 		}
 
-#if AK_DIAGNOSTICS
-		private static void TryWriteDiagDetail(string reason, Exception ex)
-		{
-			try
-			{
-				string dir = Path.Combine(Main.SavePath, "AdvancedKeybinds", "Compat");
-				Directory.CreateDirectory(dir);
-				string path = Path.Combine(dir, "DialogueTweakGamepadCompat-disable.log");
-				string body = DateTime.UtcNow.ToString("o") + "\n" + reason + "\n";
-				if (ex != null)
-					body += ex + "\n";
-				File.AppendAllText(path, body);
-			}
-			catch
-			{
-				// ignore
-			}
-		}
-#endif
 	}
 }

@@ -86,7 +86,6 @@ namespace AdvancedKeybinds.Features.ListView
 		{
 			if (BindingListViewSystem.ShouldBlockInventoryItemSlotLeftClick())
 			{
-				BindingListViewHoverSoundDiag.NoteSuppressedMouseOver(self);
 				// Skip IsMouseHovering=true / OnMouseOver (MenuTick) / parent bubble.
 				return;
 			}

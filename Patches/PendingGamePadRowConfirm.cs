@@ -71,10 +71,6 @@ namespace AdvancedKeybinds.Patches
 			{
 				if (_openedThisConfirmHold || IsActive)
 				{
-#if AK_DIAGNOSTICS
-					PadConfirmAfterComboSaveDiagSystem.ObservePendingArm(
-						_actionId, armed: false, denyReason: "PadAReleased");
-#endif
 					ClearPendingOnly();
 					_openedThisConfirmHold = false;
 				}
@@ -87,10 +83,6 @@ namespace AdvancedKeybinds.Patches
 			{
 				if (IsActive || _openedThisConfirmHold)
 				{
-#if AK_DIAGNOSTICS
-					PadConfirmAfterComboSaveDiagSystem.ObservePendingArm(
-						_actionId, armed: false, denyReason: "CancelPressed");
-#endif
 					ClearPendingOnly();
 					_openedThisConfirmHold = false;
 				}
@@ -112,9 +104,6 @@ namespace AdvancedKeybinds.Patches
 			{
 				GamePadProbeSystem.LogPanelRowConfirmPoll(pointNow, rowKind, null, armAllowed: false, "CloseInputConsumeGate");
 				LogNotArmed("CloseInputConsumeGate");
-#if AK_DIAGNOSTICS
-				PadConfirmAfterComboSaveDiagSystem.ObservePendingArm(null, armed: false, denyReason: "CloseInputConsumeGate");
-#endif
 				return;
 			}
 
@@ -122,9 +111,6 @@ namespace AdvancedKeybinds.Patches
 			{
 				GamePadProbeSystem.LogPanelRowConfirmPoll(pointNow, rowKind, null, armAllowed: false, "SaveCloseEpochGate");
 				LogNotArmed("SaveCloseEpochGate");
-#if AK_DIAGNOSTICS
-				PadConfirmAfterComboSaveDiagSystem.ObservePendingArm(null, armed: false, denyReason: "SaveCloseEpochGate");
-#endif
 				return;
 			}
 
@@ -141,10 +127,6 @@ namespace AdvancedKeybinds.Patches
 
 			if (_openedThisConfirmHold)
 			{
-#if AK_DIAGNOSTICS
-				PadConfirmAfterComboSaveDiagSystem.ObservePendingArm(
-					null, armed: false, denyReason: "AlreadyOpenedThisHold");
-#endif
 				return;
 			}
 
@@ -176,9 +158,6 @@ namespace AdvancedKeybinds.Patches
 			_host = host ?? "?";
 			_openToken = confirmTok;
 
-#if AK_DIAGNOSTICS
-			PadConfirmAfterComboSaveDiagSystem.ObservePendingArm(actionId, armed: true, denyReason: null);
-#endif
 			GamePadProbeSystem.LogPanelRowConfirmPendingBegin(
 				_host,
 				_pointId,
@@ -195,14 +174,6 @@ namespace AdvancedKeybinds.Patches
 				_openedThisConfirmHold = true;
 				_consumed = true;
 				_active = false;
-#if AK_DIAGNOSTICS
-				PadConfirmAfterComboSaveDiagSystem.ObserveOpenIntent(
-					actionId,
-					accepted: true,
-					source: "DirectPadAOpen",
-					blockReason: null,
-					openedByGamePad: true);
-#endif
 				GamePadProbeSystem.LogPanelOpenAttempt(
 					actionId,
 					"DirectPadAOpen",
@@ -215,14 +186,6 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			// Open failed (gates / invalid row) — discard pending so ItemUse cannot complete it later.
-#if AK_DIAGNOSTICS
-			PadConfirmAfterComboSaveDiagSystem.ObserveOpenIntent(
-				actionId,
-				accepted: false,
-				source: "DirectPadAOpen",
-				blockReason: openReject ?? "DirectOpenFailed",
-				openedByGamePad: true);
-#endif
 			ClearPendingOnly();
 		}
 
@@ -259,14 +222,6 @@ namespace AdvancedKeybinds.Patches
 				mouseLeftArrived: true))
 			{
 				rejectReason = "StalePendingItemUseMouseLeftRejected";
-#if AK_DIAGNOSTICS
-				PadConfirmAfterComboSaveDiagSystem.ObserveOpenIntent(
-					_actionId ?? clickActionId,
-					accepted: false,
-					source: "PadConfirmPending",
-					blockReason: rejectReason,
-					openedByGamePad: false);
-#endif
 				ClearPendingOnly();
 				return false;
 			}

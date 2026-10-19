@@ -103,7 +103,6 @@ namespace AdvancedKeybinds.Features.ListView
 		{
 			if (Block())
 			{
-				BindingListViewClickPathDiag.TraceItemSlotLeftClickBlocked("LeftClick(Item[])", context, slot);
 				return;
 			}
 
@@ -114,7 +113,6 @@ namespace AdvancedKeybinds.Features.ListView
 		{
 			if (Block())
 			{
-				BindingListViewClickPathDiag.TraceItemSlotLeftClickBlocked("LeftClick(ref Item)", context, -1);
 				return;
 			}
 

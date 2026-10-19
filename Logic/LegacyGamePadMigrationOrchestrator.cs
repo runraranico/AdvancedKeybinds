@@ -480,73 +480,6 @@ namespace AdvancedKeybinds.Core
 			return true;
 		}
 
-		private static void AssertUnchangedDisk(
-			string bindingsPath,
-			string profilesPath,
-			string bindingsShaBefore,
-			string profilesShaBefore)
-		{
-			// Soft check helpers for callers; orchestrator itself does not throw.
-			_ = bindingsPath;
-			_ = profilesPath;
-			_ = bindingsShaBefore;
-			_ = profilesShaBefore;
-		}
-
-		private static bool TryRequiredBackups(
-			Session session,
-			Result result,
-			string bindingsPath,
-			string profilesPath,
-			string stamp,
-			Func<string, string, bool> tryCopyFile,
-			bool backupBindings,
-			bool backupProfiles)
-		{
-			bool ok = true;
-			if (backupBindings && !string.IsNullOrEmpty(bindingsPath) && File.Exists(bindingsPath))
-			{
-				string dest = bindingsPath + ".bak-" + stamp;
-				try
-				{
-					if (!tryCopyFile(bindingsPath, dest))
-					{
-						ok = false;
-						Log(result, session, "BACKUP_FAIL", bindingsPath, dest, "copy returned false");
-					}
-					else
-						Log(result, session, "BACKUP", bindingsPath, dest, "legacy-gp-migrate");
-				}
-				catch (Exception ex)
-				{
-					ok = false;
-					Log(result, session, "BACKUP_FAIL", bindingsPath, null, ex.GetType().Name);
-				}
-			}
-
-			if (backupProfiles && !string.IsNullOrEmpty(profilesPath) && File.Exists(profilesPath))
-			{
-				string dest = profilesPath + ".bak-" + stamp;
-				try
-				{
-					if (!tryCopyFile(profilesPath, dest))
-					{
-						ok = false;
-						Log(result, session, "BACKUP_FAIL", profilesPath, dest, "copy returned false");
-					}
-					else
-						Log(result, session, "BACKUP", profilesPath, dest, "legacy-gp-migrate");
-				}
-				catch (Exception ex)
-				{
-					ok = false;
-					Log(result, session, "BACKUP_FAIL", profilesPath, null, ex.GetType().Name);
-				}
-			}
-
-			return ok;
-		}
-
 		private static void ApplyPlan(
 			Dictionary<string, ComboBindingData> working,
 			List<LegacyGamePadStorageMigrationPolicy.PlanItem> plan,
@@ -832,17 +765,6 @@ namespace AdvancedKeybinds.Core
 			return IsDoubleTapData(getData(g)) || IsDoubleTapData(getData(u));
 		}
 
-		private static (Dictionary<string, List<string>> g, Dictionary<string, List<string>> u) SnapshotKeyStatus(Session s)
-			=> (CloneMap(s.KeyStatusGamepad), CloneMap(s.KeyStatusGamepadUi));
-
-		private static void RestoreKeyStatus(
-			Session s,
-			(Dictionary<string, List<string>> g, Dictionary<string, List<string>> u) snap)
-		{
-			s.KeyStatusGamepad = snap.g;
-			s.KeyStatusGamepadUi = snap.u;
-		}
-
 		private static Dictionary<string, List<string>> CloneMap(Dictionary<string, List<string>> src)
 		{
 			var dst = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -898,17 +820,6 @@ namespace AdvancedKeybinds.Core
 			}
 
 			return o;
-		}
-
-		private static void ReadProfilesKeyStatus(string path, Session session)
-		{
-			JObject root = JObject.Parse(File.ReadAllText(path));
-			string selected = root.Value<string>("Selected Profile") ?? "Custom";
-			JObject profile = root[selected] as JObject ?? root["Custom"] as JObject;
-			if (profile == null)
-				return;
-			ReadSection(profile[GamepadSection] as JObject, session.KeyStatusGamepad);
-			ReadSection(profile[GamepadUiSection] as JObject, session.KeyStatusGamepadUi);
 		}
 
 		private static void ReadSection(JObject section, Dictionary<string, List<string>> map)

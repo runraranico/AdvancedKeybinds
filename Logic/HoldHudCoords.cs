@@ -22,10 +22,6 @@ namespace AdvancedKeybinds.Logic
 		private static int _gamePixelSurfaceW;
 		private static int _gamePixelSurfaceH;
 		private static string _gamePixelSurfaceSource = "unset";
-#if AK_DIAGNOSTICS
-		private static uint _lastSurfaceChooseLogUpdate;
-		private static uint _lastPhaseSnapLogUpdate;
-#endif
 
 		public static int GamePixelSurfaceW => Math.Max(1, _gamePixelSurfaceW);
 		public static int GamePixelSurfaceH => Math.Max(1, _gamePixelSurfaceH);
@@ -75,9 +71,6 @@ namespace AdvancedKeybinds.Logic
 
 		public static SurfaceCatalog CaptureSurfaces()
 		{
-#if AK_DIAGNOSTICS
-			AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdCaptureSurfaces);
-#endif
 			try
 			{
 			bool hasClient = GameWindowHandle.TryGetClientSize(out int clientW, out int clientH);
@@ -130,9 +123,6 @@ namespace AdvancedKeybinds.Logic
 			}
 			finally
 			{
-#if AK_DIAGNOSTICS
-				AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdCaptureSurfaces);
-#endif
 			}
 		}
 
@@ -140,12 +130,6 @@ namespace AdvancedKeybinds.Logic
 
 		public static void InvalidateGamePixelSurface(string reason)
 		{
-#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"SURFACE-INVALIDATE reason=" + reason
-				+ " had=" + _gamePixelSurfaceW + "x" + _gamePixelSurfaceH
-				+ " source=" + _gamePixelSurfaceSource);
-#endif
 			_gamePixelSurfaceW = 0;
 			_gamePixelSurfaceH = 0;
 			_gamePixelSurfaceSource = "unset";
@@ -157,9 +141,6 @@ namespace AdvancedKeybinds.Logic
 		/// </summary>
 		public static void RefreshGamePixelSurface(string phase)
 		{
-#if AK_DIAGNOSTICS
-			AkCpuMeasureSystem.Begin(AkCpuMeasureSystem.IdRefreshGamePixelSurface);
-#endif
 			try
 			{
 			SurfaceCatalog cat = CaptureSurfaces();
@@ -230,9 +211,6 @@ namespace AdvancedKeybinds.Logic
 			}
 			finally
 			{
-#if AK_DIAGNOSTICS
-				AkCpuMeasureSystem.End(AkCpuMeasureSystem.IdRefreshGamePixelSurface);
-#endif
 			}
 		}
 
@@ -246,22 +224,6 @@ namespace AdvancedKeybinds.Logic
 		private static void LogSurfaceChoice(
 			string phase, int w, int h, string source, string why, bool changed)
 		{
-#if AK_DIAGNOSTICS
-			if (!HoldHudProbe.Enabled)
-				return;
-
-			uint now = Main.GameUpdateCount;
-			if (!changed && now - _lastSurfaceChooseLogUpdate < 120)
-				return;
-			_lastSurfaceChooseLogUpdate = now;
-			HoldHudProbe.Log(
-				"SURFACE-CHOOSE phase=" + phase
-				+ " chosen=" + w + "x" + h
-				+ " source=" + source
-				+ " changed=" + changed
-				+ " " + why
-				+ " UIScale=" + UiScale.ToString("0.###"));
-#endif
 		}
 
 		public static void GetGamePixelSurface(out int width, out int height)
@@ -420,64 +382,14 @@ namespace AdvancedKeybinds.Logic
 			int surfaceW,
 			int surfaceH)
 		{
-#if AK_DIAGNOSTICS
-			Vector2 restoredGamePx = DenormalizeToGamePx(customNormX, customNormY, surfaceW, surfaceH);
-			float errX = restoredGamePx.X - inputGamePx.X;
-			float errY = restoredGamePx.Y - inputGamePx.Y;
-			HoldHudProbe.LogCoordPipeline(
-				stage, inputGamePx, customNormX, customNormY, restoredGamePx, surfaceW, surfaceH);
-			if (Math.Abs(errX) > RoundTripAnomalyPx || Math.Abs(errY) > RoundTripAnomalyPx)
-			{
-				HoldHudProbe.Log(
-					"ANOMALY ROUND-TRIP stage=" + stage
-					+ " inputGamePx=(" + inputGamePx.X.ToString("0.#") + "," + inputGamePx.Y.ToString("0.#") + ")"
-					+ " customNorm=(" + customNormX.ToString("0.###") + "," + customNormY.ToString("0.###") + ")"
-					+ " restoredGamePx=(" + restoredGamePx.X.ToString("0.#") + "," + restoredGamePx.Y.ToString("0.#") + ")"
-					+ " err=(" + errX.ToString("0.##") + "," + errY.ToString("0.##") + ")"
-					+ " surface=" + surfaceW + "x" + surfaceH
-					+ " source=" + _gamePixelSurfaceSource);
-			}
-#endif
 		}
 
 		public static void CheckFeetAnomaly(Vector2 finalOriginUi, float expectedOffsetYUi)
 		{
-#if AK_DIAGNOSTICS
-			if (Main.LocalPlayer == null || !Main.LocalPlayer.active)
-				return;
-
-			Vector2 feetUi = PlayerFeetUi(Main.LocalPlayer);
-			Vector2 expectedUi = feetUi + new Vector2(0f, expectedOffsetYUi);
-			float dist = Vector2.Distance(finalOriginUi, expectedUi);
-			if (dist > FeetAnomalyMaxUi)
-			{
-				HoldHudProbe.Log(
-					"FEET-ANOMALY distUi=" + dist.ToString("0.#")
-					+ " finalOriginUi=(" + finalOriginUi.X.ToString("0.#") + "," + finalOriginUi.Y.ToString("0.#") + ")"
-					+ " playerFeetUi=(" + feetUi.X.ToString("0.#") + "," + feetUi.Y.ToString("0.#") + ")"
-					+ " expectedUi=(" + expectedUi.X.ToString("0.#") + "," + expectedUi.Y.ToString("0.#") + ")"
-					+ " UIScale=" + UiScale.ToString("0.###"));
-			}
-#endif
 		}
 
 		public static void CheckMouseAnomaly(Vector2 finalOriginUi, Vector2 expectedOffsetUi)
 		{
-#if AK_DIAGNOSTICS
-			Vector2 mouseUi = GetMouseUi();
-			Vector2 expectedUi = mouseUi + expectedOffsetUi;
-			float dist = Vector2.Distance(finalOriginUi, expectedUi);
-			float max = expectedOffsetUi.Length() + MouseAnomalySlackUi;
-			if (dist > max)
-			{
-				HoldHudProbe.Log(
-					"MOUSE-ANOMALY distUi=" + dist.ToString("0.#")
-					+ " max=" + max.ToString("0.#")
-					+ " finalOriginUi=(" + finalOriginUi.X.ToString("0.#") + "," + finalOriginUi.Y.ToString("0.#") + ")"
-					+ " mouseUi=(" + mouseUi.X.ToString("0.#") + "," + mouseUi.Y.ToString("0.#") + ")"
-					+ " UIScale=" + UiScale.ToString("0.###"));
-			}
-#endif
 		}
 
 		public static void LogCustomLayout(
@@ -488,71 +400,15 @@ namespace AdvancedKeybinds.Logic
 			Vector2 customNorm,
 			Vector2 originGamePx)
 		{
-#if AK_DIAGNOSTICS
-			GetGamePixelSurface(out int sw, out int sh);
-			HoldHudProbe.Log(
-				"CUSTOM-LAYOUT stage=" + stage
-				+ " drawRect=[" + drawRect.X + "," + drawRect.Y + " " + drawRect.Width + "x" + drawRect.Height + "]"
-				+ " hitRect=[" + hitRect.X + "," + hitRect.Y + " " + hitRect.Width + "x" + hitRect.Height + "]"
-				+ " mouseClientPx=(" + mouseClientPx.X.ToString("0.#") + "," + mouseClientPx.Y.ToString("0.#") + ")"
-				+ " originGamePx=(" + originGamePx.X.ToString("0.#") + "," + originGamePx.Y.ToString("0.#") + ")"
-				+ " customNorm=(" + customNorm.X.ToString("0.###") + "," + customNorm.Y.ToString("0.###") + ")"
-				+ " gamePixelSurface=" + sw + "x" + sh
-				+ " source=" + _gamePixelSurfaceSource
-				+ " drawContains=" + drawRect.Contains((int)mouseClientPx.X, (int)mouseClientPx.Y)
-				+ " hitContains=" + hitRect.Contains((int)mouseClientPx.X, (int)mouseClientPx.Y)
-				+ " UIScale=" + UiScale.ToString("0.###"));
-#endif
 		}
 
 		public static void LogPhaseSnapshot(string phase, AdvancedKeybindsConfig config = null)
 		{
-#if AK_DIAGNOSTICS
-			// Skip CaptureSurfaces / mouse reads when probe is off (was still costing CPU every ~60 frames).
-			if (!HoldHudProbe.Enabled)
-				return;
-
-			uint now = Main.GameUpdateCount;
-			bool discrete = phase.IndexOf("drag", StringComparison.OrdinalIgnoreCase) >= 0
-				|| phase.IndexOf("OnChanged", StringComparison.OrdinalIgnoreCase) >= 0
-				|| phase.IndexOf("commit", StringComparison.OrdinalIgnoreCase) >= 0
-				|| phase.IndexOf("Begin", StringComparison.OrdinalIgnoreCase) >= 0;
-			if (!discrete && now - _lastPhaseSnapLogUpdate < 60)
-				return;
-			if (!discrete)
-				_lastPhaseSnapLogUpdate = now;
-
-			SurfaceCatalog cat = CaptureSurfaces();
-			config ??= AdvancedKeybindsConfig.Instance;
-			Vector2 mouseClientPx = GetMouseClientPx();
-			Vector2 mouseUi = GetMouseUi();
-			HoldHudProbe.Log(
-				"PHASE-SNAP phase=" + phase
-				+ " " + cat.Format()
-				+ " gamePixelSurface=" + GamePixelSurfaceW + "x" + GamePixelSurfaceH
-				+ " source=" + _gamePixelSurfaceSource
-				+ " mouseClientPx=(" + mouseClientPx.X.ToString("0.#") + "," + mouseClientPx.Y.ToString("0.#") + ")"
-				+ " mouseUi=(" + mouseUi.X.ToString("0.#") + "," + mouseUi.Y.ToString("0.#") + ")"
-				+ " UIScale=" + UiScale.ToString("0.###")
-				+ " anchor=" + (config?.HoldTierHudAnchor.ToString() ?? "null")
-				+ " customNorm=(" + (config?.HoldTierHudCustomPositionX.ToString("0.###") ?? "?") + ","
-				+ (config?.HoldTierHudCustomPositionY.ToString("0.###") ?? "?") + ")");
-#endif
 		}
 
 		public static void LogUiToCustomPromotion(
 			Vector2 originUi, Vector2 gamePx, Vector2 customNorm, int gameW, int gameH)
 		{
-#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"PROMOTE-UI-TO-CUSTOM originUi=(" + originUi.X.ToString("0.#") + "," + originUi.Y.ToString("0.#") + ")"
-				+ " gamePx=(" + gamePx.X.ToString("0.#") + "," + gamePx.Y.ToString("0.#") + ")"
-				+ " customNorm=(" + customNorm.X.ToString("0.###") + "," + customNorm.Y.ToString("0.###") + ")"
-				+ " gamePixelSurface=" + gameW + "x" + gameH
-				+ " source=" + _gamePixelSurfaceSource
-				+ " UIScale=" + UiScale.ToString("0.###"));
-			ValidateRoundTrip("promote-ui-to-custom", gamePx, customNorm.X, customNorm.Y, gameW, gameH);
-#endif
 		}
 	}
 }

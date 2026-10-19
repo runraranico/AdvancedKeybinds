@@ -82,11 +82,6 @@ namespace AdvancedKeybinds.Patches
 				}
 				catch (Exception ex)
 				{
-#if AK_DIAGNOSTICS
-					if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-						AdvancedKeybinds.Instance?.Logger.Debug(
-							"EnsureSectionHeaderSnapPoints: " + ex.GetType().Name + ": " + ex.Message);
-#endif
 					GamePadProbeSystem.LogControlSectionLinkFailed(
 						"Controls.Section?.Header",
 						"SetSnapPointFailed:" + ex.GetType().Name);

@@ -56,9 +56,6 @@ namespace AdvancedKeybinds.Patches
 
 		public override void PostUpdateInput()
 		{
-			#if AK_DIAGNOSTICS
-			Diagnostics.AkCpuMeasureSystem.Begin(Diagnostics.AkCpuMeasureSystem.IdKeybindShortcut);
-			#endif
 			try
 			{
 				// Install (once, on the main thread that pumps window messages) the low-level hook that
@@ -90,9 +87,6 @@ namespace AdvancedKeybinds.Patches
 			}
 			finally
 			{
-				#if AK_DIAGNOSTICS
-				Diagnostics.AkCpuMeasureSystem.End(Diagnostics.AkCpuMeasureSystem.IdKeybindShortcut);
-				#endif
 			}
 		}
 

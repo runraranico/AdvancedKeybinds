@@ -157,43 +157,72 @@ namespace AdvancedKeybinds.Core
 			if (journal == null)
 				return result;
 			tryRestore ??= LegacyGamePadMigrationTransaction.TryRestoreFileOverwrite;
-			bool bindingsOk = RecoverOne(
-				journal, bindingsPath ?? journal.BindingsPath, "bindings",
-				journal.BindingsExisted, journal.BindingsBackupSha, journal.BindingsStagingSha, tryRestore);
-			bool profilesOk = RecoverOne(
-				journal, profilesPath ?? journal.ProfilesPath, "profiles",
-				journal.ProfilesExisted, journal.ProfilesBackupSha, journal.ProfilesStagingSha, tryRestore);
-			if (!bindingsOk || !profilesOk)
+			bool recovered = false;
+			var snapshots = new RecoveryResult();
+			try
+			{
+				// Validate both targets and required backups before changing either file.
+				recovered = TryLoadSnapshots(journal.DirectoryPath, snapshots)
+					&& CanRecoverOne(journal, bindingsPath ?? journal.BindingsPath, "bindings",
+					journal.BindingsExisted, journal.BindingsBackupSha, journal.BindingsStagingSha)
+					&& CanRecoverOne(journal, profilesPath ?? journal.ProfilesPath, "profiles",
+						journal.ProfilesExisted, journal.ProfilesBackupSha, journal.ProfilesStagingSha)
+					&& RecoverOne(journal, bindingsPath ?? journal.BindingsPath, "bindings",
+						journal.BindingsExisted, journal.BindingsBackupSha, journal.BindingsStagingSha, tryRestore)
+					&& RecoverOne(journal, profilesPath ?? journal.ProfilesPath, "profiles",
+						journal.ProfilesExisted, journal.ProfilesBackupSha, journal.ProfilesStagingSha, tryRestore);
+			}
+			catch
+			{
+				// Failed I/O must not publish journal memory snapshots as a successful recovery.
+			}
+			if (!recovered)
 			{
 				TrySetPhase(journal.DirectoryPath, JournalPhase.CriticalRecoveryConflict);
 				result.CriticalRecoveryConflict = true;
 				result.Journal = journal;
-				TryLoadSnapshots(journal.DirectoryPath, result);
 				return result;
 			}
-			TryLoadSnapshots(journal.DirectoryPath, result);
+			result.GpSnapshot = snapshots.GpSnapshot;
+			result.GpUiSnapshot = snapshots.GpUiSnapshot;
 			TrySetPhase(journal.DirectoryPath, JournalPhase.RolledBack);
 			result.Recovered = true;
 			return result;
 		}
 
-		private static void TryLoadSnapshots(string dir, RecoveryResult result)
+		private static bool TryLoadSnapshots(string dir, RecoveryResult result)
 		{
 			try
 			{
 				string gpPath = Path.Combine(dir, "snap-gp.json");
 				string gpUiPath = Path.Combine(dir, "snap-gpui.json");
-				if (File.Exists(gpPath))
-					result.GpSnapshot = JsonConvert.DeserializeObject<Dictionary<string, List<string>>>(
-						File.ReadAllText(gpPath));
-				if (File.Exists(gpUiPath))
-					result.GpUiSnapshot = JsonConvert.DeserializeObject<Dictionary<string, List<string>>>(
-						File.ReadAllText(gpUiPath));
+				if (!File.Exists(gpPath) || !File.Exists(gpUiPath))
+					return false;
+				var gp = JsonConvert.DeserializeObject<Dictionary<string, List<string>>>(File.ReadAllText(gpPath));
+				var gpUi = JsonConvert.DeserializeObject<Dictionary<string, List<string>>>(File.ReadAllText(gpUiPath));
+				if (gp == null || gpUi == null)
+					return false;
+				result.GpSnapshot = gp;
+				result.GpUiSnapshot = gpUi;
+				return true;
 			}
-			catch
-			{
-				/* keep null — caller treats missing as conflict when restore required */
-			}
+			catch { return false; }
+		}
+
+		private static bool CanRecoverOne(
+			JournalRecord journal, string path, string label,
+			bool existed, string backupSha, string stagingSha)
+		{
+			if (string.IsNullOrEmpty(path) || existed != !string.IsNullOrEmpty(backupSha))
+				return false;
+			string currentSha = ShaFile(path);
+			if (string.Equals(currentSha, backupSha, StringComparison.Ordinal))
+				return true;
+			if (string.IsNullOrEmpty(stagingSha)
+				|| !string.Equals(currentSha, stagingSha, StringComparison.Ordinal))
+				return false;
+			return !existed || string.Equals(
+				ShaFile(Path.Combine(journal.DirectoryPath, label + ".bak")), backupSha, StringComparison.Ordinal);
 		}
 
 		private static bool RecoverOne(
@@ -205,6 +234,8 @@ namespace AdvancedKeybinds.Core
 			string stagingSha,
 			Func<string, string, bool> restore)
 		{
+			if (!CanRecoverOne(journal, path, label, existed, backupSha, stagingSha))
+				return false;
 			string currentSha = ShaFile(path);
 			if (string.Equals(currentSha, backupSha, StringComparison.Ordinal))
 				return true;

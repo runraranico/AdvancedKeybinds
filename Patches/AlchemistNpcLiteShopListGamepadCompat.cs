@@ -270,18 +270,6 @@ namespace AdvancedKeybinds.Patches
 						SafeCurrentPoint());
 					_engaged = _active;
 
-					#if AK_DIAGNOSTICS
-					AlchemistNpcLiteShopListTempDiag.ResetDedupe();
-					#endif
-					#if AK_DIAGNOSTICS
-					AlchemistNpcLiteShopListTempDiag.Event(
-						"list-open",
-						"panel=" + _active.UiType.Name
-						+ " items=" + _active.ItemCount
-						+ " shops=" + _active.ReadShops()
-						+ " tentative=" + State.TentativeIndex
-						+ " talkNPC=" + talkNpc);
-					#endif
 				}
 
 				SuppressShoulderInput(controllerInputMode);
@@ -303,10 +291,6 @@ namespace AdvancedKeybinds.Patches
 				switch (step.Action)
 				{
 					case AlchemistNpcLiteShopListGamepadCompatLayout.ListAction.Move:
-						#if AK_DIAGNOSTICS
-						AlchemistNpcLiteShopListTempDiag.Event(
-							"tentative", "index=" + State.TentativeIndex);
-						#endif
 						break;
 
 					case AlchemistNpcLiteShopListGamepadCompatLayout.ListAction.Confirm:
@@ -323,9 +307,6 @@ namespace AdvancedKeybinds.Patches
 			}
 			catch (Exception ex)
 			{
-				#if AK_DIAGNOSTICS
-				AlchemistNpcLiteShopListTempDiag.Event("exception", ex.GetType().Name + ": " + ex.Message);
-				#endif
 				Disable("process-failed", ex);
 			}
 		}
@@ -349,10 +330,6 @@ namespace AdvancedKeybinds.Patches
 
 			if (click.Target != AlchemistNpcLiteShopListGamepadCompatLayout.ConfirmClickTarget.RowCheckboxButton)
 			{
-				#if AK_DIAGNOSTICS
-				AlchemistNpcLiteShopListTempDiag.Event(
-					"confirm-refused", "highlight=" + highlight.Index + " source=" + highlight.Source);
-				#endif
 				return;
 			}
 
@@ -372,14 +349,6 @@ namespace AdvancedKeybinds.Patches
 			int shopsAfter = panel.ReadShops();
 			bool visibleAfter = panel.ReadVisible();
 
-			#if AK_DIAGNOSTICS
-			AlchemistNpcLiteShopListTempDiag.Event(
-				"confirm",
-				"row=" + click.RowIndex
-				+ " ordinal=" + click.Ordinal
-				+ " shops=" + shopsBefore + "->" + shopsAfter
-				+ " visible=" + visibleBefore + "->" + visibleAfter);
-			#endif
 
 			// The panel enforces its own ShopChangeDelay; if it refused, stay engaged and keep the cursor.
 			if (visibleAfter)
@@ -394,10 +363,6 @@ namespace AdvancedKeybinds.Patches
 			// waits and the parent confirm stays blocked until the button is physically released.
 			AlchemistNpcLiteShopListGamepadCompatLayout.ArmConfirmReleaseGate(
 				State, returnPoint, Main.LocalPlayer?.talkNPC ?? -1);
-			#if AK_DIAGNOSTICS
-			AlchemistNpcLiteShopListTempDiag.Event(
-				"confirm-gate-armed", "pending=" + returnPoint + " held=" + FnaGamePadProvider.IsDown(GamePadToken.A));
-			#endif
 			ReleaseSession();
 		}
 
@@ -415,9 +380,6 @@ namespace AdvancedKeybinds.Patches
 				    State, inPlay: !Main.gameMenu, talking: talking, talkNpc: talkNpc))
 			{
 				AlchemistNpcLiteShopListGamepadCompatLayout.AbandonConfirmReleaseGate(State);
-				#if AK_DIAGNOSTICS
-				AlchemistNpcLiteShopListTempDiag.Event("confirm-gate-abandoned", "talkNPC=" + talkNpc);
-				#endif
 				return false;
 			}
 
@@ -428,10 +390,6 @@ namespace AdvancedKeybinds.Patches
 			}
 
 			int pending = AlchemistNpcLiteShopListGamepadCompatLayout.TakePendingFocusPoint(State);
-			#if AK_DIAGNOSTICS
-			AlchemistNpcLiteShopListTempDiag.Event(
-				"confirm-gate-released", "focus=" + pending + " current=" + SafeCurrentPoint());
-			#endif
 			RestoreFocusToShopButton(pending);
 			return false;
 		}
@@ -448,11 +406,6 @@ namespace AdvancedKeybinds.Patches
 			else
 				panel.CloseClick?.Invoke(null, null);
 
-			#if AK_DIAGNOSTICS
-			AlchemistNpcLiteShopListTempDiag.Event(
-				"cancel",
-				"shops=" + shopsBefore + "->" + panel.ReadShops() + " visible=" + panel.ReadVisible());
-			#endif
 
 			if (panel.ReadVisible())
 				return;
@@ -552,10 +505,6 @@ namespace AdvancedKeybinds.Patches
 			_tintedPanel = panel;
 			_tintedRow = wantedRow;
 
-			#if AK_DIAGNOSTICS
-			AlchemistNpcLiteShopListTempDiag.Event(
-				"tentative-color", "row=" + wantedRow + " color=Yellow");
-			#endif
 		}
 
 		/// <summary>
@@ -601,9 +550,6 @@ namespace AdvancedKeybinds.Patches
 				}
 			}
 
-			#if AK_DIAGNOSTICS
-			AlchemistNpcLiteShopListTempDiag.Event("tentative-color-restored", "row=" + row);
-			#endif
 		}
 
 		private static void TryArchitectRecheckOnOpenEdge()
@@ -651,9 +597,6 @@ namespace AdvancedKeybinds.Patches
 		{
 			RestoreTentativeShopNameTextColor();
 			if (_engaged != null)
-				#if AK_DIAGNOSTICS
-				AlchemistNpcLiteShopListTempDiag.Event("list-release", "panel=" + _engaged.UiType.Name);
-				#endif
 			_engaged = null;
 			State.MouseHoverIndex = 0;
 			State.Disengage();
@@ -728,13 +671,6 @@ namespace AdvancedKeybinds.Patches
 			Main.mouseRight = false;
 			Main.mouseRightRelease = false;
 
-			#if AK_DIAGNOSTICS
-			AlchemistNpcLiteShopListTempDiag.Event(
-				"shoulder-suppressed",
-				padToken + " cleared=" + (TriggerClearScratch.Count == 0
-					? "none"
-					: string.Join(",", TriggerClearScratch)));
-			#endif
 		}
 
 		/// <summary>
@@ -1101,14 +1037,6 @@ namespace AdvancedKeybinds.Patches
 
 			if (!binding.Bound || rebound)
 			{
-				#if AK_DIAGNOSTICS
-				AlchemistNpcLiteShopListTempDiag.Event(
-					rebound ? "ui-rebind" : "ui-selected",
-					"panel=" + binding.UiType.Name
-					+ " owner=" + chosen.OwnerLabel
-					+ " instance=" + RuntimeHelpers.GetHashCode(displayed).ToString("X8")
-					+ " currentState=True");
-				#endif
 			}
 
 			return true;

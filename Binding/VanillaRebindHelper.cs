@@ -249,12 +249,6 @@ namespace AdvancedKeybinds.Binding
 
 			WriteKeyStatusListToConfigs(ModeWritableScratch, trigger, entries);
 			NotifyBindingChanged();
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage(
-				"1_after_terraria_keystatus_write",
-				trigger,
-				"WriteKeyStatusForInputModes modes=" + FormatModes(modes));
-#endif
 		}
 
 		private static void WriteKeyStatusList(string trigger, IReadOnlyList<string> entries)
@@ -264,12 +258,6 @@ namespace AdvancedKeybinds.Binding
 
 			WriteKeyStatusListToConfigs(WritableScratch, trigger, entries);
 			NotifyBindingChanged();
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage(
-				"1_after_terraria_keystatus_write",
-				trigger,
-				"WriteKeyStatusList KeyboardBoth count=" + WritableScratch.Count);
-#endif
 		}
 
 		private static string FormatModes(InputMode[] modes)
@@ -468,12 +456,6 @@ namespace AdvancedKeybinds.Binding
 				return;
 
 			WriteKeyStatusForInputModes(trigger, restoreKeys ?? Array.Empty<string>(), mode);
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage(
-				"1_after_terraria_keystatus_write",
-				trigger,
-				(reason ?? "RestoreAssignedKeysForInputMode") + " mode=" + mode);
-#endif
 		}
 
 		/// <summary>Deep-copy every KeyStatus entry for one InputMode (Lists cloned).</summary>
@@ -537,13 +519,7 @@ namespace AdvancedKeybinds.Binding
 			if (string.IsNullOrEmpty(trigger))
 				return;
 
-#if AK_DIAGNOSTICS
-			string before = FormatAssignedKeys(trigger);
-#endif
 			WriteKeyStatusList(trigger, Array.Empty<string>());
-#if AK_DIAGNOSTICS
-			BindingMutationDiag.LogVanillaMutation(trigger, before, FormatAssignedKeys(trigger), reason ?? "ClearVanillaBinding");
-#endif
 		}
 
 		/// <summary>
@@ -558,18 +534,8 @@ namespace AdvancedKeybinds.Binding
 			if (string.IsNullOrEmpty(trigger))
 				return;
 
-#if AK_DIAGNOSTICS
-			string before = FormatAssignedKeys(trigger);
-#endif
 			List<string> markers = AdvancedVanillaOwnershipMarker.BuildMarkers(bindingKeys);
 			WriteKeyStatusList(trigger, markers);
-#if AK_DIAGNOSTICS
-			BindingMutationDiag.LogVanillaMutation(
-				trigger,
-				before,
-				FormatAssignedKeys(trigger),
-				reason ?? "AssignAdvancedOwnershipMarkers");
-#endif
 		}
 
 		public static void AssignVanillaBinding(string trigger, string key, string reason = null)
@@ -577,13 +543,7 @@ namespace AdvancedKeybinds.Binding
 			if (string.IsNullOrEmpty(trigger) || string.IsNullOrEmpty(key))
 				return;
 
-#if AK_DIAGNOSTICS
-			string before = FormatAssignedKeys(trigger);
-#endif
 			WriteKeyStatusList(trigger, new[] { key });
-#if AK_DIAGNOSTICS
-			BindingMutationDiag.LogVanillaMutation(trigger, before, FormatAssignedKeys(trigger), reason ?? "AssignVanillaBinding");
-#endif
 		}
 
 		/// <summary>Restores the complete vanilla key list captured before a controls-screen edit.</summary>
@@ -592,13 +552,7 @@ namespace AdvancedKeybinds.Binding
 			if (string.IsNullOrEmpty(trigger))
 				return;
 
-#if AK_DIAGNOSTICS
-			string before = FormatAssignedKeys(trigger);
-#endif
 			WriteKeyStatusList(trigger, restoreKeys ?? Array.Empty<string>());
-#if AK_DIAGNOSTICS
-			BindingMutationDiag.LogVanillaMutation(trigger, before, FormatAssignedKeys(trigger), reason ?? "RestoreAssignedKeys");
-#endif
 		}
 
 		/// <summary>
@@ -612,14 +566,8 @@ namespace AdvancedKeybinds.Binding
 			if (string.IsNullOrEmpty(trigger) || !IsProfileReady())
 				return;
 
-#if AK_DIAGNOSTICS
-			string before = FormatAssignedKeys(trigger);
-#endif
 			List<string> defaults = TryGetOriginalKeys(trigger);
 			WriteKeyStatusList(trigger, defaults ?? (IReadOnlyList<string>)Array.Empty<string>());
-#if AK_DIAGNOSTICS
-			BindingMutationDiag.LogVanillaMutation(trigger, before, FormatAssignedKeys(trigger), reason ?? "ResetVanillaBindingToDefault");
-#endif
 		}
 
 		/// <summary>
@@ -654,12 +602,6 @@ namespace AdvancedKeybinds.Binding
 				WriteKeyStatusForInputModes(trigger, defaults, mode);
 			}
 
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage(
-				"1_after_terraria_keystatus_write",
-				trigger,
-				(reason ?? "ResetVanillaBindingToDefaultForInputModes") + " modes=" + FormatModes(modes));
-#endif
 		}
 
 		/// <summary>
@@ -681,13 +623,6 @@ namespace AdvancedKeybinds.Binding
 				? new List<string>()
 				: new List<string>(source);
 			WriteKeyStatusForInputModes(trigger, copy, toMode);
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage(
-				"1_after_terraria_keystatus_write",
-				trigger,
-				(reason ?? "CopyAssignedKeysBetweenInputModes")
-				+ " " + fromMode + "->" + toMode + " count=" + copy.Count);
-#endif
 		}
 
 		private static List<string> TryGetOriginalKeys(string trigger)

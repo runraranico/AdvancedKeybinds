@@ -5,81 +5,12 @@
     <AssemblyName>AdvancedKeybinds</AssemblyName>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
-    <!--
-      Diagnostics (AK_DIAGNOSTICS):
-      - Default FALSE for public / Workshop / tModLoader Build+Reload safety.
-      - First-group / second-group / idle-esc FULL bodies:
-        ../AdvancedKeybinds.Dev/diagnostics/{first-group,second-group-a,second-group-b1,combo-panel-idle-esc}/
-      - Former product-tree diag FULL bodies (public-excluded):
-        ../AdvancedKeybinds.Dev/diagnostics/product-tree/
-        archive mirror: _developer/archive/product-diagnostics_*/*.cs.archived
-      - Product tree has NO heavy diag ModSystems / Commands / probe bodies.
-        Public builds link ../AdvancedKeybinds.Dev/public-stubs/.
-      - Dev diagnostics MSBuild: tools/Build-Diagnostics.ps1 -p:EnableAkDiagnostics=true
-      - Public MSBuild: tools/Build-Public.ps1 -p:EnableAkDiagnostics=false
-      - Local investigation ONLY: `.ak-enable-diagnostics` marker (do not ship).
-    -->
-    <!-- Prefer explicit -p:EnableAkDiagnostics=...; else local marker; else false (public-safe). -->
-    <EnableAkDiagnostics Condition="'$(EnableAkDiagnostics)' == '' and Exists('$(MSBuildProjectDirectory)\.ak-enable-diagnostics')">true</EnableAkDiagnostics>
-    <EnableAkDiagnostics Condition="'$(EnableAkDiagnostics)' == ''">false</EnableAkDiagnostics>
-    <EnableAkDoubleTapDiagnostics Condition="'$(EnableAkDoubleTapDiagnostics)' == ''">false</EnableAkDoubleTapDiagnostics>
-    <!-- AKDIAG_DEFINE_MARKER -->
+    <Nullable>annotations</Nullable>
+    <!-- Public and developer builds compile product functionality only. Diagnostics live outside AK. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**;**/tools/**;**/_developer/**;**/*.Tests/**;**/AdvancedKeybinds.Core.Tests/**;**/AdvancedKeybinds.Dev/**;**/build/**</DefaultItemExcludes>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(EnableAkDiagnostics)' == 'true'">
-    <DefineConstants>$(DefineConstants);AK_DIAGNOSTICS</DefineConstants>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(EnableAkDoubleTapDiagnostics)' == 'true'">
-    <DefineConstants>$(DefineConstants);AK_DOUBLETAP_DIAGNOSTICS</DefineConstants>
-  </PropertyGroup>
 
-  <!-- Explicit diagnostics build: link Dev first-group / second-group / idle-esc + former product-tree diag bodies. -->
-  <ItemGroup Condition="'$(EnableAkDiagnostics)' == 'true'">
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Diagnostics\ControlsGameUiSeparationTrace.cs"
-            Link="Diagnostics\ControlsGameUiSeparationTrace.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Diagnostics\GamePadTwoKeyLiveFireDiagSystem.cs"
-            Link="Diagnostics\GamePadTwoKeyLiveFireDiagSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Diagnostics\Ps5ControllerReconnectDiagSystem.cs"
-            Link="Diagnostics\Ps5ControllerReconnectDiagSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Diagnostics\GamePadDefaultUnboundBindingDiagSystem.cs"
-            Link="Diagnostics\GamePadDefaultUnboundBindingDiagSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Logic\ControlsGameUiSeparationTraceWritePolicy.cs"
-            Link="Logic\ControlsGameUiSeparationTraceWritePolicy.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Logic\Ps5ControllerReconnectDiagPolicy.cs"
-            Link="Logic\Ps5ControllerReconnectDiagPolicy.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\first-group\Logic\GamePadDefaultUnboundBindingDiagPolicy.cs"
-            Link="Logic\GamePadDefaultUnboundBindingDiagPolicy.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Diagnostics\TriangleInputAutoDiagnosticSystem.cs"
-            Link="Diagnostics\TriangleInputAutoDiagnosticSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Diagnostics\PadFaceMappingAutoDiagnosticSystem.cs"
-            Link="Diagnostics\PadFaceMappingAutoDiagnosticSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Diagnostics\AkAssemblyIdentityDiagSystem.cs"
-            Link="Diagnostics\AkAssemblyIdentityDiagSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Logic\TriangleInputDiagnosticPolicy.cs"
-            Link="Logic\TriangleInputDiagnosticPolicy.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-a\Logic\PadFaceMappingDiagnosticPolicy.cs"
-            Link="Logic\PadFaceMappingDiagnosticPolicy.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Diagnostics\KeybindEscapeDiagSystem.cs"
-            Link="Diagnostics\KeybindEscapeDiagSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Diagnostics\AkEscStartSaveSessionDiagSystem.cs"
-            Link="Diagnostics\AkEscStartSaveSessionDiagSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Diagnostics\InventoryOpenFocusAutoDiagnosticSystem.cs"
-            Link="Diagnostics\InventoryOpenFocusAutoDiagnosticSystem.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Diagnostics\ComboPanelEscPathDiag.cs"
-            Link="Diagnostics\ComboPanelEscPathDiag.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Logic\KeybindEscapeDiagPolicy.cs"
-            Link="Logic\KeybindEscapeDiagPolicy.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Logic\InventoryOpenFocusDiagnosticPolicy.cs"
-            Link="Logic\InventoryOpenFocusDiagnosticPolicy.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\second-group-b1\Logic\EscStartInventoryMutationOrderPolicy.cs"
-            Link="Logic\EscStartInventoryMutationOrderPolicy.cs" />
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\combo-panel-idle-esc\Diagnostics\ComboPanelIdleEscPathDiag.cs"
-            Link="Diagnostics\ComboPanelIdleEscPathDiag.cs" />
-    <!-- Former product-tree diag bodies (archived under _developer/archive/product-diagnostics_*). -->
-    <Compile Include="..\AdvancedKeybinds.Dev\diagnostics\product-tree\**\*.cs"
-            Link="%(RecursiveDir)%(Filename)%(Extension)" />
-  </ItemGroup>
 
   <ItemGroup>
     <Compile Remove="**/bin/**" />
@@ -108,51 +39,27 @@
     tModLoader in-game build globs **/*.cs under the mod folder and may ignore Compile Remove.
     Keep quarantine sources as *.cs.archived (not *.cs) under _developer/archive/.
     Test harnesses that need Core.Tests catalogs must not live as *.cs in the product root
-    (EnableAkDiagnostics=true used to skip the public-only Remove list and break B+R).
+    Keep all test harnesses outside the product source tree.
   -->
-  <!-- Opt-in only, after _developer Remove. Non-.cs extensions exclude in-game glob builds. -->
-  <ItemGroup Condition="'$(EnableAkDoubleTapDiagnostics)' == 'true'">
-    <Compile Include="_developer/Features/DoubleTap/Diagnostic/*.cs.disabled" Link="Features/DoubleTap/Diagnostic/%(Filename)" />
-  </ItemGroup>
-  <Target Name="AssertDoubleTapDiagnosticsIsolation" BeforeTargets="BeforeBuild">
-    <Error Condition="'$(EnableAkDoubleTapDiagnostics)' != 'true' and $(DefineConstants.Contains('AK_DOUBLETAP_DIAGNOSTICS'))"
-           Text="AK_DOUBLETAP_DIAGNOSTICS requires explicit EnableAkDoubleTapDiagnostics=true." />
-    <Error Condition="'$(EnableAkDoubleTapDiagnostics)' == 'true' and '$(EnableAkDiagnostics)' == 'true'"
-           Text="DT-only diagnostics must not enable the unrelated AK_DIAGNOSTICS systems." />
-  </Target>
   <ItemGroup>
     <!-- Always exclude: lives in AdvancedKeybinds.Core.Tests; archived under _developer/archive. -->
     <Compile Remove="FullKeyboardRegistrationComboBurstHarness.cs" />
   </ItemGroup>
 
-  <!--
-    Public no-op stubs live IN the product tree (Diagnostics\*Stub*.cs) so tModLoader
-    in-game Build+Reload can compile them (it only globs **/*.cs under this mod folder;
-    Compile Include from ../AdvancedKeybinds.Dev is ignored by B+R).
-    When EnableAkDiagnostics=true, Remove stubs and link real diag bodies from Dev.
-  -->
-  <ItemGroup Condition="'$(EnableAkDiagnostics)' == 'true'">
-    <Compile Remove="Diagnostics\PublicDiagnosticStubs.cs" />
-    <Compile Remove="Diagnostics\GamePadProbeSystem.PublicStub.cs" />
-  </ItemGroup>
 
   <Target Name="RemoveStaleRootPrecompiledDll" BeforeTargets="Build">
     <Delete Files="$(MSBuildProjectDirectory)\AdvancedKeybinds.dll;$(MSBuildProjectDirectory)\AdvancedKeybinds.pdb"
             TreatErrorsAsWarnings="true" />
   </Target>
 
-  <!-- Dev: merge KeyboardDiag localization into Localization/*.hjson before package. -->
-  <Target Name="MergeDiagLocalization" BeforeTargets="BeforeBuild" Condition="'$(EnableAkDiagnostics)' == 'true'">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\_developer\tools\Sync-DiagLocalization.ps1&quot; -Mode Merge -ModRoot &quot;$(MSBuildProjectDirectory)&quot;" />
-  </Target>
 
-  <!-- Public: ensure KeyboardDiag is absent from Localization before compile/package. -->
-  <Target Name="StripDiagLocalization" BeforeTargets="BeforeBuild" Condition="'$(EnableAkDiagnostics)' != 'true'">
+  <!-- Both profiles: ensure KeyboardDiag is absent from Localization before compile/package. -->
+  <Target Name="StripDiagLocalization" BeforeTargets="BeforeBuild" DependsOnTargets="AssertProductDiagnosticsRemoved">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\_developer\tools\Sync-DiagLocalization.ps1&quot; -Mode Strip -ModRoot &quot;$(MSBuildProjectDirectory)&quot;" />
   </Target>
 
-  <Target Name="AssertPublicDiagnosticsOff" BeforeTargets="Build" Condition="'$(EnableAkDiagnostics)' != 'true'">
-    <Error Condition="$(DefineConstants.Contains('AK_DIAGNOSTICS'))"
-           Text="Public build must not define AK_DIAGNOSTICS. Use Build-Public.ps1 / EnableAkDiagnostics=false." />
+  <Target Name="AssertProductDiagnosticsRemoved" BeforeTargets="BeforeBuild">
+    <Error Condition="$(DefineConstants.Contains('AK_DIAGNOSTICS')) Or $(DefineConstants.Contains('AK_DOUBLETAP_DIAGNOSTICS'))"
+           Text="AK diagnostic payloads were removed from both product build profiles. Use the independent Observer or Dev tools." />
   </Target>
 </Project>

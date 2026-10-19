@@ -585,39 +585,6 @@ namespace AdvancedKeybinds.Binding
 		private static bool CanPollWin32KeySupplement()
 			=> OperatingSystem.IsWindows() && Main.hasFocus;
 
-		private static void SupplementWindowsOemKeys(HashSet<string> pressed)
-		{
-			if (!CanPollWin32KeySupplement())
-				return;
-
-			for (int i = 0; i < WindowsOemKeys.Length; i++)
-			{
-				Keys key = WindowsOemKeys[i];
-				if (!WindowsKeySuppressor.IsVirtualKeyPhysicallyDown((uint)key))
-					continue;
-
-				// JP: only VK_OEM_3 may add OemTilde (already gated by GetAsyncKeyState above).
-				pressed.Add(key.ToString());
-			}
-		}
-
-		private static void SupplementWindowsImeNeighborKeys(HashSet<string> pressed)
-		{
-			if (!CanPollWin32KeySupplement())
-				return;
-
-			for (int i = 0; i < WindowsImeNeighborKeys.Length; i++)
-			{
-				Keys key = WindowsImeNeighborKeys[i];
-				if (WindowsKeySuppressor.IsVirtualKeyPhysicallyDown((uint)key))
-					pressed.Add(key.ToString());
-			}
-
-			// kbd106 縲後き繧ｿ繧ｫ繝奇ｼ上・繧峨′縺ｪ縲・is VK_OEM_COPY, not VK_KANA 窶・normalize to "Kana".
-			if (IsAnyKanaAliasVirtualKeyDown())
-				pressed.Add(nameof(Keys.Kana));
-		}
-
 		/// <summary>KeyboardState / VK_KANA / kbd106 VK_OEM_COPY aliases for the kana key.</summary>
 		private static bool IsKanaPhysicallyDown()
 		{
@@ -730,90 +697,6 @@ namespace AdvancedKeybinds.Binding
 			if (Win32KeyboardAcquisitionPolicy.KeystrokeMessagesOnly)
 				return;
 
-			if (!SlotCapture.IsCapturing || !CanPollWin32KeySupplement())
-				return;
-
-			KeyboardState keyboard = Main.keyState;
-			var current = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-			for (int i = 0; i < WindowsOemKeys.Length; i++)
-			{
-				Keys key = WindowsOemKeys[i];
-				if (keyboard.IsKeyDown(key))
-					continue;
-				if (!WindowsKeySuppressor.IsVirtualKeyPhysicallyDown((uint)key)
-					&& !WindowsKeySuppressor.IsJisIntlScanTokenDown(key.ToString()))
-					continue;
-
-				string token = key.ToString();
-				PhysicalKeyResolver.ResolveResult resolved = PhysicalKeyResolver.ResolveForCapture(
-					(uint)key,
-					0,
-					false,
-					keyboard);
-				if (resolved.Success && !string.Equals(resolved.Token, token, StringComparison.OrdinalIgnoreCase))
-					token = resolved.Token;
-
-				current.Add(token);
-				if (PrevWin32OnlySupplementTokens.Contains(token))
-					continue;
-
-				string src = WindowsKeySuppressor.IsVirtualKeyPhysicallyDown((uint)key)
-					? "oem"
-					: "jisIntlScan";
-				LogWin32SupplementEdge(token, (uint)key, src, edges);
-			}
-
-			for (int i = 0; i < WindowsImeNeighborKeys.Length; i++)
-			{
-				Keys key = WindowsImeNeighborKeys[i];
-				if (key == Keys.Kana)
-					continue;
-				if (keyboard.IsKeyDown(key))
-					continue;
-				if (!WindowsKeySuppressor.IsVirtualKeyPhysicallyDown((uint)key)
-					&& !WindowsKeySuppressor.IsJisIntlScanTokenDown(key.ToString()))
-					continue;
-
-				string token = key.ToString();
-				PhysicalKeyResolver.ResolveResult resolved = PhysicalKeyResolver.ResolveForCapture(
-					(uint)key,
-					0,
-					false,
-					keyboard);
-				if (resolved.Success && !string.Equals(resolved.Token, token, StringComparison.OrdinalIgnoreCase))
-					token = resolved.Token;
-
-				current.Add(token);
-				if (PrevWin32OnlySupplementTokens.Contains(token))
-					continue;
-
-				string src = WindowsKeySuppressor.IsVirtualKeyPhysicallyDown((uint)key)
-					? "ime"
-					: "jisIntlScan";
-				LogWin32SupplementEdge(token, (uint)key, src, edges);
-			}
-
-			if (!keyboard.IsKeyDown(Keys.Kana))
-			{
-				bool aliasDown = IsAnyKanaAliasVirtualKeyDown();
-				bool kanaVkDown = WindowsKeySuppressor.IsVirtualKeyPhysicallyDown((uint)Keys.Kana);
-				if (aliasDown || kanaVkDown)
-				{
-					const string token = nameof(Keys.Kana);
-					current.Add(token);
-					if (!PrevWin32OnlySupplementTokens.Contains(token))
-					{
-						string src = aliasDown ? "kanaAlias(0xF2)" : "ime";
-						uint vk = aliasDown ? 0xF2u : (uint)Keys.Kana;
-						LogWin32SupplementEdge(token, vk, src, edges);
-					}
-				}
-			}
-
-			PrevWin32OnlySupplementTokens.Clear();
-			foreach (string token in current)
-				PrevWin32OnlySupplementTokens.Add(token);
 		}
 	}
 }

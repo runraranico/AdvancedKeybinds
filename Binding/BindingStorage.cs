@@ -483,10 +483,6 @@ namespace AdvancedKeybinds.Binding
 			// Profile may be null during Mod.Load / Build+Reload — repair again when ready.
 			EnsureVanillaOwnershipConsistent("initialize-ensure");
 			BindingInputEngine.InvalidateBindings();
-#if AK_DIAGNOSTICS
-			BindingMutationDiag.ResetObservationBaseline();
-			BindingMutationDiag.LogWatchedBaseline("BindingStorage.Initialize");
-#endif
 		}
 
 		/// <summary>True when Combos contains the storage key (including PersistAsEmptyRecord).</summary>
@@ -809,15 +805,6 @@ namespace AdvancedKeybinds.Binding
 			}
 		}
 
-		private static void SyncKeyStatusFromMigrationSession(
-			LegacyGamePadMigrationOrchestrator.Session session)
-		{
-			if (session == null || !VanillaRebindHelper.IsProfileReady())
-				return;
-			ApplyKeyStatusMap(session.KeyStatusGamepad, InputMode.XBoxGamepad);
-			ApplyKeyStatusMap(session.KeyStatusGamepadUi, InputMode.XBoxGamepadUI);
-		}
-
 		private static void ApplyKeyStatusMap(Dictionary<string, List<string>> map, InputMode mode)
 		{
 			if (map == null)
@@ -864,22 +851,6 @@ namespace AdvancedKeybinds.Binding
 			ApplyKeyStatusMap(snapshot, mode);
 		}
 
-		private static bool TryWriteBindingsDtoAtomic(
-			string path,
-			Dictionary<string, ComboBindingData> data)
-		{
-			try
-			{
-				string json = BindingJsonCodec.Save(data ?? new Dictionary<string, ComboBindingData>());
-				return LegacyGamePadAtomicFileIo.TryWriteAllTextAtomic(path, json);
-			}
-			catch (Exception ex)
-			{
-				LogMigrationLine("SAVE_FAIL", path, null, ex.GetType().Name);
-				return false;
-			}
-		}
-
 		private static Dictionary<string, List<string>> CloneKeyStatusMap(Dictionary<string, List<string>> src)
 		{
 			var dst = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -890,54 +861,12 @@ namespace AdvancedKeybinds.Binding
 			return dst;
 		}
 
-		private static void ForwardLegacyGpMigrationLogs(LegacyGamePadMigrationOrchestrator.Result result)
-		{
-#if AK_DIAGNOSTICS
-			if (!global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-				return;
-			if (result?.Log == null)
-				return;
-			for (int i = 0; i < result.Log.Count; i++)
-			{
-				try { AdvancedKeybinds.Instance?.Logger?.Info(result.Log[i]); }
-				catch { /* ignore */ }
-			}
-#endif
-		}
-
 		private static void ForwardLegacyGpMigrationLogs(IReadOnlyList<string> lines)
 		{
-#if AK_DIAGNOSTICS
-			if (!global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-				return;
-			if (lines == null)
-				return;
-			for (int i = 0; i < lines.Count; i++)
-			{
-				try { AdvancedKeybinds.Instance?.Logger?.Info(lines[i]); }
-				catch { /* ignore */ }
-			}
-#endif
 		}
 
 		private static void LogMigrationLine(string op, string from, string to, string reason)
 		{
-#if AK_DIAGNOSTICS
-			if (!global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-				return;
-			try
-			{
-				string msg = "[LegacyGpMigrate] " + op
-					+ " from=" + (from ?? "-")
-					+ " to=" + (to ?? "-")
-					+ " reason=" + (reason ?? "-");
-				AdvancedKeybinds.Instance?.Logger?.Info(msg);
-			}
-			catch
-			{
-				/* ignore */
-			}
-#endif
 		}
 
 		/// <summary>Mod GamePad dual sync only (vanilla GAME/UI use single-mode arrays).</summary>
@@ -1227,7 +1156,10 @@ namespace AdvancedKeybinds.Binding
 
 		private static bool OwnershipMatchesForStorageKey(string storageKey, ComboBinding combo)
 		{
-			if (combo?.DoubleTap == true)
+			if (combo == null)
+				return false;
+
+			if (combo.DoubleTap == true)
 				return DoubleTapOwnershipBridge.Matches(storageKey, combo);
 
 			string trigger = ControlsGameUiSeparationPolicy.ToTriggerActionId(storageKey);
@@ -1395,9 +1327,6 @@ namespace AdvancedKeybinds.Binding
 			if (combo?.DoubleTap == true)
 				return false;
 
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage("4_before_ak_save", storageKey, reason ?? "TryCommitGamePadTwoKey");
-#endif
 			string syncReason = reason ?? "BindingStorage.TryCommitGamePadTwoKeyTerrariaOr";
 			ComboBinding toStore = combo == null
 				? new ComboBinding { UseTerrariaKeyStatusOr = true, PersistAsEmptyRecord = true }
@@ -1432,18 +1361,8 @@ namespace AdvancedKeybinds.Binding
 			});
 			if (ok)
 			{
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteBindingOverwrite(
-					syncReason,
-					storageKey,
-					"(two-key-commit)",
-					FormatComboSlots(toStore));
-#endif
 			}
 
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage("5_after_ak_save", storageKey, syncReason);
-#endif
 			return ok;
 		}
 
@@ -1532,9 +1451,6 @@ namespace AdvancedKeybinds.Binding
 			if (string.IsNullOrEmpty(actionId))
 				return false;
 
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage("4_before_ak_save", actionId, reason ?? "BindingStorage.Set");
-#endif
 
 			// TwoKey Terraria-OR commit is non-DT only. DT rows use ApplySetMemoryOnly
 			// (clone preserve + eligible-only ownership sync) so out-of-scope GP:G:/GP:U: keep originals.
@@ -1543,44 +1459,19 @@ namespace AdvancedKeybinds.Binding
 				return TryCommitGamePadTwoKeyTerrariaOr(actionId, combo, reason ?? "BindingStorage.Set");
 
 			string syncReason = reason ?? "BindingStorage.Set";
-#if AK_DIAGNOSTICS
-			string beforeSnap = FormatComboSlots(Get(actionId));
-#endif
 
 			if (ShouldPersistPlayerInputProfiles(actionId))
 			{
 				bool ok = TryCommitGamePadUserEdit(actionId, syncReason, () => {
 					ApplySetMemoryOnly(actionId, combo, syncReason);
-#if AK_DIAGNOSTICS
-					string afterSnap = FormatComboSlots(Get(actionId));
-					AkEscStartSaveSessionDiagSystem.NoteBindingOverwrite(
-						syncReason, actionId, beforeSnap, afterSnap);
-#endif
 				});
-#if AK_DIAGNOSTICS
-				ControlsGameUiSeparationTrace.LogStage("5_after_ak_save", actionId, syncReason);
-#endif
 				return ok;
 			}
 
 			ApplySetMemoryOnly(actionId, combo, syncReason);
-#if AK_DIAGNOSTICS
-			string afterKb = FormatComboSlots(Get(actionId));
-			AkEscStartSaveSessionDiagSystem.NoteBindingOverwrite(syncReason, actionId, beforeSnap, afterKb);
-#endif
 			bool saved = SaveToFile();
 			BindingInputEngine.InvalidateBindings();
-#if AK_DIAGNOSTICS
-			ControlsGameUiSeparationTrace.LogStage("5_after_ak_save", actionId, syncReason);
-#endif
 			return saved;
-		}
-
-		private static string FormatComboSlots(ComboBinding combo)
-		{
-			if (combo == null || combo.IsEmpty)
-				return "(none)";
-			return (combo.Slot1 ?? "-") + "/" + (combo.Slot2 ?? "-") + "/" + (combo.Slot3 ?? "-");
 		}
 
 		public static bool ClearBindings(string actionId, string reason = null)
@@ -1817,19 +1708,6 @@ namespace AdvancedKeybinds.Binding
 				// Must not leave KeyStatus empty after promote (same ghost-unbound failure mode).
 				SyncVanillaKeyStatusForAction(pair.Key, promoted, "promote-hook-managed");
 				changed = true;
-#if AK_DIAGNOSTICS
-				string beforeVan = VanillaRebindHelper.FormatAssignedKeys(pair.Key);
-				BindingMutationDiag.LogVanillaMutation(
-					pair.Key,
-					beforeVan,
-					VanillaRebindHelper.FormatAssignedKeys(pair.Key),
-					"promote-hook-managed");
-				BindingMutationDiag.LogAdvancedMutation(
-					pair.Key,
-					"(none)",
-					BindingMutationDiag.FormatComboSnapshot(Combos[pair.Key]),
-					"promote-hook-managed");
-#endif
 				if (AkDiag.Enabled) AkDiag.Log("Promoted hook-managed vanilla binding action=" + pair.Key + " key=" + key);
 			}
 
@@ -1865,25 +1743,11 @@ namespace AdvancedKeybinds.Binding
 					AdvancedKeybinds.Instance?.Logger.Warn(
 						"Advanced Keybinds failed to load bindings: " + (loaded.Message ?? "invalid json"));
 					_bindingsLoadFailedKeepDisk = true;
-#if AK_DIAGNOSTICS
-					AkEscStartSaveSessionDiagSystem.NoteBindingLoad(
-						"BindingStorage.LoadFromFile",
-						"InvalidJson",
-						0,
-						loaded.Message ?? "invalid json");
-#endif
 					return;
 				}
 
 				if (loaded.Bindings == null || loaded.Bindings.Count == 0)
 				{
-#if AK_DIAGNOSTICS
-					AkEscStartSaveSessionDiagSystem.NoteBindingLoad(
-						"BindingStorage.LoadFromFile",
-						loaded.Kind.ToString(),
-						0,
-						"empty-or-null-bindings");
-#endif
 					return;
 				}
 
@@ -1901,31 +1765,11 @@ namespace AdvancedKeybinds.Binding
 				}
 				NoteCombosMutated();
 
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteBindingLoad(
-					"BindingStorage.LoadFromFile",
-					loaded.Kind.ToString(),
-					Combos.Count,
-					Combos.ContainsKey("Jump") ? "hasJump=1" : "hasJump=0");
-#endif
 
-#if AK_DIAGNOSTICS
-				ControlsGameUiSeparationTrace.LogStage(
-					"6_after_ak_reload",
-					"*",
-					"LoadFromFile comboCount=" + Combos.Count);
-#endif
 			}
 			catch (Exception ex)
 			{
 				AdvancedKeybinds.Instance?.Logger.Warn("Advanced Keybinds failed to load bindings: " + ex.Message);
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteBindingLoad(
-					"BindingStorage.LoadFromFile",
-					"Exception",
-					Combos.Count,
-					ex.GetType().Name + ":" + ex.Message);
-#endif
 			}
 		}
 
@@ -2064,13 +1908,6 @@ namespace AdvancedKeybinds.Binding
 				{
 					AdvancedKeybinds.Instance?.Logger.Warn(
 						"Advanced Keybinds skipped SaveToFile after failed load to avoid wiping bindings.json");
-#if AK_DIAGNOSTICS
-					AkEscStartSaveSessionDiagSystem.NoteBindingSave(
-						reason ?? "BindingStorage.SaveToFile",
-						"Jump",
-						success: false,
-						detail: "skipped-after-InvalidJson-keep-disk");
-#endif
 					return false;
 				}
 
@@ -2082,25 +1919,11 @@ namespace AdvancedKeybinds.Binding
 
 				data ??= new Dictionary<string, ComboBindingData>(StringComparer.Ordinal);
 				File.WriteAllText(FilePath, BindingJsonCodec.Save(data));
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteBindingSave(
-					reason ?? "BindingStorage.SaveToFile",
-					data.ContainsKey("Jump") ? "Jump" : "-",
-					success: true,
-					detail: "comboCount=" + data.Count + (data.ContainsKey("Jump") ? " hasJump=1" : " hasJump=0"));
-#endif
 				return true;
 			}
 			catch (Exception ex)
 			{
 				AdvancedKeybinds.Instance?.Logger.Warn("Advanced Keybinds failed to save bindings: " + ex.Message);
-#if AK_DIAGNOSTICS
-				AkEscStartSaveSessionDiagSystem.NoteBindingSave(
-					reason ?? "BindingStorage.SaveToFile",
-					"Jump",
-					success: false,
-					detail: ex.GetType().Name + ":" + ex.Message);
-#endif
 				return false;
 			}
 		}

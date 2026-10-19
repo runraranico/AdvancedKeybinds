@@ -110,18 +110,6 @@ namespace AdvancedKeybinds
 		[DefaultValue(false)]
 		public bool HoldTierHudAllowDrag { get; set; } = false;
 
-#if AK_DIAGNOSTICS
-		[Header("$Mods.AdvancedKeybinds.Config.KeyboardDiag.Header")]
-		[LabelKey("$Mods.AdvancedKeybinds.Config.KeyboardDiag.Mode.Label")]
-		[TooltipKey("$Mods.AdvancedKeybinds.Config.KeyboardDiag.Mode.Tooltip")]
-		[DefaultValue(true)]
-		public bool KeyboardDiagnosticMode { get; set; } = true;
-
-		[LabelKey("$Mods.AdvancedKeybinds.Config.KeyboardDiag.LogToFile.Label")]
-		[TooltipKey("$Mods.AdvancedKeybinds.Config.KeyboardDiag.LogToFile.Tooltip")]
-		[DefaultValue(true)]
-		public bool KeyboardDiagnosticLogToFile { get; set; } = true;
-#endif
 
 		[LabelKey("$Mods.AdvancedKeybinds.Config.HoldTierHud.Anchor.Label")]
 		[TooltipKey("$Mods.AdvancedKeybinds.Config.HoldTierHud.Anchor.Tooltip")]
@@ -206,12 +194,6 @@ namespace AdvancedKeybinds
 
 			SyncTerrariaDebugUiHotkeyPolicy();
 
-#if AK_DIAGNOSTICS
-			if (KeyboardDiagnosticMode)
-				KeyboardDiagMode.FlushLogHeader();
-			else
-				KeyboardDiagMode.Clear();
-#endif
 		}
 
 		/// <summary>
@@ -268,14 +250,6 @@ namespace AdvancedKeybinds
 				_ => HoldTierHudAnchor.Feet
 			};
 
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.Log(
-				"CYCLE begin from=" + from
-				+ " next=" + next
-				+ " preferCustom=" + ClientPrefs.HoldHudPreferCustom
-				+ " enabled=" + enabledBefore
-				+ " allowDrag=" + allowDragBefore);
-			#endif
 			if (AkDiag.Enabled)
 			{
 				AkDiag.Log(
@@ -297,9 +271,6 @@ namespace AdvancedKeybinds
 				HoldTierHudSystem.NotifyPresetAnchorChosen(this);
 			}
 
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogState("CYCLE after-branch", this);
-			#endif
 
 			// Re-assert after EnterCustom / Notify / any OnChanged side effects from nested saves.
 			HoldTierHudEnabled = enabledBefore;
@@ -311,18 +282,8 @@ namespace AdvancedKeybinds
 			HoldTierHudEnabled = enabledBefore;
 			HoldTierHudAllowDrag = allowDragBefore;
 
-			#if AK_DIAGNOSTICS
-			HoldHudProbe.LogState("CYCLE after-save", this);
-			#endif
 			if (HoldTierHudAnchor != next)
 			{
-				#if AK_DIAGNOSTICS
-				HoldHudProbe.Log(
-					"CYCLE ANOMALY expectedAnchor=" + next
-					+ " actual=" + HoldTierHudAnchor
-					+ " preferCustom=" + ClientPrefs.HoldHudPreferCustom
-					+ " (Recover/OnChanged overwrote shortcut target)");
-				#endif
 			}
 
 			if (AkDiag.Enabled)

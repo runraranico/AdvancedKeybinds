@@ -25,6 +25,7 @@ namespace AdvancedKeybinds.Features.DoubleTap
 		int _seedHeldMask;
 		int _knownMask;
 		int _heldMask;
+		object? _focusBoundaryToken;
 
 		public DoubleTapObservationSession(int capacity)
 		{
@@ -42,10 +43,15 @@ namespace AdvancedKeybinds.Features.DoubleTap
 			get { lock (_gate) return _active ? _generation : 0L; }
 		}
 
-		/// <summary>Seed snapshot from the last successful Begin.</summary>
+		/// <summary>Seed snapshot from the last successful Begin or a focus-boundary snapshot.</summary>
 		public int SeedHeldMask
 		{
 			get { lock (_gate) return _seedHeldMask; }
+		}
+
+		public object? FocusBoundaryToken
+		{
+			get { return System.Threading.Volatile.Read(ref _focusBoundaryToken); }
 		}
 
 		/// <summary>
@@ -198,6 +204,56 @@ namespace AdvancedKeybinds.Features.DoubleTap
 		{
 			lock (_gate)
 				return _buffer.Drain(dest, offset);
+		}
+
+		public int DrainForFocusBoundary(DoubleTapObservedEvent[] dest, int offset, out long generation, out int seedHeldMask, out object? focusBoundaryToken)
+		{
+			lock (_gate)
+			{
+				generation = _active ? _generation : 0L;
+				seedHeldMask = _seedHeldMask;
+				focusBoundaryToken = _focusBoundaryToken;
+				return _buffer.Drain(dest, offset);
+			}
+		}
+
+		internal bool TryEnterFocusBoundary(long generation, object? focusBoundaryToken)
+		{
+			System.Threading.Monitor.Enter(_gate);
+			if (_active && _generation > 0L && generation == _generation && object.ReferenceEquals(_focusBoundaryToken, focusBoundaryToken))
+				return true;
+
+			System.Threading.Monitor.Exit(_gate);
+			return false;
+		}
+
+		internal bool TryEnterFocusBoundary(object? focusBoundaryToken)
+		{
+			System.Threading.Monitor.Enter(_gate);
+			if (object.ReferenceEquals(_focusBoundaryToken, focusBoundaryToken))
+				return true;
+
+			System.Threading.Monitor.Exit(_gate);
+			return false;
+		}
+
+		internal void ExitFocusBoundary()
+		{
+			System.Threading.Monitor.Exit(_gate);
+		}
+
+		public void MarkFocusBoundary()
+		{
+			lock (_gate)
+			{
+				if (_active && _generation > 0L && _nextSequence > 0L)
+				{
+					_buffer.DiscardThrough(_generation, _nextSequence - 1L);
+					_seedHeldMask = BuildSeed(_seedHeldMask);
+				}
+
+				System.Threading.Volatile.Write(ref _focusBoundaryToken, new object());
+			}
 		}
 
 		void EndUnlocked()

@@ -95,9 +95,6 @@ namespace AdvancedKeybinds.Patches
 		private static long _sectionConfirmReleaseTickMs;
 		private static bool _sectionConfirmSawPadADown;
 		private static bool _duringOnActivate;
-		private static bool _duringSetupGamepadPoints;
-		private static bool _postRelease3002Logged;
-		private static bool _manualScrollSyncRanThisEpoch;
 		private static int _manualScrollSelectedPoint = int.MinValue;
 		private static string _manualScrollSelectedStableId;
 
@@ -165,8 +162,6 @@ namespace AdvancedKeybinds.Patches
 		private const float RightStickScrollDeadZone = 0.35f;
 		private static bool _manualScrollActive;
 		private static int _manualScrollPreferredColumn; // 0=left/full, 1=right
-		private static string _lastGridLinkLogKey;
-		private static string _lastGridVerticalLogKey;
 
 		public static void Apply()
 		{
@@ -212,13 +207,6 @@ namespace AdvancedKeybinds.Patches
 
 			ControlsSectionHeaderSupport.ApplyReflection(manageType);
 
-#if AK_DIAGNOSTICS
-			if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-				AdvancedKeybinds.Instance?.Logger.Info(
-					"ControlsGamepadAutoScrollPatches: GetSnapPoint="
-					+ (_getSnapPointMethod != null ? "OK" : "MISSING")
-					+ " _snapPointField=" + (_snapPointFieldExists ? "OK" : "MISSING"));
-#endif
 
 			MethodInfo setup = manageType.GetMethod(
 				"SetupGamepadPoints",
@@ -410,32 +398,20 @@ namespace AdvancedKeybinds.Patches
 			ModDetours.Apply(setup, (orig_SetupGamepadPoints orig, object self, SpriteBatch spriteBatch) =>
 			{
 				try { PrepareBeforeVanillaSetup(self); }
-				catch (Exception ex)
+				catch (Exception)
 				{
-#if AK_DIAGNOSTICS
-					if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-						AdvancedKeybinds.Instance?.Logger.Debug(
-							"ControlsGamepadAutoScrollPatches.Prepare: " + ex.GetType().Name + ": " + ex.Message);
-#endif
 				}
 
 				_blockFixedUiFocus = !_catalogFailsafeActive && !string.IsNullOrEmpty(_pendingRestoreStableId);
-				_duringSetupGamepadPoints = true;
 				try { orig(self, spriteBatch); }
 				finally
 				{
-					_duringSetupGamepadPoints = false;
 					_blockFixedUiFocus = false;
 				}
 
 				try { AfterVanillaSetup(self, spriteBatch); }
-				catch (Exception ex)
+				catch (Exception)
 				{
-#if AK_DIAGNOSTICS
-					if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-						AdvancedKeybinds.Instance?.Logger.Debug(
-							"ControlsGamepadAutoScrollPatches.After: " + ex.GetType().Name + ": " + ex.Message);
-#endif
 				}
 			});
 		}
@@ -468,8 +444,6 @@ namespace AdvancedKeybinds.Patches
 			_catalogFailsafeActive = false;
 			_manualScrollActive = false;
 			_manualScrollPreferredColumn = 0;
-			_lastGridLinkLogKey = null;
-			_lastGridVerticalLogKey = null;
 			_resetEntries.Clear();
 			_lastResetLinkKey = null;
 			_focusResetPoint = int.MinValue;
@@ -499,9 +473,6 @@ namespace AdvancedKeybinds.Patches
 			_sectionConfirmReleaseTickMs = 0;
 			_sectionConfirmSawPadADown = false;
 			_duringOnActivate = false;
-			_duringSetupGamepadPoints = false;
-			_postRelease3002Logged = false;
-			_manualScrollSyncRanThisEpoch = false;
 			_manualScrollSelectedPoint = int.MinValue;
 			_manualScrollSelectedStableId = null;
 			_sessionListViewPosition = 0f;
@@ -557,7 +528,6 @@ namespace AdvancedKeybinds.Patches
 			_savedFocusElementType = elementType ?? "?";
 			_savedFocusExpandedBefore = expanded;
 			_focusRestoreLoggedRebuild = false;
-			_postRelease3002Logged = false;
 			_sectionConfirmPressTickMs = Environment.TickCount64;
 			_sectionConfirmReleaseTickMs = 0;
 			_sectionConfirmSawPadADown = true;
@@ -1434,13 +1404,6 @@ namespace AdvancedKeybinds.Patches
 			return false;
 		}
 
-		/// <summary>Legacy name kept for any remaining call sites — includes HorizontalRight.</summary>
-		private static bool TryFindBindingRowIndexByAction(List<RowInfo> rows, string actionId, out int index)
-			=> TryFindRestorableBindingRowIndexByAction(rows, actionId, preferredColumn: -1, out index);
-
-		private static bool TryFindNavigableRowIndexByStableId(List<RowInfo> rows, string stableId, out int index)
-			=> TryFindRestorableRowIndexByStableId(rows, stableId, preferredColumn: -1, out index);
-
 		private static string ResolveRowActionId(RowInfo row)
 		{
 			UIElement keybindEl = FindKeybindListItemInSubtree(row.Element);
@@ -1807,7 +1770,6 @@ namespace AdvancedKeybinds.Patches
 			_focusRestoreLoggedRebuild = false;
 			_focusSaveEpoch = int.MinValue;
 			_sectionConfirmSawPadADown = false;
-			_postRelease3002Logged = false;
 		}
 
 		private static void EndSectionConfirmLifetime(string cause, bool movedToGamepadTab, bool fixedOk)
@@ -1854,121 +1816,8 @@ namespace AdvancedKeybinds.Patches
 
 		private static void LogSectionPostRelease3002(int from, int to, bool applied)
 		{
-#if AK_DIAGNOSTICS
-			if (!global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-				return;
-			if (applied && _postRelease3002Logged)
-				return;
-			if (!applied)
-				_postRelease3002Logged = true;
-
-			long now = Environment.TickCount64;
-			int msPress = _sectionConfirmPressTickMs > 0
-				? (int)Math.Max(0, now - _sectionConfirmPressTickMs)
-				: -1;
-			int msRelease = _sectionConfirmReleaseTickMs > 0
-				? (int)Math.Max(0, now - _sectionConfirmReleaseTickMs)
-				: -1;
-
-			bool menuPressed = false, menuCurrent = false, menuReleased = false;
-			try
-			{
-				var jp = PlayerInput.Triggers?.JustPressed;
-				var cur = PlayerInput.Triggers?.Current;
-				var jr = PlayerInput.Triggers?.JustReleased;
-				if (jp?.KeyStatus != null && jp.KeyStatus.TryGetValue("MouseLeft", out bool jpMl))
-					menuPressed = jpMl;
-				if (cur?.KeyStatus != null && cur.KeyStatus.TryGetValue("MouseLeft", out bool curMl))
-					menuCurrent = curMl;
-				if (jr?.KeyStatus != null && jr.KeyStatus.TryGetValue("MouseLeft", out bool jrMl))
-					menuReleased = jrMl;
-			}
-			catch { /* ignore */ }
-
-			ResolveCaller(out string callerType, out string callerMethod, out string stackBrief);
-
-			float stickY = 0f;
-			try
-			{
-				var snap = FnaGamePadProvider.Current;
-				if (snap != null && snap.IsConnected)
-					stickY = snap.RightStickY;
-			}
-			catch { /* ignore */ }
-
-			GamePadProbeSystem.LogAkSectionPostRelease3002(
-				FnaGamePadProvider.InputTickEpoch,
-				msPress,
-				msRelease,
-				from,
-				_savedFocusStableId ?? _lastKnownStableId ?? "?",
-				to,
-				callerType,
-				callerMethod,
-				stackBrief,
-				FnaGamePadProvider.WasJustPressed(GamePadToken.A),
-				FnaGamePadProvider.IsDown(GamePadToken.A),
-				_sectionConfirmReleaseTickMs > 0 && !FnaGamePadProvider.IsDown(GamePadToken.A),
-				menuPressed,
-				menuCurrent,
-				menuReleased,
-				_duringSetupGamepadPoints,
-				_duringOnActivate,
-				duringUiUpdate: !_duringSetupGamepadPoints && !_duringOnActivate,
-				duringDraw: _duringSetupGamepadPoints,
-				_sectionConfirmAwaitingRebuild || _focusRestoreSessionActive,
-				_manualScrollActive,
-				stickY,
-				_manualScrollSyncRanThisEpoch,
-				_manualScrollSelectedPoint,
-				_manualScrollSelectedStableId ?? "?",
-				applied);
-#endif
 		}
 
-#if AK_DIAGNOSTICS
-		private static void ResolveCaller(out string callerType, out string callerMethod, out string stackBrief)
-		{
-			callerType = "?";
-			callerMethod = "?";
-			stackBrief = "";
-			try
-			{
-				var st = new System.Diagnostics.StackTrace(2, false);
-				var sb = new StringBuilder(256);
-				int kept = 0;
-				for (int i = 0; i < st.FrameCount && kept < 8; i++)
-				{
-					var m = st.GetFrame(i)?.GetMethod();
-					if (m == null)
-						continue;
-					string typeName = m.DeclaringType?.FullName ?? "";
-					if (typeName.IndexOf("ControlsGamepadAutoScrollPatches", StringComparison.Ordinal) >= 0)
-						continue;
-					if (typeName.IndexOf("ModDetour", StringComparison.OrdinalIgnoreCase) >= 0)
-						continue;
-					if (typeName.IndexOf("RuntimeDetour", StringComparison.OrdinalIgnoreCase) >= 0)
-						continue;
-					if (kept == 0)
-					{
-						callerType = m.DeclaringType?.Name ?? typeName;
-						callerMethod = m.Name ?? "?";
-					}
-
-					if (sb.Length > 0)
-						sb.Append(" < ");
-					sb.Append(m.DeclaringType?.Name ?? "?").Append('.').Append(m.Name);
-					kept++;
-				}
-
-				stackBrief = sb.ToString();
-			}
-			catch
-			{
-				// ignore
-			}
-		}
-#endif
 
 		private static int FindRestoreIndex(
 			List<RowInfo> rows,
@@ -2469,7 +2318,6 @@ namespace AdvancedKeybinds.Patches
 			if (selIdx >= 0 && selIdx < rows.Count)
 				selectedStable = rows[selIdx].StableId ?? FormatPoint(choose);
 
-			_manualScrollSyncRanThisEpoch = true;
 			_manualScrollSelectedPoint = choose;
 			_manualScrollSelectedStableId = selectedStable;
 

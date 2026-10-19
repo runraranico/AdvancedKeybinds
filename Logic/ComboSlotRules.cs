@@ -42,9 +42,6 @@ namespace AdvancedKeybinds.Core
 				binding.Slot1, binding.Slot2, binding.Slot3, index, canonical))
 				return SetSlotResult.RejectedOppositeStickDirection;
 
-#if AK_DIAGNOSTICS
-			bool comparedAny = false;
-#endif
 			for (int i = 1; i <= 3; i++)
 			{
 				if (i == index)
@@ -54,55 +51,14 @@ namespace AdvancedKeybinds.Core
 				if (string.IsNullOrEmpty(existing))
 					continue;
 
-#if AK_DIAGNOSTICS
-				comparedAny = true;
-#endif
 				bool tokensEqual = StableKeyToken.TokensEqual(existing, canonical);
 				bool samePhysical = PhysicalKeyIdentity.AreSamePhysical(existing, canonical);
 
 				if (tokensEqual || samePhysical)
 				{
-#if AK_DIAGNOSTICS
-					bool resolveA = PhysicalKeyIdentity.TryResolve(existing, out string idA);
-					bool resolveB = PhysicalKeyIdentity.TryResolve(canonical, out string idB);
-					bool physicalIdEqual = resolveA && resolveB
-						&& string.Equals(idA, idB, StringComparison.OrdinalIgnoreCase);
-					PhysicalKeyDupDiag.LogDupCheck(
-						caller: "ComboSlotRules.TrySetSlot",
-						targetSlot: index,
-						existingSlot: i,
-						existingToken: existing,
-						incomingToken: canonical,
-						tokensEqual: tokensEqual,
-						samePhysical: samePhysical,
-						physicalIdEqual: physicalIdEqual,
-						result: "RejectedDuplicate",
-						reason: tokensEqual ? "tokens-equal" : "same-physical-id");
-#endif
 					return SetSlotResult.RejectedDuplicate;
 				}
 
-#if AK_DIAGNOSTICS
-				{
-					bool resolveA = PhysicalKeyIdentity.TryResolve(existing, out string idA);
-					bool resolveB = PhysicalKeyIdentity.TryResolve(canonical, out string idB);
-					bool physicalIdEqual = resolveA && resolveB
-						&& string.Equals(idA, idB, StringComparison.OrdinalIgnoreCase);
-					PhysicalKeyDupDiag.LogDupCheck(
-						caller: "ComboSlotRules.TrySetSlot",
-						targetSlot: index,
-						existingSlot: i,
-						existingToken: existing,
-						incomingToken: canonical,
-						tokensEqual: tokensEqual,
-						samePhysical: samePhysical,
-						physicalIdEqual: physicalIdEqual,
-						result: "Accepted",
-						reason: !resolveA || !resolveB
-							? "pair-ok-but-resolve-incomplete"
-							: "different-physical-id");
-				}
-#endif
 			}
 
 			if (KeyboardAdditionalOrPolicy.HasToken(binding.AdditionalOrToken)
@@ -112,22 +68,6 @@ namespace AdvancedKeybinds.Core
 				return SetSlotResult.RejectedDuplicate;
 			}
 
-#if AK_DIAGNOSTICS
-			if (!comparedAny)
-			{
-				PhysicalKeyDupDiag.LogDupCheck(
-					caller: "ComboSlotRules.TrySetSlot",
-					targetSlot: index,
-					existingSlot: 0,
-					existingToken: string.Empty,
-					incomingToken: canonical,
-					tokensEqual: false,
-					samePhysical: false,
-					physicalIdEqual: false,
-					result: "Accepted",
-					reason: "no-other-filled-slots");
-			}
-#endif
 
 			binding.SetSlot(index, canonical);
 

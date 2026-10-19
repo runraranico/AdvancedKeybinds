@@ -29,12 +29,9 @@ namespace AdvancedKeybinds.Patches
 		private const int WM_INPUT = 0x00FF;
 		private const int WM_MOUSEWHEEL = 0x020A;
 		private const int WM_MOUSEHWHEEL = 0x020E;
-		private const int WM_IME_NOTIFY = 0x0282;
-		private const int IMN_SETCONVERSIONMODE = 0x0006;
 		private const uint RID_INPUT = 0x10000003;
 		private const uint RIDEV_REMOVE = 0x00000001;
 		private const uint RIDEV_INPUT = 0x00000001;
-		private const uint RIDEV_NOHOTKEYS = 0x00000200;
 		private const ushort RIM_TYPEKEYBOARD = 1;
 		private const ushort RI_KEY_BREAK = 0x0001;
 		private const ushort SC_CAPITAL = 0x3A;
@@ -60,7 +57,6 @@ namespace AdvancedKeybinds.Patches
 		private static bool _wndProcInstalled;
 		private static bool _rawInputRegistered;
 		private static string _rawInputMode = "none";
-		private static long _lastImeCapsEdgeMs;
 
 		internal static bool IsInstalledForDiag => _wndProcInstalled;
 		internal static long HookedHwndForDiag => _hookedHwnd.ToInt64();
@@ -152,7 +148,6 @@ namespace AdvancedKeybinds.Patches
 		/// Installs the WndProc hook only while Caps Lock capture/gameplay needs it. Avoids chaining
 		/// arbitrary visible HWNDs on the title screen, which can make Escape feel intermittent.
 		/// </summary>
-		private static long _lastDeferredLogMs;
 
 		public static void EnsureInstalledIfNeeded()
 		{
@@ -170,7 +165,6 @@ namespace AdvancedKeybinds.Patches
 
 				if (_wndProcInstalled && ShouldRehookForeground())
 				{
-					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook rehooking foreground hwnd was=0x" + _hookedHwnd.ToInt64().ToString("X"));
 					RestoreWndProc();
 					_wndProcInstalled = false;
 					_rawInputRegistered = false;
@@ -192,12 +186,6 @@ namespace AdvancedKeybinds.Patches
 						return;
 				}
 
-				long now = Environment.TickCount64;
-				if (now - _lastDeferredLogMs > 5000)
-				{
-					_lastDeferredLogMs = now;
-					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook deferred: game window handle not ready.");
-				}
 			}
 		}
 
@@ -251,7 +239,6 @@ namespace AdvancedKeybinds.Patches
 				return;
 
 			EnsureInstalledIfNeeded();
-			TryRefreshNoHotkeys();
 		}
 
 		public static IReadOnlyCollection<string> DrainEdges()
@@ -362,7 +349,6 @@ namespace AdvancedKeybinds.Patches
 				IntPtr previous = SetWindowLongPtr(target, GWLP_WNDPROC, proc);
 				if (previous == IntPtr.Zero)
 				{
-					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook SetWindowLongPtr failed hwnd=" + target + " err=" + Marshal.GetLastWin32Error());
 					return false;
 				}
 
@@ -370,21 +356,15 @@ namespace AdvancedKeybinds.Patches
 				_originalWndProc = previous;
 				_wndProcInstalled = true;
 				TryRegisterRawInput(target);
-				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook installed hwnd=" + target + " raw=" + _rawInputRegistered);
-#if AK_DIAGNOSTICS
-				StartMenuDiag.LogInstall("wndproc installed hwnd=0x" + target.ToInt64().ToString("X") + " rawMode=" + _rawInputMode);
-#endif
 				return true;
 			}
-			catch (Exception ex)
+			catch (Exception)
 			{
-				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook install failed hwnd=" + hwnd + ": " + ex.Message);
 				RestoreWndProc();
 				return false;
 			}
 		}
 
-		private static long _lastNoHotkeysRetryMs;
 
 		private static void RemoveKeyboardRawInput(int cbSize)
 		{
@@ -416,29 +396,14 @@ namespace AdvancedKeybinds.Patches
 
 		private static void TryRegisterRawInput(IntPtr hwnd)
 		{
+			if (!OperatingSystem.IsWindows()) return;
 			int cbSize = Marshal.SizeOf<RAWINPUTDEVICE>();
 			RemoveKeyboardRawInput(cbSize);
 
-			bool wantNoHotkeys = WindowsKeySuppressor.IsWinKeySuppressionEnabled();
-			(string mode, uint flags, IntPtr target)[] strategies = wantNoHotkeys
-				? new (string, uint, IntPtr)[] {
-					("INPUT+NOHOTKEYS", RIDEV_INPUT | RIDEV_NOHOTKEYS, hwnd),
-					("NOHOTKEYS", RIDEV_NOHOTKEYS, hwnd),
-					("INPUT+NOHOTKEYS@global", RIDEV_INPUT | RIDEV_NOHOTKEYS, IntPtr.Zero),
-					("NOHOTKEYS@global", RIDEV_NOHOTKEYS, IntPtr.Zero),
-					("INPUT", RIDEV_INPUT, hwnd),
-					("GLOBAL", 0, IntPtr.Zero),
-				}
-				: new (string, uint, IntPtr)[] {
-					("INPUT", RIDEV_INPUT, hwnd),
-					("GLOBAL", 0, IntPtr.Zero),
-				};
-
 			List<int> errors = new();
-			foreach ((string mode, uint flags, IntPtr target) in strategies)
+			bool registered = WinInputReleaseCandidate.WinRawKeyboardRegistration.Register(true, hwnd, (flags, target) =>
 			{
-				if (hwnd == IntPtr.Zero && target != IntPtr.Zero)
-					continue;
+				string mode = target == IntPtr.Zero ? "GLOBAL" : "FOREGROUND";
 
 				RAWINPUTDEVICE device = new() {
 					usUsagePage = 0x01,
@@ -451,17 +416,16 @@ namespace AdvancedKeybinds.Patches
 				{
 					_rawInputRegistered = true;
 					_rawInputMode = mode;
-					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook raw input registered mode=" + mode + " hwnd=" + target + " cb=" + cbSize);
-					return;
+					return true;
 				}
 
 				errors.Add(err);
-				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook raw input failed mode=" + mode + " err=" + err);
-			}
+				return false;
+			});
+			if (registered) return;
 
 			_rawInputRegistered = false;
 			_rawInputMode = "FAILED:" + string.Join("/", errors);
-			if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook raw input registration failed err=" + _rawInputMode);
 		}
 
 		/// <summary>Re-apply raw-input flags after Win-suppression config changes.</summary>
@@ -515,14 +479,12 @@ namespace AdvancedKeybinds.Patches
 			{
 				inputOnly.dwFlags = 0;
 				inputOnly.hwndTarget = IntPtr.Zero;
-				if (!TryRegisterRawInputDevice(inputOnly, cbSize, out err))
-					if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook temp hotkeys enable failed err=" + err);
+				TryRegisterRawInputDevice(inputOnly, cbSize, out err);
 			}
 			else
 			{
 				_rawInputRegistered = true;
 				_rawInputMode = "INPUT(temp-os-hotkeys)";
-				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook temporarily enabled OS Win hotkeys for virtual-desktop chord.");
 			}
 
 			try
@@ -532,41 +494,6 @@ namespace AdvancedKeybinds.Patches
 			finally
 			{
 				TryRegisterRawInput(hwnd);
-			}
-		}
-
-		private static void TryRefreshNoHotkeys()
-		{
-			if (!_wndProcInstalled || _hookedHwnd == IntPtr.Zero)
-				return;
-
-			if (!WindowsKeySuppressor.IsWinKeySuppressionEnabled())
-				return;
-
-			if (_rawInputMode.Contains("NOHOTKEYS", StringComparison.Ordinal))
-				return;
-
-			long now = Environment.TickCount64;
-			if (now - _lastNoHotkeysRetryMs < 2000)
-				return;
-
-			_lastNoHotkeysRetryMs = now;
-			int cbSize = Marshal.SizeOf<RAWINPUTDEVICE>();
-			RAWINPUTDEVICE device = new() {
-				usUsagePage = 0x01,
-				usUsage = 0x06,
-				dwFlags = RIDEV_INPUT | RIDEV_NOHOTKEYS,
-				hwndTarget = _hookedHwnd,
-			};
-
-			if (TryRegisterRawInputDevice(device, cbSize, out int err))
-			{
-				_rawInputMode = _rawInputMode + "+NOHOTKEYS";
-				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook refreshed NOHOTKEYS hwnd=" + _hookedHwnd);
-			}
-			else
-			{
-				if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook NOHOTKEYS refresh failed err=" + err + " mode=" + _rawInputMode);
 			}
 		}
 
@@ -592,6 +519,17 @@ namespace AdvancedKeybinds.Patches
 		{
 			try
 			{
+				if (msg == 0x001Cu && wParam == IntPtr.Zero)
+				{
+					WindowsKeySuppressor.RequestFocusLossInputReset();
+					WindowsKeySuppressor.InvalidateWinMaskOwnership();
+				}
+				bool maskDown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+				bool maskUp = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+				if ((maskDown || maskUp) && WindowsKeySuppressor.IsOwnMaskKeyMessage(
+					(uint)(wParam.ToInt64() & 0xFF), maskDown, maskUp))
+					goto ForwardOriginal;
+
 				if (TryBlockShellStartMenuMessage(msg, wParam, out IntPtr blockResult))
 					return blockResult;
 
@@ -620,14 +558,6 @@ namespace AdvancedKeybinds.Patches
 					case WM_SYSKEYUP:
 						HandleKeyUp(msg, wParam, lParam);
 						break;
-					case WM_INPUT:
-						// Acquisition discarded: Microsoft keystroke messages only.
-						// Still allow Win swallow / diagnostic publish without feeding held state.
-						HandleRawInputDiagnosticsOnly(lParam);
-						break;
-					case WM_IME_NOTIFY:
-						HandleImeNotifyDiagnosticsOnly(wParam);
-						break;
 					case WM_MOUSEWHEEL:
 						HandleMouseWheel(wParam);
 						break;
@@ -640,25 +570,14 @@ namespace AdvancedKeybinds.Patches
 			{
 			}
 
-#if AK_DIAGNOSTICS
-			StartMenuDiag.LogForwarded(msg, wParam);
-#endif
+		ForwardOriginal:
 			return CallWindowProc(_originalWndProc, hWnd, msg, wParam, lParam);
 		}
 
 		private static bool TryBlockHotkeyMessage(uint msg, out IntPtr result)
 		{
 			result = IntPtr.Zero;
-			if (msg != WM_HOTKEY)
-				return false;
-
-			if (!WindowsKeySuppressor.ShouldBlockStartMenuShortcuts())
-				return false;
-
-#if AK_DIAGNOSTICS
-			StartMenuDiag.LogInstall("WndProc WM_HOTKEY swallowed");
-#endif
-			return true;
+			return false;
 		}
 
 		private static bool TryBlockShellStartMenuMessage(uint msg, IntPtr wParam, out IntPtr result)
@@ -670,14 +589,10 @@ namespace AdvancedKeybinds.Patches
 
 			int cmd = wParam.ToInt32() & 0xFFF0;
 			bool block = WindowsKeySuppressor.ShouldBlockShellStartMenuCommand(cmd);
-#if AK_DIAGNOSTICS
-			StartMenuDiag.LogSyscmd(cmd, block, block ? "swallowed" : "suppression-off");
-#endif
 
 			if (!block)
 				return false;
 
-			if (AkDiag.Enabled) AkDiag.Log("WndProc WM_SYSCOMMAND blocked cmd=0x" + cmd.ToString("X4"));
 			return true;
 		}
 
@@ -692,18 +607,9 @@ namespace AdvancedKeybinds.Patches
 			uint vk = (uint)(wParam.ToInt64() & 0xFF);
 			if (WindowsKeySuppressor.TryApplyCtrlEscCaptureOrBlock(vk, isDown, out bool swallowCtrlEsc))
 			{
-#if AK_DIAGNOSTICS
-				bool ctrl = WindowsKeySuppressor.IsControlDownForDiag();
-				if (vk == VK_ESCAPE && ctrl)
-				{
-					string reason = swallowCtrlEsc ? "ctrl+esc" : "ctrl+esc reason=" + WindowsKeySuppressor.DescribeWhyNotBlocking();
-					StartMenuDiag.LogWndProc(msg, vk, swallowCtrlEsc, reason);
-				}
-#endif
 
 				if (swallowCtrlEsc)
 				{
-					if (AkDiag.Enabled) AkDiag.Log("WndProc Ctrl+Esc blocked");
 					return true;
 				}
 			}
@@ -776,12 +682,11 @@ namespace AdvancedKeybinds.Patches
 
 			bool isUp = (raw.keyboard.Flags & RI_KEY_BREAK) != 0;
 			bool isDown = !isUp;
+			if (WinInputReleaseCandidate.WinMaskNativeBatchAdapter.IsNativeEcho(
+				vk, isDown, isUp, raw.keyboard.ExtraInformation)) return false;
 			if (!WindowsKeySuppressor.TryApplyWindowsKeyBlock(vk, isDown, isUp, out bool blocked))
 				return false;
 
-#if AK_DIAGNOSTICS
-			StartMenuDiag.LogRaw(vk, isDown, blocked, blocked ? "win" : "reason=" + WindowsKeySuppressor.DescribeWhyNotBlocking());
-#endif
 
 			if (!blocked)
 				return false;
@@ -820,40 +725,13 @@ namespace AdvancedKeybinds.Patches
 				k.Vk, k.Scan, k.Extended, k.WasKeyDown);
 			string messageName = msg == WM_SYSKEYDOWN ? "WM_SYSKEYDOWN" : "WM_KEYDOWN";
 			string source = messageName;
-			if (AdvancedKeybindsDiagnosticEvents.HasKeyMessageSubscribers)
-			{
-				DiagnosticEventPublisher.PublishKeyMessage(
-					messageName,
-					k.Vk,
-					k.Scan,
-					k.Extended,
-					isKeyDown: true,
-					lParam.ToInt64());
-			}
 
 			_lastKeydownScan = k.Scan;
 			_lastKeydownScanMs = Environment.TickCount64;
 
 			if (WindowsKeySuppressor.IsSlotCapturePassthrough)
 			{
-				if (AkDiag.Enabled)
-				{
-					AkDiag.Log(
-						"WndProc keydown vk=0x" + k.Vk.ToString("X2")
-						+ " scan=0x" + k.Scan.ToString("X2")
-						+ " extended=" + k.Extended
-						+ " (MS keystroke parse)");
-				}
 
-				if (AkDiag.Enabled)
-				{
-					CaptureResponsivenessDiag.NoteRawKeyDown(
-						k.Vk,
-						k.Scan,
-						k.Extended,
-						messageName,
-						k.WasKeyDown);
-				}
 			}
 
 			ApplyMicrosoftKeystroke(k, isDown: true, source);
@@ -862,28 +740,8 @@ namespace AdvancedKeybinds.Patches
 		private static void HandleKeyUp(uint msg, IntPtr wParam, IntPtr lParam)
 		{
 			Win32KeystrokeMessage.Parsed k = Win32KeystrokeMessage.Parse(wParam, lParam);
-			global::AdvancedKeybinds.Features.DoubleTap.DoubleTapNativeInput.NotifyWindowKeyUpForDiag(
-				k.Vk, k.Scan, k.Extended, k.WasKeyDown);
 			string messageName = msg == WM_SYSKEYUP ? "WM_SYSKEYUP" : "WM_KEYUP";
 			string source = messageName;
-			if (AdvancedKeybindsDiagnosticEvents.HasKeyMessageSubscribers)
-			{
-				DiagnosticEventPublisher.PublishKeyMessage(
-					messageName,
-					k.Vk,
-					k.Scan,
-					k.Extended,
-					isKeyDown: false,
-					lParam.ToInt64());
-			}
-			if (WindowsKeySuppressor.IsSlotCapturePassthrough && AkDiag.Enabled)
-			{
-				CaptureResponsivenessDiag.NoteRawKeyUp(
-					k.Vk,
-					k.Scan,
-					k.Extended,
-					messageName);
-			}
 
 			ApplyMicrosoftKeystroke(k, isDown: false, source);
 		}
@@ -909,56 +767,6 @@ namespace AdvancedKeybinds.Patches
 				QueueScanEdge(k.Scan, (ushort)k.Vk, source);
 		}
 
-		/// <summary>
-		/// WM_INPUT is no longer an acquisition path (Microsoft keystroke messages only).
-		/// Publishes diagnostics and may swallow Win for Start-menu blocking.
-		/// </summary>
-		private static void HandleRawInputDiagnosticsOnly(IntPtr lParam)
-		{
-			if (!TryReadRawKeyboard(lParam, out RawInputData raw))
-				return;
-
-			bool isUp = (raw.keyboard.Flags & RI_KEY_BREAK) != 0;
-			if (AdvancedKeybindsDiagnosticEvents.HasRawInputSubscribers)
-			{
-				DiagnosticEventPublisher.PublishRawInput(
-					raw.keyboard.VKey,
-					raw.keyboard.MakeCode,
-					raw.keyboard.Flags,
-					isUp,
-					raw.header.hDevice);
-			}
-
-			// Do not call ApplyPhysicalKeyEvent / ApplyKana / ApplyJis / QueueScanEdge.
-		}
-
-		/// <summary>
-		/// IME notify is not used to synthesize CapsLock edges under keystroke-message-only policy.
-		/// </summary>
-		private static void HandleImeNotifyDiagnosticsOnly(IntPtr wParam)
-		{
-			int notify = wParam.ToInt32();
-			if (notify != IMN_SETCONVERSIONMODE)
-				return;
-
-			if (!AdvancedKeybindsDiagnosticEvents.HasImeStateSubscribers)
-				return;
-
-			DiagnosticEventPublisher.PublishImeState(
-				new DiagnosticImeState {
-					ImeOpen = "Unknown",
-					ConversionMode = "Changed",
-					SentenceMode = "Unknown",
-					Composing = "Unknown",
-					CandidateWindowActive = "Unknown",
-					ImeContextAvailable = "Unknown"
-				},
-				"WM_IME_NOTIFY");
-
-			if (WindowsKeySuppressor.WasRecentHankakuZenkaku())
-				WindowsKeySuppressor.NoteImeConversionToggleForCaptureRecovery("WM_IME_NOTIFY");
-		}
-
 		private static void HandleMouseWheel(IntPtr wParam)
 		{
 			short delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
@@ -976,7 +784,6 @@ namespace AdvancedKeybinds.Patches
 			// Pause/Break share make-code 0x45 with NumLock — never emit NumLock for them or bare 0x45.
 			if (WindowsKeySuppressor.IsPauseOrBreakVk(vKey))
 			{
-				if (AkDiag.Enabled) AkDiag.Log($"GameWindowInputHook skip Pause/Break as toggle make=0x{makeCode:X2} vk=0x{vKey:X2} src={source}");
 				return;
 			}
 
@@ -993,7 +800,6 @@ namespace AdvancedKeybinds.Patches
 
 			if (token == null && makeCode == SC_NUMLOCK)
 			{
-				if (AkDiag.Enabled) AkDiag.Log($"GameWindowInputHook skip scan45 without VK_NUMLOCK vk=0x{vKey:X2} src={source}");
 				return;
 			}
 
@@ -1027,7 +833,6 @@ namespace AdvancedKeybinds.Patches
 			if (!PendingEdges.Add(token))
 				return;
 
-			if (AkDiag.Enabled) AkDiag.Log("GameWindowInputHook edge " + source + " token=" + token);
 		}
 
 	}

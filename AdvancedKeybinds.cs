@@ -35,14 +35,8 @@ namespace AdvancedKeybinds
 		public override void Load()
 		{
 			Instance = this;
-			AkDiag.ResetAnnounceState();
 
 			AkPlatform.ResetForReload();
-#if AK_DIAGNOSTICS
-			// Single line per launch: the only way to confirm Deck detection on real hardware.
-			if (global::AdvancedKeybinds.Binding.AkDiag.Enabled)
-				Logger.Info("AK platform: " + AkPlatform.SteamDeckEvidence);
-#endif
 
 			ComboPanel.ResetStaticState();
 			ModDetours.DisposeAll();
@@ -80,11 +74,9 @@ namespace AdvancedKeybinds
 			KeybindingUiPatches.Apply();
 			ControlsOverlayPatches.Apply();
 			ControlsGamepadAutoScrollPatches.Apply();
-			GamePadControlTabProbe.Apply();
 			GamePadUiNavigationPatches.Apply();
 			KeybindUiWorldInputGuard.Apply();
 			TerrariaDebugUiHotkeyPatches.Apply();
-			DiagnosticCommandHelpHidePatches.Apply();
 			FargoActiveSkillDisplayCompat.Apply();
 			MachineTranslateDisplayCompat.Apply();
 			DialogueTweakGamepadCompat.Apply();
@@ -94,37 +86,6 @@ namespace AdvancedKeybinds
 			// Diagnosis-only: immediate parent restore once; deferred re-apply off (NOT a product fix).
 			ParentRestoreFlickerTest.AnnounceOnLoad(this);
 
-			// Dup-check file / resolve-trace only in AK_DIAGNOSTICS builds (never in public DLL).
-#if AK_DIAGNOSTICS
-			if (AkDiag.Enabled)
-			{
-				string dupLog = Path.Combine(Main.SavePath, "AdvancedKeybinds", "dup-check-session.log");
-				PhysicalKeyDupDiag.Configure(
-					msg => {
-						try
-						{
-							Instance?.Logger?.Info(msg);
-						}
-						catch
-						{
-							// ignore
-						}
-					},
-					dupLog,
-					enableResolveTrace: false);
-			}
-			else
-			{
-				PhysicalKeyDupDiag.Reset();
-			}
-
-			if (AkDiag.Enabled)
-				AkDiag.AnnounceLoad();
-			else
-				AkDiag.ResetAnnounceState();
-#else
-			AkDiag.ResetAnnounceState();
-#endif
 		}
 
 		public override void PostSetupContent()
@@ -177,11 +138,6 @@ namespace AdvancedKeybinds
 
 		public override void Unload()
 		{
-			LiveInputDiagnosticSession.Shutdown();
-#if AK_DIAGNOSTICS
-			PhysicalKeyDupDiag.Reset();
-			KeybindEscapeDiagSystem.Reset();
-#endif
 			ComboPanel.ResetStaticState();
 			ModDetours.DisposeAll();
 			FargoActiveSkillDisplayCompat.ResetAppliedFlag();
@@ -197,14 +153,6 @@ namespace AdvancedKeybinds
 			ControlsUiHost.ClearRuntimeState();
 			ComboPanelCloseInputConsumeGate.ClearRuntimeState();
 			PendingGamePadRowConfirm.ClearRuntimeState();
-			FixedGamepadUiConfirmApplicator.ClearRuntimeState();
-#if AK_DIAGNOSTICS
-			JumpApplyStageDiag.Reset();
-			PadFaceMappingAutoDiagnosticSystem.Reset();
-			PadConfirmAfterComboSaveDiagSystem.Reset();
-			InGameTriggerNavDiag.ClearRuntimeState();
-			ComboPanelRegistrationWaitDiag.Unload();
-#endif
 			CursorConfineHelper.ResetSession();
 			GameWindowInputHook.Uninstall();
 			WindowsKeySuppressor.Uninstall();
@@ -225,9 +173,7 @@ namespace AdvancedKeybinds
 			OpenModConfigHotkey = null;
 			CycleHoldTierHudAnchorHotkey = null;
 			OpenBindingListHotkey = null;
-			AkDiag.ResetAnnounceState();
 			AkPlatform.ResetForReload();
-			AdvancedKeybindsDiagnosticEvents.ClearAllSubscribers();
 			Instance = null;
 		}
 	}

@@ -51,6 +51,37 @@ namespace AdvancedKeybinds.Binding
 		private static ulong _lastUpdateGameFrame = ulong.MaxValue;
 		private static bool _updatedThisGameFrame;
 		private static ulong _evaluationGeneration;
+		private static object? _appliedFocusBoundaryToken;
+		// Identity of the normal snapshot, not of a subsequently drained native DT batch.
+		private static object? _evaluationFocusBoundaryToken;
+		// Inventory OR alone uses input ticks while the world/Hold/DT clocks are paused.
+		private static int _pausedInventoryEpoch = int.MinValue;
+		private static ComboBinding? _pausedInventoryCombo;
+		private static bool _pausedInventoryOrDown;
+		private static bool _pausedInventoryOrPressed;
+		private static readonly HashSet<string> PausedInventoryWheelEdges = new(StringComparer.OrdinalIgnoreCase);
+		// Keep frozen Pad Inventory output fenced until a fresh world evaluation replaces it.
+		private static bool _preservePausedPadInventory;
+
+		private static void SynchronizeFocusBoundaryState(object? token)
+		{
+			if (ReferenceEquals(_appliedFocusBoundaryToken, token))
+				return;
+			HoldTrackers.Clear();
+			JustPressedActions.Clear();
+			CurrentActions.Clear();
+			PreviousCurrentActions.Clear();
+			_previousPressed.Clear();
+			AlternateOrHeldPrevious.Clear();
+			AdditionalOrHeldPrevious.Clear();
+			SharedUiBackAndHeldPrevious.Clear();
+			SharedUiEscapeHoldLatch.Clear();
+			SuppressedComboTokens.Clear();
+			CancelDoubleTapRuntimesForFocusBoundary();
+			ResetPausedInventoryInput();
+			_appliedFocusBoundaryToken = token;
+			_preservePausedPadInventory = false;
+		}
 
 		/// <summary>
 		/// In-world ownership watch: sparse checks via <see cref="OwnershipEnsureWatchSchedule"/>.
@@ -78,6 +109,8 @@ namespace AdvancedKeybinds.Binding
 			SharedUiBackAndHeldPrevious.Clear();
 			SharedUiEscapeHoldLatch.Clear();
 			JustPressedActions.Clear();
+			ResetPausedInventoryInput();
+			_preservePausedPadInventory = false;
 			CurrentActions.Clear();
 			ResetAllDoubleTapRuntimes();
 			MarkCompiledDirty();
@@ -105,12 +138,24 @@ namespace AdvancedKeybinds.Binding
 		{
 			// Update once / read many: same GameUpdateCount skips re-evaluation.
 			ulong frame = Main.GameUpdateCount;
+			object? focusToken = DoubleTapNativeInput.Session.FocusBoundaryToken;
+			SynchronizeFocusBoundaryState(focusToken);
 			// Cancellation is observable even on a read-many call in this update.
 			// Do not re-evaluate or drain normal input a second time.
 			if (_activeDoubleTapCount > 0 && IsDoubleTapEnvironmentBlocked())
 				ResetAllDoubleTapRuntimes();
+			if (Main.gameMenu)
+				WindowsKeySuppressor.DiscardPendingGameplayEdges();
 			if (frame == _lastUpdateGameFrame && _updatedThisGameFrame)
 				return;
+			_preservePausedPadInventory = false;
+			// A fresh world evaluation takes Inventory back from the paused input path.
+			// Carry its OR held state so resuming while held is not a second press.
+			if (_pausedInventoryCombo != null && _pausedInventoryCombo.HasAdditionalOr
+				&& TryGetPausedInventoryCombo(out ComboBinding resumedCombo)
+				&& ReferenceEquals(_pausedInventoryCombo, resumedCombo))
+				AdditionalOrHeldPrevious["Inventory"] = _pausedInventoryOrDown;
+			ResetPausedInventoryInput();
 
 			// Gameplay trigger evaluation is in-world only. Title / menu still run PlayerInput detour
 			// (WinKey suppressor, ComboPanel capture, Controls UI) outside this method.
@@ -146,6 +191,7 @@ namespace AdvancedKeybinds.Binding
 			}
 
 			EnsureCompiled();
+			_evaluationFocusBoundaryToken = focusToken;
 			CapturePreviousCurrent();
 
 			BindingPhysicalHeldMatch.BeginFrame(unchecked((int)frame));
@@ -228,6 +274,11 @@ namespace AdvancedKeybinds.Binding
 				pressed.Add(token);
 
 			FireHookManagedTapBindings(toggleEdges, winEdges);
+			if (!ReferenceEquals(focusToken, DoubleTapNativeInput.Session.FocusBoundaryToken))
+			{
+				SynchronizeFocusBoundaryState(DoubleTapNativeInput.Session.FocusBoundaryToken);
+				return;
+			}
 
 			// Release-to-fire holds are resolved before trackers are cleared for the released key.
 			ProcessHoldReleases(pressed);
@@ -237,6 +288,11 @@ namespace AdvancedKeybinds.Binding
 			BindingPhysicalHeldMatch.CollapsePhysicalAliasesInPlace(pressed);
 
 			EvaluateAllCompiledBindings(pressed, toggleEdges, winEdges);
+			if (!ReferenceEquals(focusToken, DoubleTapNativeInput.Session.FocusBoundaryToken))
+			{
+				SynchronizeFocusBoundaryState(DoubleTapNativeInput.Session.FocusBoundaryToken);
+				return;
+			}
 
 			if (captureDt)
 			{
@@ -248,13 +304,18 @@ namespace AdvancedKeybinds.Binding
 					_dtEdgeScratch);
 			}
 
-			PruneHoldTrackers(pressed);
-
-			WindowsKeySuppressor.EndToggleComboLatchFrame(latchedToggles);
-
-			_previousPressed.Clear();
-			foreach (string token in pressed)
-				_previousPressed.Add(token);
+			if (ReferenceEquals(focusToken, DoubleTapNativeInput.Session.FocusBoundaryToken))
+				PruneHoldTrackers(pressed);
+			if (ReferenceEquals(focusToken, DoubleTapNativeInput.Session.FocusBoundaryToken))
+				WindowsKeySuppressor.EndToggleComboLatchFrame(latchedToggles);
+			if (ReferenceEquals(focusToken, DoubleTapNativeInput.Session.FocusBoundaryToken))
+			{
+				_previousPressed.Clear();
+				foreach (string token in pressed)
+					_previousPressed.Add(token);
+			}
+			else
+				SynchronizeFocusBoundaryState(DoubleTapNativeInput.Session.FocusBoundaryToken);
 			unchecked { _evaluationGeneration++; }
 		}
 
@@ -440,16 +501,6 @@ namespace AdvancedKeybinds.Binding
 				return;
 
 			JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(winnerId)] = true;
-			if (HoldTrackers.TryGetValue(winnerId, out HoldTracker winnerTracker)
-				&& LiveInputDiagnosticSession.IsActive)
-			{
-				LiveInputDiagnosticSession.ObserveHold(
-					winnerId,
-					"HoldReleaseFired",
-					winnerTracker.HeldMs,
-					winnerMs,
-					holdOnRelease: true);
-			}
 			// Vanilla map keys (MapFull / MapStyle) and similar actions fire on a Current rising edge
 			// (armed while up, fire when Current becomes true) — not on JustPressed alone.
 			// Pulse Current for one frame so Hold-on-release works for those actions too.
@@ -526,7 +577,10 @@ namespace AdvancedKeybinds.Binding
 
 		private static void EvaluateCombo(string actionId, ComboBinding combo, HashSet<string> pressed, HashSet<string> toggleEdges, HashSet<string> winEdges)
 		{
-			if (combo?.DoubleTap == true)
+			if (combo == null)
+				return;
+
+			if (combo.DoubleTap == true)
 				return;
 
 			List<string> keys = combo.Keys;
@@ -714,8 +768,6 @@ namespace AdvancedKeybinds.Binding
 			if (andJustPressed)
 			{
 				JustPressedActions[triggerId] = true;
-				if (keys.Count == 1 && JisOemInGameDiagnostic.IsSessionActive)
-					JisOemInGameDiagnostic.NoteActivation(keys[0], pressed, wouldFire: true);
 
 				if (keys.Count > 1)
 				{
@@ -794,8 +846,6 @@ namespace AdvancedKeybinds.Binding
 			if (orJustPressed)
 			{
 				JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
-				if (keys.Count == 1 && JisOemInGameDiagnostic.IsSessionActive)
-					JisOemInGameDiagnostic.NoteActivation(keys[0], pressed, wouldFire: true);
 			}
 
 			CurrentActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
@@ -1022,15 +1072,6 @@ namespace AdvancedKeybinds.Binding
 			{
 				tracker = new HoldTracker();
 				HoldTrackers[actionId] = tracker;
-				if (LiveInputDiagnosticSession.IsActive)
-				{
-					LiveInputDiagnosticSession.ObserveHold(
-						actionId,
-						"HoldDownStarted",
-						0,
-						combo.EffectiveHoldMs,
-						holdOnRelease: false);
-				}
 			}
 
 			tracker.HeldMs += Main.GameUpdateCount > 0 ? 1000.0 / 60.0 : 16.0;
@@ -1039,15 +1080,6 @@ namespace AdvancedKeybinds.Binding
 			{
 				tracker.Fired = true;
 				JustPressedActions[ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId)] = true;
-				if (LiveInputDiagnosticSession.IsActive)
-				{
-					LiveInputDiagnosticSession.ObserveHold(
-						actionId,
-						"HoldThresholdFired",
-						tracker.HeldMs,
-						combo.EffectiveHoldMs,
-						holdOnRelease: false);
-				}
 
 				// Only cancel on-release when this while-held is the latest ms on the key.
 				if (combo.Keys.Count == 1 && IsLatestMsWhileHeldOnKey(combo.Keys[0], combo.EffectiveHoldMs))
@@ -1069,16 +1101,6 @@ namespace AdvancedKeybinds.Binding
 			{
 				tracker = new HoldTracker();
 				HoldTrackers[actionId] = tracker;
-				if (LiveInputDiagnosticSession.IsActive)
-				{
-					ComboBinding combo = BindingStorage.Get(actionId);
-					LiveInputDiagnosticSession.ObserveHold(
-						actionId,
-						"HoldDownStarted",
-						0,
-						combo?.EffectiveHoldMs ?? 0,
-						holdOnRelease: true);
-				}
 			}
 
 			tracker.HeldMs += Main.GameUpdateCount > 0 ? 1000.0 / 60.0 : 16.0;
@@ -1131,33 +1153,34 @@ namespace AdvancedKeybinds.Binding
 			for (int i = 0; i < _removeScratch.Count; i++)
 			{
 				string key = _removeScratch[i];
-				if (HoldTrackers.TryGetValue(key, out HoldTracker tracker)
-					&& LiveInputDiagnosticSession.IsActive)
-				{
-					ComboBinding combo = BindingStorage.Get(key);
-					LiveInputDiagnosticSession.ObserveHold(
-						key,
-						"HoldReleasedOrPruned",
-						tracker.HeldMs,
-						combo?.EffectiveHoldMs ?? 0,
-						combo?.HoldOnRelease ?? false);
-				}
 				HoldTrackers.Remove(key);
 			}
 		}
 
 		public static bool WasJustPressed(string actionId)
 		{
-			return !string.IsNullOrEmpty(actionId)
+			object? token = DoubleTapNativeInput.Session.FocusBoundaryToken;
+			SynchronizeFocusBoundaryState(token);
+			bool result = !string.IsNullOrEmpty(actionId)
 				&& JustPressedActions.TryGetValue(actionId, out bool value)
 				&& value;
+			if (ReferenceEquals(token, DoubleTapNativeInput.Session.FocusBoundaryToken))
+				return result;
+			SynchronizeFocusBoundaryState(DoubleTapNativeInput.Session.FocusBoundaryToken);
+			return false;
 		}
 
 		public static bool IsCurrent(string actionId)
 		{
-			return !string.IsNullOrEmpty(actionId)
+			object? token = DoubleTapNativeInput.Session.FocusBoundaryToken;
+			SynchronizeFocusBoundaryState(token);
+			bool result = !string.IsNullOrEmpty(actionId)
 				&& CurrentActions.TryGetValue(actionId, out bool value)
 				&& value;
+			if (ReferenceEquals(token, DoubleTapNativeInput.Session.FocusBoundaryToken))
+				return result;
+			SynchronizeFocusBoundaryState(DoubleTapNativeInput.Session.FocusBoundaryToken);
+			return false;
 		}
 
 		/// <summary>
@@ -1166,26 +1189,39 @@ namespace AdvancedKeybinds.Binding
 		/// </summary>
 		public static void ApplyResultsToTriggers(TriggersSet justPressed, TriggersSet current)
 		{
-			bool deferInventory = ShouldDeferInventoryTriggersToVanillaDuringAutopause();
-			foreach (KeyValuePair<string, bool> pair in JustPressedActions)
+			DoubleTapObservationSession session = DoubleTapNativeInput.Session;
+			object? token = session.FocusBoundaryToken;
+			SynchronizeFocusBoundaryState(token);
+			bool freshInventory = TryGetPausedInventoryCombo(out ComboBinding pausedCombo);
+			bool preservePadInventory = ShouldPreservePausedPadInventoryTriggers();
+			bool deferInventory = preservePadInventory || freshInventory || ShouldDeferInventoryTriggersToVanillaDuringAutopause();
+			if (!session.TryEnterFocusBoundary(token))
 			{
-				if (!pair.Value)
-					continue;
-				if (deferInventory && string.Equals(pair.Key, "Inventory", StringComparison.Ordinal))
-					continue;
-				justPressed.KeyStatus[pair.Key] = true;
-				if (LiveInputDiagnosticSession.IsActive)
-					LiveInputDiagnosticSession.ObserveActionExecution(pair.Key);
+				SynchronizeFocusBoundaryState(session.FocusBoundaryToken);
+				return;
 			}
-
-			foreach (KeyValuePair<string, bool> pair in CurrentActions)
+			try
 			{
-				if (!pair.Value)
-					continue;
-				if (deferInventory && string.Equals(pair.Key, "Inventory", StringComparison.Ordinal))
-					continue;
-				current.KeyStatus[pair.Key] = true;
+				if (preservePadInventory)
+					_preservePausedPadInventory = true;
+				if (freshInventory)
+					ApplyPausedInventoryOr(pausedCombo, justPressed, current);
+				else
+					ResetPausedInventoryInput();
+				foreach (KeyValuePair<string, bool> pair in JustPressedActions)
+				{
+					if (!pair.Value || (deferInventory && string.Equals(pair.Key, "Inventory", StringComparison.Ordinal)))
+						continue;
+					justPressed.KeyStatus[pair.Key] = true;
+				}
+				foreach (KeyValuePair<string, bool> pair in CurrentActions)
+				{
+					if (!pair.Value || (deferInventory && string.Equals(pair.Key, "Inventory", StringComparison.Ordinal)))
+						continue;
+					current.KeyStatus[pair.Key] = true;
+				}
 			}
+			finally { session.ExitFocusBoundary(); }
 		}
 
 		/// <summary>
@@ -1257,9 +1293,15 @@ namespace AdvancedKeybinds.Binding
 		/// </summary>
 		public static bool WasJustReleased(string actionId)
 		{
-			return !string.IsNullOrEmpty(actionId)
+			object? token = DoubleTapNativeInput.Session.FocusBoundaryToken;
+			SynchronizeFocusBoundaryState(token);
+			bool result = !string.IsNullOrEmpty(actionId)
 				&& PreviousCurrentActions.Contains(actionId)
-				&& !IsCurrent(actionId);
+				&& !(CurrentActions.TryGetValue(actionId, out bool value) && value);
+			if (ReferenceEquals(token, DoubleTapNativeInput.Session.FocusBoundaryToken))
+				return result;
+			SynchronizeFocusBoundaryState(DoubleTapNativeInput.Session.FocusBoundaryToken);
+			return false;
 		}
 
 		/// <summary>
@@ -1269,11 +1311,16 @@ namespace AdvancedKeybinds.Binding
 		/// </summary>
 		public static void ApplyOwnershipToTriggers(TriggersSet justPressed, TriggersSet current, TriggersSet justReleased)
 		{
+			DoubleTapObservationSession session = DoubleTapNativeInput.Session;
+			object? token = session.FocusBoundaryToken;
+			SynchronizeFocusBoundaryState(token);
 			EnsureCompiled();
-			bool deferInventory = ShouldDeferInventoryTriggersToVanillaDuringAutopause();
+			bool preservePadInventory = ShouldPreservePausedPadInventoryTriggers();
+			bool deferInventory = ShouldPreservePausedInventoryTriggers();
 			bool currentInputIsGamePad = PlayerInput.CurrentInputMode == InputMode.XBoxGamepad
 				|| PlayerInput.CurrentInputMode == InputMode.XBoxGamepadUI;
 			CompiledBinding[] compiled = _compiled;
+			var eligible = new List<(string ActionId, string TriggerId)>();
 			for (int i = 0; i < compiled.Length; i++)
 			{
 				CompiledBinding cb = compiled[i];
@@ -1281,6 +1328,11 @@ namespace AdvancedKeybinds.Binding
 					continue;
 
 				string actionId = cb.ActionId;
+				// GP:G:/GP:U:/legacy GP all map to the same Inventory trigger.
+				// A frozen DT/advanced row must not re-inject it via ownership replacement.
+				if (preservePadInventory && string.Equals(
+					ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId), "Inventory", StringComparison.Ordinal))
+					continue;
 				if (deferInventory
 					&& (string.Equals(actionId, "Inventory", StringComparison.Ordinal)
 						|| string.Equals(actionId, "KU:Inventory", StringComparison.Ordinal)))
@@ -1315,19 +1367,127 @@ namespace AdvancedKeybinds.Binding
 					continue;
 
 				string triggerId = ControlsGameUiSeparationPolicy.ToTriggerActionId(actionId);
-				bool akPressed = WasJustPressed(triggerId) || WasJustPressed(actionId);
-				bool akCurrent = IsCurrent(triggerId) || IsCurrent(actionId);
-				bool akReleased = WasJustReleased(triggerId) || WasJustReleased(actionId);
-
-				if (justPressed != null && justPressed.KeyStatus.ContainsKey(triggerId))
-					justPressed.KeyStatus[triggerId] = akPressed;
-
-				if (current != null && current.KeyStatus.ContainsKey(triggerId))
-					current.KeyStatus[triggerId] = akCurrent;
-
-				if (justReleased != null && justReleased.KeyStatus.ContainsKey(triggerId))
-					justReleased.KeyStatus[triggerId] = akReleased;
+				eligible.Add((actionId, triggerId));
 			}
+			if (!session.TryEnterFocusBoundary(token))
+			{
+				SynchronizeFocusBoundaryState(session.FocusBoundaryToken);
+				return;
+			}
+			try
+			{
+				foreach (var row in eligible)
+				{
+					string actionId = row.ActionId;
+					string triggerId = row.TriggerId;
+					bool triggerValid = !string.IsNullOrEmpty(triggerId);
+					bool actionValid = !string.IsNullOrEmpty(actionId);
+					bool triggerPressed = triggerValid && JustPressedActions.TryGetValue(triggerId, out bool tp) && tp;
+					bool actionPressed = actionValid && JustPressedActions.TryGetValue(actionId, out bool ap) && ap;
+					bool triggerCurrent = triggerValid && CurrentActions.TryGetValue(triggerId, out bool tc) && tc;
+					bool actionCurrent = actionValid && CurrentActions.TryGetValue(actionId, out bool ac) && ac;
+					bool akReleased = (triggerValid && PreviousCurrentActions.Contains(triggerId) && !triggerCurrent)
+						|| (actionValid && PreviousCurrentActions.Contains(actionId) && !actionCurrent);
+					if (justPressed != null && justPressed.KeyStatus.ContainsKey(triggerId))
+						justPressed.KeyStatus[triggerId] = triggerPressed || actionPressed;
+					if (current != null && current.KeyStatus.ContainsKey(triggerId))
+						current.KeyStatus[triggerId] = triggerCurrent || actionCurrent;
+					if (justReleased != null && justReleased.KeyStatus.ContainsKey(triggerId))
+						justReleased.KeyStatus[triggerId] = akReleased;
+				}
+			}
+			finally { session.ExitFocusBoundary(); }
+		}
+
+		private static void ResetPausedInventoryInput()
+		{
+			_pausedInventoryEpoch = int.MinValue;
+			_pausedInventoryCombo = null;
+			_pausedInventoryOrDown = false;
+			_pausedInventoryOrPressed = false;
+		}
+
+		/// <summary>Paused Inventory protection only; other actions keep world-frame evaluation.</summary>
+		public static bool ShouldPreservePausedInventoryTriggers()
+			=> ShouldPreservePausedPadInventoryTriggers()
+				|| TryGetPausedInventoryCombo(out _) || ShouldDeferInventoryTriggersToVanillaDuringAutopause();
+
+		private static bool ShouldPreservePausedPadInventoryTriggers()
+		{
+			if (Main.gameMenu)
+				return false;
+			if (_preservePausedPadInventory)
+				return true;
+			return Main.gamePaused && (PlayerInput.CurrentInputMode == InputMode.XBoxGamepad
+				|| PlayerInput.CurrentInputMode == InputMode.XBoxGamepadUI);
+		}
+
+		private static bool TryGetPausedInventoryCombo(out ComboBinding combo)
+		{
+			combo = null;
+			if (Main.gameMenu || (!Main.gamePaused && _pausedInventoryCombo == null) || IsRecording
+				|| global::AdvancedKeybinds.UI.ComboPanel.IsOpen)
+				return false;
+			InputMode mode = PlayerInput.CurrentInputMode;
+			if (mode != InputMode.Keyboard && mode != InputMode.KeyboardUI && mode != InputMode.Mouse)
+				return false;
+			if (!(BindingStorage.AllBindings is IReadOnlyDictionary<string, ComboBinding> map))
+				return false;
+			string id = mode == InputMode.KeyboardUI ? "KU:Inventory" : "Inventory";
+			if (!map.TryGetValue(id, out combo) || combo == null
+				|| combo.Hold || combo.HoldOnRelease || combo.DoubleTap || combo.HasAlternateGamePad)
+				return false;
+			int filled = 0;
+			string sole = null;
+			if (!string.IsNullOrEmpty(combo.Slot1)) { filled++; sole = combo.Slot1; }
+			if (!string.IsNullOrEmpty(combo.Slot2)) { filled++; sole = combo.Slot2; }
+			if (!string.IsNullOrEmpty(combo.Slot3)) { filled++; sole = combo.Slot3; }
+			if (filled != 1 || !PlainSingleTapPolicy.IsEscapeEquivalentToken(sole))
+				return false;
+			// Only hand AND to vanilla when its active KeyStatus really owns Escape.
+			var profile = PlayerInput.CurrentProfile;
+			InputMode keyboardMode = mode == InputMode.KeyboardUI ? InputMode.KeyboardUI : InputMode.Keyboard;
+			return profile?.InputModes != null
+				&& profile.InputModes.TryGetValue(keyboardMode, out var config) && config?.KeyStatus != null
+				&& config.KeyStatus.TryGetValue("Inventory", out var vanillaKeys)
+				&& vanillaKeys != null && vanillaKeys.Contains("Escape");
+		}
+
+		private static void ApplyPausedInventoryOr(ComboBinding combo, TriggersSet justPressed, TriggersSet current)
+		{
+			int epoch = FnaKeyboardProvider.InputTickEpoch;
+			if (!ReferenceEquals(_pausedInventoryCombo, combo))
+				ResetPausedInventoryInput();
+			if (_pausedInventoryEpoch != epoch)
+			{
+				bool down = Main.hasFocus && !Main.blockInput && !Main.drawingPlayerChat
+					&& !Main.editSign && !Main.editChest && !Main.inFancyUI && !Main.ingameOptionsWindow
+					&& combo.HasAdditionalOr && IsPausedInventoryOrDown(combo.AdditionalOrToken);
+				_pausedInventoryOrPressed = down
+					&& (StableKeyToken.IsMouseWheelToken(combo.AdditionalOrToken) || !_pausedInventoryOrDown);
+				_pausedInventoryOrDown = down;
+				_pausedInventoryEpoch = epoch;
+				_pausedInventoryCombo = combo;
+			}
+			// Preserve vanilla Escape and its modal/one-shot guards; add only the live OR.
+			if (_pausedInventoryOrPressed)
+				justPressed.KeyStatus["Inventory"] = true;
+			if (_pausedInventoryOrDown)
+				current.KeyStatus["Inventory"] = true;
+		}
+
+		private static bool IsPausedInventoryOrDown(string token)
+		{
+			if (StableKeyToken.IsMouseWheelToken(token))
+			{
+				PausedInventoryWheelEdges.Clear();
+				MouseInputHelper.AppendFrameWheelEdges(PausedInventoryWheelEdges);
+				return PausedInventoryWheelEdges.Contains(token);
+			}
+			// Button cache normally follows world frames; paused polls need this input tick.
+			if (KeyToken.IsMouseButtonToken(token))
+				MouseInputHelper.RefreshFrameMouseState();
+			return KeyToken.IsDown(token);
 		}
 
 		/// <summary>

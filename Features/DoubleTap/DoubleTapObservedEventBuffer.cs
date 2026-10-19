@@ -142,6 +142,36 @@ namespace AdvancedKeybinds.Features.DoubleTap
 			}
 		}
 
+		public int DiscardThrough(long generation, long inclusiveSequence)
+		{
+			lock (_gate)
+			{
+				if (!_accepting
+					|| _generation <= 0L
+					|| generation != _generation
+					|| inclusiveSequence < 0L
+					|| _count <= 0)
+					return 0;
+
+				int removed = 0;
+				int limit = _count;
+				for (int i = 0; i < limit; i++)
+				{
+					if (_slots[_head].Sequence > inclusiveSequence)
+						break;
+
+					_head = (_head + 1) % _slots.Length;
+					_count--;
+					removed++;
+				}
+
+				if (_count == 0)
+					_head = 0;
+
+				return removed;
+			}
+		}
+
 		void Invalidate()
 		{
 			DiscardLogical();

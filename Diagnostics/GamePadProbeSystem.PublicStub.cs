@@ -20,13 +20,6 @@ namespace AdvancedKeybinds.Diagnostics
 		public static void LogUiSuppressEnd(string gamePadToken) { }
 		public static void LogPanelCloseAttempt(string gamePadToken, string source, bool blocked) { }
 		public static void LogParentUiTrigger(string gamePadToken, string triggerName, bool cleared) { }
-		public static void LogCaptureEdge(string gamePadToken, int slotNumber, string phaseBefore, string phaseAfter, bool captureCompleted, bool purpleWaitCleared, bool keyboardOrMouseAlsoPresent, string note) { }
-		public static void LogPadTabOpen(Terraria.GameInput.InputMode mode) { }
-		public static void LogPadBindWaitBegin(string action, Terraria.GameInput.InputMode mode, string source) { }
-		public static void LogPadBindWaitEnd(string action, Terraria.GameInput.InputMode mode) { }
-		public static void LogPadBindAttempt(string action, string padToken, string vanillaValue, Terraria.GameInput.InputMode mode) { }
-		public static void LogPadBindResult(string action, bool? accepted, Terraria.GameInput.InputMode storedMode, string note) { }
-		public static void LogPanelPadNavBegin(ComboPanelPadFocus focus, string openToken) { }
 		public static void LogPanelPadOpen(ComboPanelPadFocus focus, string openToken) { }
 		public static void LogPanelOpenSource(string source, bool displayNameEnabled) { }
 		public static void LogPanelMouseSessionOpen(string openSource, bool mouseInputEnabled, bool displayNameEnabled) { }
@@ -49,16 +42,13 @@ namespace AdvancedKeybinds.Diagnostics
 		public static void LogPanelPadNumberEditBegin(int value) { }
 		public static void LogPanelPadNumberChange(int from, int to, string input) { }
 		public static void LogPanelPadNumberEditEnd(int value, bool committed) { }
-		public static void LogPanelPadClearConfirmBegin() { }
 		public static void LogPanelPadClearConfirmBegin(ComboPanelPadFocus focus) { }
-		public static void LogPanelPadClearConfirmEnd(bool confirmed) { }
 		public static void LogPanelPadClearConfirmEnd(bool confirmed, ComboPanelPadFocus focus) { }
 		public static void LogPanelClearConfirmArm(string input, bool bindingChanged, int epoch) { }
 		public static void LogPanelClearConfirmReleaseReady(int epoch) { }
 		public static void LogPanelClearConfirmCommit(string input, bool bindingChanged, int epoch) { }
 		public static void LogPanelClearConfirmCancel(string input) { }
 		public static void LogPanelClearDoubleUseBlocked(string token) { }
-		public static void LogPanelClearChangedBeforeCommit(string reason) { }
 		public static void LogPanelPadUnexpectedCaptureBegin(ComboPanelPadFocus focus) { }
 		public static void LogPanelPadSave() { }
 		public static void LogPanelSaveCloseBegin(string action, string host, string focus, int epoch) { }
@@ -100,26 +90,11 @@ namespace AdvancedKeybinds.Diagnostics
 		public static void LogPanelLeftStickDirectionMismatch(float rawY, string expected, string actual) { }
 		public static void LogPanelRowActionIdentity(int point, string focusedAction, string pendingAction, string clickAction, bool matched) { }
 		public static void LogPanelRowActionIdentityMismatch(int point, string focusedAction, string clickAction, bool allowed) { }
-		public static void LogIngameTriggerNavInput(string token, bool mainGameMenu, bool playerInventory, bool comboPanelOpen, bool controlsOpen, string inputMode, int currentPoint, bool navigatorInUse) { }
-		public static void LogIngameTriggerNavState(string token, bool menuLeft, bool menuRight, bool hotbarMinus, bool hotbarPlus, bool mouseLeft, bool mouseRight, bool allowGamepadInstructions, bool gamepadAllowScrolling) { }
-		public static void LogIngameTriggerNavSuppress(string token, bool beforeMenuLeft, bool afterMenuLeft, bool beforeMenuRight, bool afterMenuRight, string suppressOwner, bool suppressApplied) { }
-		public static void LogIngameTriggerNavResult(string token, int beforePoint, int afterPoint) { }
-		public static void LogIngameTriggerNavMode(string before, string after, string changedBy) { }
-		public static void LogForeignUiNavInput(string uiType, string token, int currentPointBefore, string currentInputMode, bool navigatorInUse) { }
-		public static void LogForeignUiNavResult(string uiType, int before, int after, int up, int down, int left, int right, float targetX, float targetY) { }
-		public static void LogForeignUiAkInterference(string uiType, string owner, string trigger, bool cleared) { }
-		public static void LogGlobalUiNavInput(string uiType, string token, int beforePoint, string inputMode, bool navigatorInUse, bool akControlsUiActive, bool akSuppressActive) { }
-		public static void LogGlobalUiNavLink(int point, int up, int down, int left, int right, bool targetExists, bool targetVisible, string targetUiType, string pointIdName = null, float posX = 0f, float posY = 0f) { }
-		public static void LogGlobalUiNavResult(int beforePoint, int afterPoint, bool moved, bool officialLinkUsed, bool akInterference) { }
-		public static void LogGlobalUiNavAkSuppress(string uiType, string owner, string trigger, bool cleared) { }
 		public static void LogControlUiContext(string host, string currentStateType, bool manageControlsFound, string currentInputMode, int currentPoint, int pointCount, int highestPoint) { }
 		public static void LogControlUiDpad(string host, string token, bool menuFlag, int beforePoint, int afterPoint) { }
 		public static void LogControlSectionLink(string stableId, string elementType, int snapId, int listIndex, int pointId, bool navigable, int up, int down, float posX, float posY) { }
 		public static void LogControlSectionLinkFailed(string stableId, string reason) { }
 		public static void LogControlGridLink(string leftAction, string rightAction, int logicalRow, int leftPoint, int rightPoint) { }
-		public static void LogControlGridVertical(string from, string to, string column, string direction) { }
-		public static void LogControlGridHorizontal(string from, string to, string direction) { }
-		public static void LogControlGridColumnLost(string from, string actualTo, string expectedColumn) { }
 		public static void LogControlManualScrollBegin(int preferredColumn) { }
 		public static void LogControlManualScrollEnd(int focusPoint) { }
 		public static void LogPanelInputConsumeBegin(string token, string reason, int epoch) { }
@@ -127,12 +102,6 @@ namespace AdvancedKeybinds.Diagnostics
 		public static void LogPanelInputConsumeEnd(string token, string reason) { }
 		public static void LogControlBackDuplicateBlocked(string token, string firstAction, string blockedAction) { }
 		public static void LogControlNavSelectedNotVisible(string target) { }
-		public static void LogControlNavScroll(float oldView, float newView, string target) { }
-		public static void LogControlNavSkipScrollItem(string from, string to, string direction) { }
-		public static void LogControlAccordionToggleBegin(string current, string stableId, bool? expandedBefore) { }
-		public static void LogControlAccordionToggleEnd(string stableId, bool? expandedAfter, string restored) { }
-		public static void LogControlNavRestore(string oldPoint, string newPoint, string reason) { }
-		public static void LogControlNavUnexpectedFixedUi(string from, string to, string reason) { }
 		public static void LogPanelPadBackBegin(string mode, string parentScreen) { }
 		public static void LogPanelClose() { }
 		public static void LogReturnParentControls() { }
@@ -143,7 +112,6 @@ namespace AdvancedKeybinds.Diagnostics
 		public static void LogRestoreResult(bool success, bool fallback) { }
 		public static void LogNavRestoreFailed(string currentStableId, string reason) { }
 		public static void LogScrollDuplicate(string target, int epoch) { }
-		public static void LogControlsClose(string source) { }
 		public static void LogControlsCloseLeak(string source) { }
 		public static void LogPanelBackgroundInputBlockBegin(string host) { }
 		public static void LogPanelBackgroundInputBlockEnd(string reason) { }
@@ -164,7 +132,6 @@ namespace AdvancedKeybinds.Diagnostics
 		public static void LogAkSectionConfirmLifetimeBegin(int epoch, int pointId, string stableId, bool padAPressed, bool? expandedBefore) { }
 		public static void LogAkSectionConfirmExactRestore(int epoch, string stableId, int pointId, bool padACurrent, bool sessionActive) { }
 		public static void LogAkSectionConfirmRelease(int epoch, string stableId, int currentPoint, string currentStableId, bool sessionActive) { }
-		public static void LogAkSectionPostRelease3002(int epoch, int msSincePress, int msSinceRelease, int fromPoint, string fromStableId, int toPoint, string callerType, string callerMethod, string stack, bool padAPressed, bool padACurrent, bool padAReleased, bool menuConfirmPressed, bool menuConfirmCurrent, bool menuConfirmReleased, bool duringSetup, bool duringOnActivate, bool duringUiUpdate, bool duringDraw, bool restoreSessionActive, bool manualScrollActive, float rightStickY, bool manualScrollSyncRan, int manualScrollSelectedPoint, string manualScrollSelectedStableId, bool applied) { }
 		public static void LogAkSectionConfirmLifetimeEnd(string originalStableId, int finalPoint, string finalStableId, bool movedToGamepadTab, string cause, bool fixedOk) { }
 		public static void LogAkManualScrollFocusSync(int epoch, int currentPointBefore, string currentStableIdBefore, float rightStickY, int selectedPoint, string selectedStableId, int currentPointAfter, bool triggeredDuringSectionConfirm) { }
 		public static void LogAkModBindingRowClassify(int point, string elementType, string action, string parentType, string parentStableId, string kind, bool hasBindingFlag, bool hasSectionChildFlag, bool navigable) { }

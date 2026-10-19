@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using AdvancedKeybinds.Binding;
-using AdvancedKeybinds.Diagnostics;
 
 namespace AdvancedKeybinds.Core
 {
@@ -12,7 +11,6 @@ namespace AdvancedKeybinds.Core
 	internal static class ComboPanelEditHistory
 	{
 		private static readonly List<ComboBinding> _stack = new(8);
-		private static string _actionId;
 		private static bool _active;
 
 		internal static int Depth => _stack.Count;
@@ -22,23 +20,13 @@ namespace AdvancedKeybinds.Core
 		internal static void Begin(string actionId, ComboBinding initial)
 		{
 			_stack.Clear();
-			_actionId = actionId ?? "?";
 			_active = true;
-			GamePadProbeSystem.LogPanelEditHistoryBegin(
-				_actionId,
-				FormatSlots(initial),
-				FormatHoldMode(initial),
-				initial?.EffectiveHoldMs ?? ComboBinding.DefaultHoldMs);
 		}
 
 		internal static void End(string reason)
 		{
-			int discarded = _stack.Count;
 			_stack.Clear();
 			_active = false;
-			string action = _actionId;
-			_actionId = null;
-			GamePadProbeSystem.LogPanelEditHistoryEnd(reason ?? "PanelClose", discarded, action);
 		}
 
 		internal static void Reset()
@@ -48,7 +36,6 @@ namespace AdvancedKeybinds.Core
 			else
 			{
 				_stack.Clear();
-				_actionId = null;
 				_active = false;
 			}
 		}
@@ -66,7 +53,6 @@ namespace AdvancedKeybinds.Core
 				return;
 
 			_stack.Add(before.Clone());
-			GamePadProbeSystem.LogPanelEditHistoryPush(reason ?? "Edit", _stack.Count);
 		}
 
 		internal static bool TryUndo(out ComboBinding restored)
@@ -74,35 +60,18 @@ namespace AdvancedKeybinds.Core
 			restored = null;
 			if (!_active)
 			{
-				GamePadProbeSystem.LogPanelUndoUnavailable("Inactive");
 				return false;
 			}
 
 			if (_stack.Count == 0)
 			{
-				GamePadProbeSystem.LogPanelUndoUnavailable("NoHistory");
 				return false;
 			}
 
 			int before = _stack.Count;
 			restored = _stack[before - 1];
 			_stack.RemoveAt(before - 1);
-			GamePadProbeSystem.LogPanelUndoApply("CancelButton", before, _stack.Count, panelStillOpen: true);
 			return true;
-		}
-
-		private static string FormatSlots(ComboBinding b)
-		{
-			if (b == null)
-				return "-/-/-";
-			return (b.Slot1 ?? "-") + "/" + (b.Slot2 ?? "-") + "/" + (b.Slot3 ?? "-");
-		}
-
-		private static string FormatHoldMode(ComboBinding b)
-		{
-			if (b == null || !b.Hold)
-				return "Off";
-			return b.HoldOnRelease ? "OnRelease" : "WhileHeld";
 		}
 	}
 }

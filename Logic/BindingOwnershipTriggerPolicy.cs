@@ -57,7 +57,9 @@ namespace AdvancedKeybinds.Core
 				return false;
 
 			string triggerId = ControlsEditTargetPolicy.ToTriggerActionId(storageKey);
-			if (IsVanillaSharedUiBackTrigger(triggerId))
+			if (IsVanillaSharedUiBackTrigger(triggerId)
+				|| string.Equals(ControlsGameUiSeparationPolicy.ToTriggerActionId(storageKey),
+					"Inventory", StringComparison.OrdinalIgnoreCase))
 				return false;
 
 			// Terraria KeyStatus OR owns GamePadTwoKeyTerrariaOrPolicy.ActionIds (sole allowlist).

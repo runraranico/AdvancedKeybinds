@@ -1233,10 +1233,6 @@ namespace AdvancedKeybinds.Patches
 							out string blockReason,
 							out string resolvedOpenToken))
 						{
-							#if AK_DIAGNOSTICS
-							PadConfirmAfterComboSaveDiagSystem.ObserveOpenIntent(
-								actionId, accepted: false, openSource, blockReason, openedByGamePad: false);
-							#endif
 							GamePadProbeSystem.LogPanelOpenAttempt(
 								actionId,
 								openSource,
@@ -1251,10 +1247,6 @@ namespace AdvancedKeybinds.Patches
 							return;
 						}
 
-						#if AK_DIAGNOSTICS
-						PadConfirmAfterComboSaveDiagSystem.ObserveOpenIntent(
-							actionId, accepted: true, openSource, blockReason: null, openedByGamePad);
-						#endif
 
 						GamePadProbeSystem.LogPanelOpenAttempt(
 							actionId,
@@ -1363,9 +1355,6 @@ namespace AdvancedKeybinds.Patches
 			if (string.IsNullOrEmpty(actionId))
 				return;
 
-#if AK_DIAGNOSTICS
-			BindingMutationDiag.ObserveControlsRow(actionId);
-#endif
 
 			if (!TryGetRowInputMode(self, out InputMode rowMode))
 				rowMode = InputMode.Keyboard;
@@ -1868,9 +1857,6 @@ namespace AdvancedKeybinds.Patches
 
 			return actionId;
 		}
-
-		private static string BuildComboLabel(ComboBinding combo)
-			=> BindingDisplayResolver.FormatComboDisplayLabel(combo);
 
 		/// <summary>
 		/// Overlay labels: on GamePad Controls rows, prefer GlyphTagHandler Buttons names

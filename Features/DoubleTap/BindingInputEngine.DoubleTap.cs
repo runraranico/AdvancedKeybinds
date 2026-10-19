@@ -43,27 +43,15 @@ namespace AdvancedKeybinds.Binding
 		static InputMode _dtTrackedInputMode;
 		static int _dtNativeSourceMask;
 
-		/// <summary>
-		/// Diag SourceState: whether current subscribers already received the current Window/LL pair.
-		/// Cleared on Reset and whenever a valid DT Update runs with zero subscribers.
-		/// </summary>
-		static bool _dtDiagSourceStateSynced;
-		static bool _dtDiagSourceStatePrevWindow;
-		static bool _dtDiagSourceStatePrevLowLevel;
-
 		static void ResetAllDoubleTapRuntimes()
 		{
-#if AK_DOUBLETAP_DIAGNOSTICS
-			DoubleTapTrace.State("DT:リセット直前");
-#endif
 			CancelDoubleTapOutputContributionsIfCurrentFrame();
 			ClearDoubleTapOutputContributionScratch();
 			_dtContinuousHeld.Clear();
 			_hasDtInputMode = false;
 			_dtNativeSourceMask = 0;
-			_dtDiagSourceStateSynced = false;
 			// Always end native session (independent of active DT count).
-			if (!DoubleTapNativeInput.LowLevelAvailable)
+			if (!DoubleTapNativeInput.LowLevelAvailable && !DoubleTapNativeInput.ThreadWindowsAvailable)
 				DoubleTapNativeInput.Session.EndAndForgetPhysicalState();
 			else
 				DoubleTapNativeInput.Session.End();
@@ -81,6 +69,25 @@ namespace AdvancedKeybinds.Binding
 			_dtRawSnapshotScratch.Clear();
 			_dtEdgeScratch.Clear();
 			ClearDoubleTapOutputContributionScratch();
+		}
+
+		// Cancel only evaluated state, not native observations made after the boundary.
+		private static void CancelDoubleTapRuntimesForFocusBoundary()
+		{
+			CancelDoubleTapOutputContributionsIfCurrentFrame();
+			ClearDoubleTapOutputContributionScratch();
+			_dtContinuousHeld.Clear();
+			CompiledBinding[] compiled = _compiled;
+			if (compiled != null)
+				for (int i = 0; i < compiled.Length; i++)
+					compiled[i].DoubleTapRuntime?.Reset();
+		}
+
+		private static void RejectStaleDoubleTapFocusBatch()
+		{
+			SynchronizeFocusBoundaryState(DoubleTapNativeInput.Session.FocusBoundaryToken);
+			// The old batch may have stepped a runtime after the first synchronization.
+			CancelDoubleTapRuntimesForFocusBoundary();
 		}
 
 		static void ClearDoubleTapOutputContributionScratch()
@@ -227,18 +234,17 @@ namespace AdvancedKeybinds.Binding
 			bool windows = DoubleTapNativeInput.IsWindows;
 			bool windowAvail = DoubleTapNativeInput.WindowAvailable;
 			bool llAvail = DoubleTapNativeInput.LowLevelAvailable;
-			int sourceMask = (windowAvail ? 1 : 0) | (llAvail ? 2 : 0);
+			bool threadWinAvail = DoubleTapNativeInput.ThreadWindowsAvailable;
+			int sourceMask = (windowAvail ? 1 : 0) | (llAvail ? 2 : 0) | (threadWinAvail ? 4 : 0);
 			if (sourceMask != _dtNativeSourceMask)
 			{
-				if ((_dtNativeSourceMask & 2) != 0 && !llAvail)
+				if (((_dtNativeSourceMask & 2) != 0 && !llAvail) || (((_dtNativeSourceMask & 4) != 0) != threadWinAvail))
 					DoubleTapNativeInput.Session.EndAndForgetPhysicalState();
 				else
 					DoubleTapNativeInput.Session.End();
 				_dtContinuousHeld.Clear();
 				_dtNativeSourceMask = sourceMask;
 			}
-
-			PublishDoubleTapDiagSourceStateIfNeeded(windowAvail, llAvail, update);
 
 			bool needNativeKeyboard = false;
 			if (windows)
@@ -262,11 +268,12 @@ namespace AdvancedKeybinds.Binding
 			long drainGeneration = 0L;
 			bool nativeReady = false;
 			int seedHeldMask = 0;
+			object? nativeBatchToken = null;
 
 			if (needNativeKeyboard)
 			{
 				DoubleTapObservationSession session = DoubleTapNativeInput.Session;
-				if (!windowAvail && !llAvail)
+				if (!windowAvail && !llAvail && !threadWinAvail)
 				{
 					session.End();
 				}
@@ -277,27 +284,28 @@ namespace AdvancedKeybinds.Binding
 						long begun = session.Begin(
 							DoubleTapNativeInput.ReadInitialHeldMask(),
 							DoubleTapNativeInput.NowMs);
-#if AK_DOUBLETAP_DIAGNOSTICS
-						DoubleTapTrace.State("DT:セッション開始結果");
-#endif
 						if (begun <= 0L)
 							session.End();
 					}
 
 					if (session.IsActive)
 					{
-						long genBefore = session.Generation;
-						seedHeldMask = session.SeedHeldMask;
-						drainCount = session.Drain(_dtNativeDrainScratch, 0);
-						if (!session.IsActive || session.Generation != genBefore)
+						drainCount = session.DrainForFocusBoundary(_dtNativeDrainScratch, 0,
+							out drainGeneration, out seedHeldMask, out nativeBatchToken);
+						if (!object.ReferenceEquals(session.FocusBoundaryToken, nativeBatchToken))
+						{
+							RejectStaleDoubleTapFocusBatch();
+							return;
+						}
+						if (!session.IsActive || drainGeneration <= 0L || session.Generation != drainGeneration)
 						{
 							// Overflow / End: drop drained set; do not revive old pair.
 							drainCount = 0;
 						}
 						else
 						{
-							drainGeneration = genBefore;
 							nativeReady = true;
+							SynchronizeFocusBoundaryState(nativeBatchToken);
 						}
 					}
 				}
@@ -326,41 +334,50 @@ namespace AdvancedKeybinds.Binding
 
 				string primary = cb.DoubleTapPrimaryToken;
 				int windowMs = cb.DoubleTapWindowMs;
-				bool fired;
-				bool stage3Matched = false;
-				DoubleTapObservedEvent stage3Ev = default;
-				DoubleTapDiagSource stage3Source = DoubleTapDiagSource.Unknown;
-				bool stage3SourceAvailable = false;
-				bool stage3SeedHeld = false;
+				bool fired = false;
+				bool snapshotLive = object.ReferenceEquals(
+					DoubleTapNativeInput.Session.FocusBoundaryToken, _evaluationFocusBoundaryToken);
 
 				if (IsWheelPrimary(primary))
 				{
-					bool pulse = IsDoubleTapPrimaryPulse(primary, dtEdges);
-					fired = runtime.Step(new DoubleTapInput(
-						update, nowMs, windowMs, down: false, pulse, blocked: false));
+					if (snapshotLive)
+					{
+						bool pulse = IsDoubleTapPrimaryPulse(primary, dtEdges);
+						fired = runtime.Step(new DoubleTapInput(
+							update, nowMs, windowMs, down: false, pulse, blocked: false));
+					}
 				}
 				else if (IsMouseButtonPrimary(primary) || IsPadPrimary(primary)
 					|| (IsKeyboardPrimary(primary) && !windows))
 				{
 					// Snapshot-only (no edge mix). Non-Windows keyboard included.
-					bool down = IsDoubleTapPrimaryDown(primary, rawSnapshot);
-					fired = runtime.Step(new DoubleTapInput(
-						update, nowMs, windowMs, down, pulse: false, blocked: false));
+					if (snapshotLive)
+					{
+						bool down = IsDoubleTapPrimaryDown(primary, rawSnapshot);
+						fired = runtime.Step(new DoubleTapInput(
+							update, nowMs, windowMs, down, pulse: false, blocked: false));
+					}
 				}
 				else if (IsKeyboardPrimary(primary) && windows)
 				{
 					fired = false;
-					bool heldMatched = false;
-					DoubleTapObservedEvent matchedEv = default;
 					if (nativeReady && drainCount > 0)
 					{
 						for (int e = 0; e < drainCount; e++)
 						{
+							if (!object.ReferenceEquals(DoubleTapNativeInput.Session.FocusBoundaryToken, nativeBatchToken))
+							{
+								RejectStaleDoubleTapFocusBatch();
+								return;
+							}
+							if (!DoubleTapNativeInput.Session.IsActive
+								|| DoubleTapNativeInput.Session.Generation != drainGeneration)
+								break;
 							DoubleTapObservedEvent ev = _dtNativeDrainScratch[e];
 							bool ll = DoubleTapRuntime.IsLowLevelFiveKeyIdPublic(ev.KeyId);
 							if (ll)
 							{
-								if (!llAvail)
+								if (!llAvail && !(threadWinAvail && ((uint)(ev.KeyId & 0xFF) == 0x5B || (uint)(ev.KeyId & 0xFF) == 0x5C)))
 									continue;
 							}
 							else if (!windowAvail)
@@ -378,58 +395,15 @@ namespace AdvancedKeybinds.Binding
 								jpLayout))
 							{
 								fired = true;
-								if (DoubleTapDiagFeed.HasSubscribers)
-								{
-									matchedEv = ev;
-									heldMatched = true;
-								}
 							}
-#if AK_DOUBLETAP_DIAGNOSTICS
-							DoubleTapTrace.Evaluated(cb.ActionId, ev.KeyId, ev.TimestampMs, fired);
-#endif
 						}
 					}
 					if (!DoubleTapNativeInput.Session.IsActive
 						|| DoubleTapNativeInput.Session.Generation != drainGeneration)
 					{
 						fired = false;
-						heldMatched = false;
 						runtime.Reset();
 						_dtContinuousHeld.Remove(cb.ActionId);
-					}
-					else if (fired && heldMatched)
-					{
-						try
-						{
-							bool ll = DoubleTapRuntime.IsLowLevelFiveKeyIdPublic(matchedEv.KeyId);
-							DoubleTapDiagSource source = ll
-								? DoubleTapDiagSource.LowLevel
-								: DoubleTapDiagSource.Window;
-							bool sourceAvailable = ll ? llAvail : windowAvail;
-							bool seedHeld = ll
-								&& IsDiagLlSeedHeld(matchedEv.KeyId, seedHeldMask);
-							stage3Matched = DoubleTapDiagPolicy.TryPublishMatched(
-								matchedEv.KeyId,
-								cb.ActionId,
-								source,
-								matchedEv.TimestampMs,
-								matchedEv.Update,
-								sessionActive: true,
-								sourceAvailable,
-								seedHeld,
-								matchedEv.Down);
-							if (stage3Matched)
-							{
-								stage3Ev = matchedEv;
-								stage3Source = source;
-								stage3SourceAvailable = sourceAvailable;
-								stage3SeedHeld = seedHeld;
-							}
-						}
-						catch
-						{
-							stage3Matched = false;
-						}
 					}
 					// No snapshot/edge fallback when native unavailable.
 				}
@@ -441,46 +415,44 @@ namespace AdvancedKeybinds.Binding
 				string triggerId = ControlsGameUiSeparationPolicy.ToTriggerActionId(cb.ActionId);
 				bool continuous = DoubleTapTargetPolicy.IsContinuousVanillaTarget(cb.ActionId)
 					&& !IsWheelPrimary(primary);
-
-				if (fired)
+				bool continueHeld = !fired && continuous && snapshotLive
+					&& _dtContinuousHeld.Contains(cb.ActionId);
+				bool keepHeld = continueHeld && IsDoubleTapPrimaryDown(primary, rawSnapshot);
+				if (fired || continueHeld)
 				{
-					if (continuous)
-						_dtContinuousHeld.Add(cb.ActionId);
-					RecordDoubleTapOutputContribution(update, triggerId);
-					JustPressedActions[triggerId] = true;
-					CurrentActions[triggerId] = true;
-#if AK_DOUBLETAP_DIAGNOSTICS
-				DoubleTapTrace.Output(cb.ActionId);
-#endif
-					if (stage3Matched)
+					DoubleTapObservationSession session = DoubleTapNativeInput.Session;
+					bool entered = IsKeyboardPrimary(primary) && windows && nativeReady
+						? session.TryEnterFocusBoundary(drainGeneration, nativeBatchToken)
+						: session.TryEnterFocusBoundary(_evaluationFocusBoundaryToken);
+					if (!entered)
 					{
-						try
+						RejectStaleDoubleTapFocusBatch();
+						return;
+					}
+					try
+					{
+						if (fired)
 						{
-							DoubleTapDiagPolicy.TryPublishFired(
-								stage3Ev.KeyId,
-								cb.ActionId,
-								stage3Source,
-								stage3Ev.TimestampMs,
-								stage3Ev.Update,
-								sessionActive: true,
-								stage3SourceAvailable,
-								stage3SeedHeld,
-								stage3Ev.Down,
-								evaluationFrame: update == 0UL ? -1 : unchecked((int)update));
+							if (continuous)
+								_dtContinuousHeld.Add(cb.ActionId);
+							RecordDoubleTapOutputContribution(update, triggerId);
+							JustPressedActions[triggerId] = true;
+							CurrentActions[triggerId] = true;
 						}
-						catch { /* diag must not affect input */ }
+						else if (keepHeld)
+						{
+							RecordDoubleTapOutputContribution(update, triggerId);
+							CurrentActions[triggerId] = true;
+						}
+						else
+							_dtContinuousHeld.Remove(cb.ActionId);
 					}
-				}
-				else if (continuous && _dtContinuousHeld.Contains(cb.ActionId))
-				{
-					if (IsDoubleTapPrimaryDown(primary, rawSnapshot))
+					finally
 					{
-						RecordDoubleTapOutputContribution(update, triggerId);
-						CurrentActions[triggerId] = true;
+						session.ExitFocusBoundary();
 					}
-					else
-						_dtContinuousHeld.Remove(cb.ActionId);
 				}
+
 			}
 		}
 
@@ -506,117 +478,5 @@ namespace AdvancedKeybinds.Binding
 				_dtAddedCurrentScratch.Add(triggerId);
 		}
 
-		/// <summary>
-		/// LL seed bits: LWin=1&lt;&lt;0, RWin=1&lt;&lt;1, Caps=1&lt;&lt;2. Non-LL / other LL → false.
-		/// </summary>
-		static bool IsDiagLlSeedHeld(int keyId, int seedHeldMask)
-		{
-			if (!DoubleTapRuntime.IsLowLevelFiveKeyIdPublic(keyId))
-				return false;
-
-			uint vk = (uint)(keyId & 0xFF);
-			int bit;
-			if (vk == 0x5Bu)
-				bit = 1 << 0;
-			else if (vk == 0x5Cu)
-				bit = 1 << 1;
-			else if (vk == 0x14u)
-				bit = 1 << 2;
-			else
-				return false;
-
-			return (seedHeldMask & bit) != 0;
-		}
-
-		/// <summary>
-		/// Passive SourceState for Window/LL availability. Valid DT Update only (caller is past block gate).
-		/// Zero subscribers → synced=false and return. Unsynced → current pair once. Synced → change only.
-		/// </summary>
-		static void PublishDoubleTapDiagSourceStateIfNeeded(
-			bool windowAvailable,
-			bool lowLevelAvailable,
-			ulong update)
-		{
-			if (!DoubleTapDiagFeed.HasSubscribers)
-			{
-				_dtDiagSourceStateSynced = false;
-				return;
-			}
-
-			if (!_dtDiagSourceStateSynced)
-			{
-				long timestampMs = ToDoubleTapDiagTimestampMs(DoubleTapNativeInput.NowMs);
-				bool sessionActive = DoubleTapNativeInput.Session.IsActive;
-				PublishDoubleTapDiagSourceState(
-					DoubleTapDiagSource.Window, windowAvailable, timestampMs, update, sessionActive);
-				PublishDoubleTapDiagSourceState(
-					DoubleTapDiagSource.LowLevel, lowLevelAvailable, timestampMs, update, sessionActive);
-				_dtDiagSourceStatePrevWindow = windowAvailable;
-				_dtDiagSourceStatePrevLowLevel = lowLevelAvailable;
-				_dtDiagSourceStateSynced = true;
-				return;
-			}
-
-			bool windowChanged = windowAvailable != _dtDiagSourceStatePrevWindow;
-			bool lowLevelChanged = lowLevelAvailable != _dtDiagSourceStatePrevLowLevel;
-			if (!windowChanged && !lowLevelChanged)
-				return;
-
-			long changeTimestampMs = ToDoubleTapDiagTimestampMs(DoubleTapNativeInput.NowMs);
-			bool changeSessionActive = DoubleTapNativeInput.Session.IsActive;
-			if (windowChanged)
-			{
-				PublishDoubleTapDiagSourceState(
-					DoubleTapDiagSource.Window,
-					windowAvailable,
-					changeTimestampMs,
-					update,
-					changeSessionActive);
-				_dtDiagSourceStatePrevWindow = windowAvailable;
-			}
-
-			if (lowLevelChanged)
-			{
-				PublishDoubleTapDiagSourceState(
-					DoubleTapDiagSource.LowLevel,
-					lowLevelAvailable,
-					changeTimestampMs,
-					update,
-					changeSessionActive);
-				_dtDiagSourceStatePrevLowLevel = lowLevelAvailable;
-			}
-		}
-
-		static void PublishDoubleTapDiagSourceState(
-			DoubleTapDiagSource source,
-			bool sourceAvailable,
-			long timestampMs,
-			ulong update,
-			bool sessionActive)
-		{
-			DoubleTapDiagFeed.Publish(new DoubleTapDiagEvent(
-				DoubleTapDiagKey.None,
-				DoubleTapDiagStage.SourceState,
-				DoubleTapDiagReason.None,
-				source,
-				timestampMs,
-				update,
-				vk: 0u,
-				scan: 0,
-				extended: false,
-				sessionActive,
-				sourceAvailable,
-				seedHeld: false,
-				actionId: string.Empty,
-				isDown: false));
-		}
-
-		/// <summary>Same safe conversion as DoubleTapDiagPolicy.ToDiagTimestampMs (NaN/Inf/neg → -1).</summary>
-		static long ToDoubleTapDiagTimestampMs(double eventMs)
-		{
-			if (double.IsNaN(eventMs) || double.IsInfinity(eventMs) || eventMs < 0.0)
-				return -1L;
-			return (long)eventMs;
-		}
 	}
 }
