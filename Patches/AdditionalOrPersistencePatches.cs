@@ -464,7 +464,8 @@ namespace AdvancedKeybinds.Patches
                 }
             }
 
-            var result = orig(self);
+            var overlaySave = global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.CaptureSave(self);
+            var result = global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.ProjectSave(overlaySave, orig(self));
             Validate(self);
             if (result == null || snapshots.Count == 0)
                 return result;

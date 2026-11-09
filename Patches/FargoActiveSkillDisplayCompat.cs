@@ -1,13 +1,15 @@
 using System;
-using System.Collections.Generic;
 using System.Reflection;
 using AdvancedKeybinds.Binding;
 using AdvancedKeybinds.Core;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Terraria;
+using Terraria.GameContent;
 using Terraria.GameInput;
+using Terraria.Localization;
 using Terraria.ModLoader;
+using Terraria.UI;
 
 namespace AdvancedKeybinds.Patches
 {
@@ -26,6 +28,7 @@ namespace AdvancedKeybinds.Patches
 
 		// MonoMod instance detour: object self (same pattern as KeybindingUiPatches OnClick / CreatePanel).
 		private delegate void orig_PreDraw(object self, SpriteBatch spriteBatch, Vector2 position);
+		private delegate void orig_DrawSelf(object self, SpriteBatch spriteBatch);
 
 		private static bool _applied;
 		/// <summary>Fail-closed: after one draw exception, skip override for the rest of the session.</summary>
@@ -50,6 +53,8 @@ namespace AdvancedKeybinds.Patches
 			try
 			{
 				Assembly asm = fargo.Code;
+				if (asm.ManifestModule.ModuleVersionId != new Guid("535d0777-d3df-4436-ac3f-e1d1fd0ad83b"))
+					return; // The cell geometry and original PreDraw were audited for this binary.
 
 				_equippedBoxType = asm.GetType(EquippedSkillBoxTypeName);
 				Type modType = asm.GetType(FargoModTypeName);
@@ -64,6 +69,9 @@ namespace AdvancedKeybinds.Patches
 					modifiers: null);
 				if (preDraw == null)
 					return;
+				MethodInfo drawSelf = _equippedBoxType.GetMethod("DrawSelf",
+					BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(SpriteBatch) }, null);
+				if (drawSelf?.ReturnType != typeof(void)) return;
 
 				_slotField = _equippedBoxType.GetField("Slot", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 				if (_slotField == null)
@@ -91,6 +99,8 @@ namespace AdvancedKeybinds.Patches
 					return;
 
 				ModDetours.Apply(preDraw, new Action<orig_PreDraw, object, SpriteBatch, Vector2>(OnPreDraw));
+				ModDetours.Apply(drawSelf, new Action<orig_DrawSelf, object, SpriteBatch>(OnDrawSelf));
+				KeyLabelHoverSystem.AttachFargo(_equippedBoxType);
 				_applied = true;
 			}
 			catch (Exception ex)
@@ -148,71 +158,60 @@ namespace AdvancedKeybinds.Patches
 			return field?.GetValue(null) as ModKeybind;
 		}
 
+		private static string Readable(string text)
+			=> string.IsNullOrEmpty(text) || text.IndexOf("AKAdv:", StringComparison.OrdinalIgnoreCase) >= 0
+				|| text.IndexOf("SC:", StringComparison.OrdinalIgnoreCase) >= 0 || text.IndexOf("VK:", StringComparison.OrdinalIgnoreCase) >= 0 ? "?" : text.Replace('\r', ' ').Replace('\n', ' ');
+
+		internal static Rectangle GetKeyHoverBounds(object self, Vector2 position)
+		{
+			float width = self is UIElement element ? element.GetDimensions().Width : 42f;
+			float height = self is UIElement owner ? owner.GetDimensions().Height : 42f;
+			return new Rectangle((int)position.X, (int)position.Y, Math.Max(0, (int)width), Math.Max(0, (int)height));
+		}
+
+		private static bool TryGetOwnedCombo(object self, out ComboBinding combo)
+		{
+			combo = null;
+			if (_disabled || _slotField == null || _equippedBoxType == null || !_equippedBoxType.IsInstanceOfType(self)) return false;
+			ModKeybind keybind = TryGetKeybindForSlot((int)_slotField.GetValue(self));
+			if (keybind == null) return false;
+			string actionId = ModKeybindReflection.GetActionId(keybind);
+			if (string.IsNullOrEmpty(actionId) || !BindingDisplayText.NeedsOverrideFromAssignedKeys(keybind.GetAssignedKeys(FargoInputMode))) return false;
+			combo = BindingStorage.Get(actionId);
+			return combo != null && !combo.IsEmpty;
+		}
+
 		private static void OnPreDraw(orig_PreDraw orig, object self, SpriteBatch spriteBatch, Vector2 position)
 		{
-			if (_disabled || self == null || spriteBatch == null || _slotField == null)
-			{
-				orig(self, spriteBatch, position);
-				return;
-			}
-
 			try
 			{
-				int slot = (int)_slotField.GetValue(self);
-				ModKeybind keybind = TryGetKeybindForSlot(slot);
-				if (keybind == null)
+				if (spriteBatch != null && TryGetOwnedCombo(self, out ComboBinding combo))
 				{
-					orig(self, spriteBatch, position);
+					// Register the readable hint before Fargo's effect tooltip; suppress only its raw AK label.
+					KeyLabelHoverSystem.Queue(self, GetKeyHoverBounds(self, position), Language.GetTextValue("Mods.AdvancedKeybinds.UI.AssignedKeysHint", Readable(BindingDisplayResolver.FormatControlsDisplayLabel(combo))));
 					return;
 				}
-
-				string actionId = ModKeybindReflection.GetActionId(keybind);
-
-				List<string> assigned;
-				try
-				{
-					assigned = keybind.GetAssignedKeys(FargoInputMode);
-				}
-				catch
-				{
-					orig(self, spriteBatch, position);
-					return;
-				}
-
-				ComboBinding combo = string.IsNullOrEmpty(actionId) ? null : BindingStorage.Get(actionId);
-				bool storageHit = combo != null && !combo.IsEmpty;
-
-				if (!BindingDisplayText.NeedsOverrideFromAssignedKeys(assigned))
-				{
-					orig(self, spriteBatch, position);
-					return;
-				}
-
-				if (!storageHit)
-				{
-					orig(self, spriteBatch, position);
-					return;
-				}
-
-				string display = BindingDisplayResolver.FormatComboDisplayLabel(combo);
-				if (string.IsNullOrEmpty(display))
-				{
-					orig(self, spriteBatch, position);
-					return;
-				}
-
-				// Suppress Fargo AKAdv DrawBorderString; draw Controls-equivalent text only.
-				Utils.DrawBorderString(
-					spriteBatch,
-					display,
-					position + new Vector2(-3f, 32f),
-					Color.White);
 			}
-			catch (Exception ex)
+			catch (Exception ex) { DisableCompat("predraw-exception", ex); }
+			orig(self, spriteBatch, position);
+		}
+
+		private static void OnDrawSelf(orig_DrawSelf orig, object self, SpriteBatch spriteBatch)
+		{
+			// Fargo draws skill icons AFTER PreDraw. AK text must be drawn after the original too.
+			orig(self, spriteBatch);
+			try
 			{
-				DisableCompat("predraw-exception", ex);
-				orig(self, spriteBatch, position);
+				if (spriteBatch == null || !TryGetOwnedCombo(self, out ComboBinding combo)) return;
+				Vector2 position = ((UIElement)self).GetDimensions().Position();
+				Rectangle frame = GetKeyHoverBounds(self, position);
+				var font = FontAssets.MouseText.Value;
+				string display = Readable(BindingDisplayResolver.FormatComboDisplayLabel(combo));
+				var fit = KeyLabelFitPolicy.Fit(display, Math.Max(0f, frame.Width - 2f), s => font.MeasureString(s).X);
+				float drawWidth = font.MeasureString(fit.Text).X * fit.Scale;
+				Utils.DrawBorderString(spriteBatch, fit.Text, position + new Vector2((frame.Width - drawWidth) / 2f, 32f), Color.White, fit.Scale);
 			}
+			catch (Exception ex) { DisableCompat("draw-exception", ex); }
 		}
 	}
 }

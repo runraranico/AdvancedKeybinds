@@ -53,6 +53,12 @@ namespace AdvancedKeybinds.Core
 		public static string ReplaceOwnershipMarkersInDisplayText(
 			string text,
 			Func<string, string> resolveDisplayName)
+			=> ReplaceOwnershipMarkersInDisplayText(text, resolveDisplayName, null);
+
+		internal static string ReplaceOwnershipMarkersInDisplayText(
+			string text,
+			Func<string, string> resolveDisplayName,
+			Func<IReadOnlyList<string>, string> resolveAssignedRun)
 		{
 			if (string.IsNullOrEmpty(text) || resolveDisplayName == null)
 				return text ?? string.Empty;
@@ -61,6 +67,7 @@ namespace AdvancedKeybinds.Core
 			int searchFrom = 0;
 			System.Text.StringBuilder sb = null;
 			var runDisplays = new List<string>(3);
+			var runMarkers = new List<string>(3);
 
 			while (true)
 			{
@@ -77,6 +84,7 @@ namespace AdvancedKeybinds.Core
 				sb.Append(text, searchFrom, at - searchFrom);
 
 				runDisplays.Clear();
+				runMarkers.Clear();
 				int cursor = at;
 				while (TryReadOwnershipMarker(text, cursor, out int markerEnd, out string marker))
 				{
@@ -84,13 +92,14 @@ namespace AdvancedKeybinds.Core
 					if (string.IsNullOrEmpty(display))
 						display = UnwrapOwnershipMarkerForDisplay(marker);
 					runDisplays.Add(display);
+					runMarkers.Add(marker);
 					cursor = markerEnd;
 
-					if (!TrySkipAssignedKeysSlashSeparator(text, ref cursor))
+					int next = cursor;
+					if (!TrySkipAssignedKeysSlashSeparator(text, ref next)
+						|| !TryReadOwnershipMarker(text, next, out _, out _))
 						break;
-					if (cursor >= text.Length
-						|| !text.AsSpan(cursor).StartsWith(prefix, StringComparison.Ordinal))
-						break;
+					cursor = next;
 				}
 
 				if (runDisplays.Count == 0)
@@ -100,7 +109,8 @@ namespace AdvancedKeybinds.Core
 					continue;
 				}
 
-				sb.Append(string.Join("+", runDisplays));
+				string assignedDisplay = resolveAssignedRun?.Invoke(runMarkers);
+				sb.Append(string.IsNullOrEmpty(assignedDisplay) ? string.Join("+", runDisplays) : assignedDisplay);
 				searchFrom = cursor;
 			}
 		}
@@ -132,6 +142,20 @@ namespace AdvancedKeybinds.Core
 			return parts.Count == 0 ? string.Empty : string.Join("+", parts);
 		}
 
+		internal static bool ContainsOwnershipMarker(string text, string marker)
+		{
+			for (int at = 0; at < text.Length; at++)
+			{
+				at = text.IndexOf(AdvancedVanillaOwnershipMarker.Prefix, at, StringComparison.Ordinal);
+				if (at < 0)
+					return false;
+				if (TryReadOwnershipMarker(text, at, out _, out string found)
+					&& string.Equals(found, marker, StringComparison.Ordinal))
+					return true;
+			}
+			return false;
+		}
+
 		private static bool TryReadOwnershipMarker(
 			string text,
 			int start,
@@ -146,9 +170,24 @@ namespace AdvancedKeybinds.Core
 			if (!text.AsSpan(start).StartsWith(prefix, StringComparison.Ordinal))
 				return false;
 
-			int tokenEnd = start + prefix.Length;
+			int tokenStart = start + prefix.Length;
+			int tokenEnd = tokenStart;
+			// A colon belongs to a token only in its known namespace. A following
+			// sentence colon or period (including inside a Terraria color tag) is text.
+			int colons = text.AsSpan(tokenStart).StartsWith("SC:", StringComparison.OrdinalIgnoreCase)
+				|| text.AsSpan(tokenStart).StartsWith("Pad:LS:", StringComparison.OrdinalIgnoreCase)
+				|| text.AsSpan(tokenStart).StartsWith("Pad:RS:", StringComparison.OrdinalIgnoreCase) ? 2
+				: text.AsSpan(tokenStart).StartsWith("VK:", StringComparison.OrdinalIgnoreCase)
+					|| text.AsSpan(tokenStart).StartsWith("Key:", StringComparison.OrdinalIgnoreCase)
+					|| text.AsSpan(tokenStart).StartsWith("Pad:", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
 			while (tokenEnd < text.Length && IsOwnershipMarkerBodyChar(text[tokenEnd]))
+			{
+				if (text[tokenEnd] == '+' && text.AsSpan(tokenEnd + 1).StartsWith(prefix, StringComparison.Ordinal))
+					break; // Adjacent owned entries joined by '+' are separate tokens.
+				if (text[tokenEnd] == ':' && colons-- <= 0)
+					break;
 				tokenEnd++;
+			}
 
 			if (tokenEnd <= start + prefix.Length)
 				return false;
@@ -179,7 +218,7 @@ namespace AdvancedKeybinds.Core
 		{
 			if (c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9')
 				return true;
-			return c is ':' or '_' or '.' or '-' or '+';
+			return c is ':' or '_' or '-' or '+';
 		}
 
 		/// <summary>

@@ -87,9 +87,12 @@ namespace AdvancedKeybinds.Binding
 			string trigger,
 			IReadOnlyList<string> entries)
 		{
+			using var overlayWrite = VanillaKeyProfileOverlay.BeginWrite(configs, trigger);
 			for (int c = 0; c < configs.Count; c++)
 			{
 				KeyConfiguration config = configs[c];
+				if (VanillaKeyProfileOverlay.PreserveDuringUnload(config, trigger))
+					continue;
 				if (!config.KeyStatus.TryGetValue(trigger, out List<string> keys) || keys == null)
 				{
 					keys = new List<string>();
@@ -106,6 +109,7 @@ namespace AdvancedKeybinds.Binding
 						keys.Add(entry);
 				}
 			}
+			overlayWrite.Complete();
 		}
 
 		private static bool TryGetWritableConfigsForModes(List<KeyConfiguration> configs, params InputMode[] modes)

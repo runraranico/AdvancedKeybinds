@@ -355,6 +355,7 @@ CursorConfine: {
 }
 
 UI: {
+	AssignedKeysHint: "使用キー：{0}"
 	BindingList: {
 		Title: AK ALL KEY
 		ColKey: キー

@@ -239,6 +239,7 @@ namespace AdvancedKeybinds.Binding
 			}
 
 			GamePadUserEditTransaction.Io io = CreateProductionIo();
+			var overlayBefore = VanillaKeyProfileOverlay.CaptureRollback();
 			GamePadUserEditTransaction.Outcome outcome = GamePadUserEditTransaction.Run(
 				before,
 				FilePath,
@@ -259,7 +260,10 @@ namespace AdvancedKeybinds.Binding
 					}
 					return BindingJsonCodec.Save(data);
 				},
-				() => RestoreGamePadPreEditMemory(storageKey, before),
+				() => {
+					RestoreGamePadPreEditMemory(storageKey, before);
+					VanillaKeyProfileOverlay.RestoreRollback(overlayBefore);
+				},
 				io);
 
 			BindingInputEngine.InvalidateBindings();
@@ -1416,11 +1420,19 @@ namespace AdvancedKeybinds.Binding
 
 		public static void Unload()
 		{
+			try
+			{
+			VanillaKeyProfileOverlay.BeginUnloadAndRestore();
 			global::AdvancedKeybinds.Patches.AdditionalOrPersistencePatches.RestoreOwnedProfiles();
 			// Drop AKAdv markers: write one vanilla-fireable key from each advanced combo (Keyboard +
 			// KeyboardUI), then PlayerInput.Save so input profiles.json no longer holds dead markers.
 			// bindings.json is not rewritten — Combos are only cleared from memory.
 			UnloadVanillaKeyRestore.RestoreAdvancedOwnedFromCombos(Combos, out _);
+			}
+			finally
+			{
+				VanillaKeyProfileOverlay.EndUnload();
+			}
 			Combos.Clear();
 			ControlsBindingUndo.Clear();
 		}
