@@ -161,7 +161,8 @@ CursorConfine: {
 }
 
 UI: {
-	AssignedKeysHint: "已分配按键：{0}"
+	AssignedKeysHint: 已分配按键：{0}
+
 	BindingList: {
 		Title: AK ALL KEY
 		ColKey: Key

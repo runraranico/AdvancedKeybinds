@@ -58,6 +58,7 @@ namespace AdvancedKeybinds.Patches
 		private static readonly List<Vector2> ActiveCenters = new();
 		private static readonly List<int> ActivePointIds = new();
 		private static Action _pageUpdateHandler;
+		private static WeakReference<UILinkPage> _pageUpdateOwner;
 
 		public static void Apply()
 		{
@@ -643,6 +644,7 @@ namespace AdvancedKeybinds.Patches
 
 			_pageUpdateHandler = OnNpcChatPageUpdate;
 			page.UpdateEvent += _pageUpdateHandler;
+			_pageUpdateOwner = new WeakReference<UILinkPage>(page);
 			_pageUpdateHooked = true;
 		}
 
@@ -652,13 +654,13 @@ namespace AdvancedKeybinds.Patches
 			{
 				_pageUpdateHooked = false;
 				_pageUpdateHandler = null;
+				_pageUpdateOwner = null;
 				return;
 			}
 
 			try
 			{
-				if (UILinkPointNavigator.Pages.TryGetValue(
-					    DialogueTweakGamepadCompatNavLayout.PreferredPageId, out UILinkPage page))
+				if (_pageUpdateOwner != null && _pageUpdateOwner.TryGetTarget(out UILinkPage page))
 					page.UpdateEvent -= _pageUpdateHandler;
 			}
 			catch
@@ -668,6 +670,7 @@ namespace AdvancedKeybinds.Patches
 
 			_pageUpdateHooked = false;
 			_pageUpdateHandler = null;
+			_pageUpdateOwner = null;
 		}
 
 		private static void OnNpcChatPageUpdate()

@@ -46,6 +46,7 @@ namespace AdvancedKeybinds.Patches
 		private static readonly HashSet<Type> _bindReflectionFailedTypes = new();
 		private static readonly ConditionalWeakTable<object, string> _rowActionIds = new();
 		private static readonly ConditionalWeakTable<UIElement, UIElement> _controlsUndoButtons = new();
+		private static readonly ConditionalWeakTable<UIElement, List<Action>> _uiEventUnsubscribers = new();
 		private static readonly HashSet<Type> _dumpedTypes = new();
 		private static readonly HashSet<Type> _dumpedColorTypes = new();
 		/// <summary>Cached GetFriendlyName getters — never GetMethod per DrawSelf.</summary>
@@ -54,9 +55,29 @@ namespace AdvancedKeybinds.Patches
 		private static readonly Dictionary<Type, FieldInfo> _inputModeFieldCache = new();
 		private static readonly HashSet<Type> _inputModeFieldMissingTypes = new();
 
-		/// <summary>Clears type caches on Unload so reloads do not keep stale Assembly MethodInfo.</summary>
+		private static void AddUpdateHandler(UIElement element, UIElement.ElementEvent handler)
+		{
+			element.OnUpdate += handler;
+			_uiEventUnsubscribers.GetOrCreateValue(element).Add(() => element.OnUpdate -= handler);
+		}
+
+		private static void AddLeftClickHandler(UIElement element, UIElement.MouseEvent handler)
+		{
+			element.OnLeftClick += handler;
+			_uiEventUnsubscribers.GetOrCreateValue(element).Add(() => element.OnLeftClick -= handler);
+		}
+
+		/// <summary>Release our UI callbacks and caches, including rows retained by another owner.</summary>
 		public static void ClearCaches()
 		{
+			foreach (var entry in _uiEventUnsubscribers)
+				foreach (Action unsubscribe in entry.Value)
+					unsubscribe();
+			_uiEventUnsubscribers.Clear();
+			_rowActionIds.Clear();
+			foreach (var entry in _controlsUndoButtons)
+				entry.Value.Remove();
+			_controlsUndoButtons.Clear();
 			_bindFieldCache.Clear();
 			_bindReflectionFailedTypes.Clear();
 			_dumpedTypes.Clear();
@@ -195,10 +216,10 @@ namespace AdvancedKeybinds.Patches
 				profileWidth = profileButton.GetDimensions().Width;
 			undoButton.MarginRight = profileButton.MarginRight + profileWidth + ControlsUndoButtonGap;
 
-			undoButton.OnLeftClick += (_, _) => {
+			AddLeftClickHandler(undoButton, (_, _) => {
 				if (TryExecuteControlsUndo("MouseClick"))
 					SoundEngine.PlaySound(SoundID.MenuOpen);
-			};
+			});
 
 			profileButton.Parent.Append(undoButton);
 			_controlsUndoButtons.Add(root, undoButton);
@@ -455,9 +476,9 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		private static void HookRowRightClickClear(UIElement row, string bind, InputMode mode)
 		{
-			row.OnUpdate += _ => {
+			AddUpdateHandler(row, _ => {
 				TryProcessPhysicalRightClickUnset(row, bind, mode, row.IsMouseHovering);
-			};
+			});
 		}
 
 		/// <summary>
@@ -559,7 +580,7 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		private static void HookRowMiddleClickReset(UIElement row, string bind, InputMode mode)
 		{
-			row.OnUpdate += _ => {
+			AddUpdateHandler(row, _ => {
 				if (ComboPanel.IsOpen || !row.IsMouseHovering)
 					return;
 
@@ -575,7 +596,7 @@ namespace AdvancedKeybinds.Patches
 				if (TryGetRowInputMode(row, out InputMode live))
 					effective = live;
 				ResetRowToDefault(bind, effective);
-			};
+			});
 		}
 
 		/// <summary>
@@ -1112,7 +1133,7 @@ namespace AdvancedKeybinds.Patches
 		/// </summary>
 		private static void HookResetButton(UIElement panel, string bind, InputMode mode)
 		{
-			panel.OnLeftClick += (evt, listeningElement) => {
+			AddLeftClickHandler(panel, (evt, listeningElement) => {
 				if (ComboPanel.IsOpen)
 					return;
 				if (IsWithinKeybindRow(evt.Target))
@@ -1120,10 +1141,10 @@ namespace AdvancedKeybinds.Patches
 
 				// Full row reset (same as middle-click), not only clearing advanced storage.
 				ResetRowToDefault(bind, mode);
-			};
+			});
 
 			// Middle-click / right-click unset: whole CreatePanel row (key slot + Reset label).
-			panel.OnUpdate += _ => {
+			AddUpdateHandler(panel, _ => {
 				if (ComboPanel.IsOpen || !panel.IsMouseHovering)
 				{
 					// Still run unset cancel path when leaving the full panel.
@@ -1142,7 +1163,7 @@ namespace AdvancedKeybinds.Patches
 				ClearPendingUnsetConfirm();
 				// CreatePanel passes the list's InputMode (Keyboard vs KeyboardUI); keep it.
 				ResetRowToDefault(bind, mode);
-			};
+			});
 		}
 
 		/// <summary>True if the clicked element is the keybinding row (or a child of it), not the Reset button.</summary>

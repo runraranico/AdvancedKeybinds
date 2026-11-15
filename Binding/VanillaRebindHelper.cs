@@ -264,20 +264,6 @@ namespace AdvancedKeybinds.Binding
 			NotifyBindingChanged();
 		}
 
-		private static string FormatModes(InputMode[] modes)
-		{
-			if (modes == null || modes.Length == 0)
-				return "-";
-			var sb = new System.Text.StringBuilder();
-			for (int i = 0; i < modes.Length; i++)
-			{
-				if (i > 0)
-					sb.Append('+');
-				sb.Append(modes[i].ToString());
-			}
-			return sb.ToString();
-		}
-
 		public static void ClearVanillaBindingForInputModes(
 			string trigger,
 			string reason,

@@ -659,34 +659,6 @@ namespace AdvancedKeybinds.Binding
 			return true;
 		}
 
-		private static void LogWin32SupplementEdge(string token, uint vk, string src, List<string> edges)
-		{
-			if (AkDiag.Enabled)
-			{
-				AkDiag.Log(
-				"Win32Supplement edge token=" + token
-				+ " vk=0x" + vk.ToString("X2")
-				+ " src=" + src
-				+ " " + KeyboardLayoutHelper.FormatPhysicalKeyCaptureDiag(vk, adoptedToken: token));
-			}
-
-			if (edges != null && !ContainsIgnoreCase(edges, token))
-				edges.Add(token);
-		}
-
-		private static bool ContainsIgnoreCase(List<string> list, string token)
-		{
-			if (list == null || token == null)
-				return false;
-			for (int i = 0; i < list.Count; i++)
-			{
-				if (string.Equals(list[i], token, StringComparison.OrdinalIgnoreCase))
-					return true;
-			}
-
-			return false;
-		}
-
 		/// <summary>
 		/// Discarded under Microsoft keystroke-message-only policy (GetAsyncKeyState / FNA polls).
 		/// Capture edges come from WM_KEY* via ApplyPhysicalKeyEvent.

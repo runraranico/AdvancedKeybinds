@@ -161,7 +161,8 @@ CursorConfine: {
 }
 
 UI: {
-	AssignedKeysHint: "Przypisane klawisze: {0}"
+	AssignedKeysHint: Przypisane klawisze: {0}
+
 	BindingList: {
 		Title: AK ALL KEY
 		ColKey: Key

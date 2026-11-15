@@ -7,16 +7,16 @@ using Terraria.GameInput;
 namespace AdvancedKeybinds.Binding
 {
 	/// <summary>
-	/// Unload/disable only: replace AKAdv ownership markers with one vanilla-fireable key from each
-	/// advanced combo, then persist via <see cref="PlayerInput.Save"/>. Does not rewrite bindings.json.
+	/// Unload/disable only: persist proven normal-key restoration, never a key guessed from a combo.
+	/// Does not rewrite bindings.json.
 	/// </summary>
 	internal static class UnloadVanillaKeyRestore
 	{
 		private static readonly List<string> RestoreScratch = new(4);
 
 		/// <summary>
-		/// Restores Keyboard + KeyboardUI KeyStatus for advanced-owned combos that still carry AKAdv
-		/// markers, then saves input profiles.
+		/// After the profile ledger restores known normal keys, handles existing DT/OR cleanup
+		/// and saves input profiles only when no unprojectable AK ownership remains.
 		/// Call while BindingStorage still holds combos (before Combos.Clear).
 		/// </summary>
 		public static int RestoreAdvancedOwnedFromCombos(
@@ -26,7 +26,7 @@ namespace AdvancedKeybinds.Binding
 			savedProfiles = false;
 			if (combos == null)
 			{
-				savedProfiles = TrySavePlayerInputProfiles();
+				savedProfiles = VanillaKeyProfileOverlay.CanPersistProfiles() && TrySavePlayerInputProfiles();
 				return 0;
 			}
 
@@ -58,49 +58,11 @@ namespace AdvancedKeybinds.Binding
 					continue;
 				}
 
-				// Only touch actions that still carry AKAdv markers (AK wrote them).
-				if (!KeyStatusHasOwnershipMarker(actionId))
-					continue;
-
-				if (combo.RequiresAdvancedStorage())
-				{
-					if (UnloadVanillaKeyRestorePolicy.TrySelectPrimaryVanillaKey(
-						combo.Slot1, combo.Slot2, combo.Slot3, out string vanillaKey)
-						&& !string.IsNullOrEmpty(vanillaKey))
-					{
-						VanillaRebindHelper.AssignVanillaBinding(
-							actionId, vanillaKey, "unload-restore-combo-key");
-					}
-					else
-					{
-						VanillaRebindHelper.ClearVanillaBinding(
-							actionId, "unload-clear-unconvertible");
-					}
-				}
-				else
-				{
-					// Plain single-tap in Combos but marker residue left — write the Keys/Mouse name.
-					IReadOnlyList<string> keys = combo.Keys;
-					string plain = keys != null && keys.Count > 0 ? keys[0] : null;
-					if (!string.IsNullOrEmpty(plain)
-						&& UnloadVanillaKeyRestorePolicy.TryConvertToVanillaKeyStatusToken(
-							plain, out string vanillaPlain)
-						&& !string.IsNullOrEmpty(vanillaPlain))
-					{
-						VanillaRebindHelper.AssignVanillaBinding(
-							actionId, vanillaPlain, "unload-restore-plain-residue");
-					}
-					else
-					{
-						VanillaRebindHelper.ClearVanillaBinding(
-							actionId, "unload-clear-plain-residue");
-					}
-				}
-
-				restored++;
+				// Non-DT A is restored by the ownership ledger before this method.
+				// A leftover marker does not prove what the original normal key was.
 			}
 
-			savedProfiles = TrySavePlayerInputProfiles();
+			savedProfiles = VanillaKeyProfileOverlay.CanPersistProfiles() && TrySavePlayerInputProfiles();
 			return restored;
 		}
 

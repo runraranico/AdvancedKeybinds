@@ -1,6 +1,6 @@
 displayName = Advanced Keybinds
 author = runohito
-version = 6.2.1
+version = 6.2.2
 includeSource = false
 side = Client
-buildIgnore = _developer\*, *.md, icon_workshop.png
+buildIgnore = _developer/*, *.md, icon_workshop.png

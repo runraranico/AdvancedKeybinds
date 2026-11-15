@@ -15,8 +15,18 @@ namespace AdvancedKeybinds.Patches
         private static readonly object Gate = new object();
         private static long _nextGeneration;
         private static Hook _saveHook;
+        private static Hook _copyHook, _inputSaveHook, _reinitializeHook;
+        [ThreadStatic] private static int _inputSaveDepth;
+        [ThreadStatic] private static bool _reinitializeSaving;
 
         private delegate Dictionary<string, object> SaveDetour(OrigProfileSave orig, PlayerInputProfile self);
+        private delegate void OrigProfileCopy(PlayerInputProfile self, PlayerInputProfile source, InputMode mode, string[] keys);
+        private delegate void CopyDetour(OrigProfileCopy orig, PlayerInputProfile self, PlayerInputProfile source, InputMode mode, string[] keys);
+        private delegate bool OrigInputSave();
+        private delegate bool InputSaveDetour(OrigInputSave orig);
+        private delegate void OrigReinitialize();
+        private delegate void ReinitializeDetour(OrigReinitialize orig);
+        private sealed class UnprojectableProfileSave : Exception { }
 
         private sealed class ProfileState
         {
@@ -60,11 +70,14 @@ namespace AdvancedKeybinds.Patches
 
         internal static void Dispose()
         {
-            Hook hook;
+            Hook hook, copyHook, inputSaveHook, reinitializeHook;
             lock (Gate)
             {
                 hook = _saveHook;
                 _saveHook = null;
+                copyHook = _copyHook; _copyHook = null;
+                inputSaveHook = _inputSaveHook; _inputSaveHook = null;
+                reinitializeHook = _reinitializeHook; _reinitializeHook = null;
             }
 
             try
@@ -73,9 +86,15 @@ namespace AdvancedKeybinds.Patches
             }
             finally
             {
-                lock (Gate)
+                try { copyHook?.Dispose(); }
+                finally
                 {
-                _profiles = new ConditionalWeakTable<PlayerInputProfile, ProfileState>();
+                    try { inputSaveHook?.Dispose(); }
+                    finally
+                    {
+                        try { reinitializeHook?.Dispose(); }
+                        finally { lock (Gate) { _profiles = new ConditionalWeakTable<PlayerInputProfile, ProfileState>(); } }
+                    }
                 }
             }
         }
@@ -251,6 +270,7 @@ namespace AdvancedKeybinds.Patches
             {
                 if (_saveHook != null && _saveHook.IsApplied)
                 {
+                    ApplyRestoreBoundaries();
                     return;
                 }
 
@@ -293,6 +313,107 @@ namespace AdvancedKeybinds.Patches
             {
                 _saveHook = hook;
             }
+            ApplyRestoreBoundaries();
+        }
+
+        // Optional boundaries: an unavailable/changed API must not prevent AK loading.
+        private static Hook TryCreateRestoreHook(Type type, string name, BindingFlags flags,
+            Type[] arguments, Type returns, Delegate detour)
+        {
+            Hook hook=null;
+            try
+            {
+                var method=type.GetMethod(name,flags,null,arguments,null);
+                if (method==null || method.IsGenericMethod || method.ReturnType!=returns) return null;
+                hook=new Hook(method,detour);
+                if (hook.IsApplied) return hook;
+            }
+            catch { }
+            try { hook?.Dispose(); } catch { }
+            return null;
+        }
+
+        private static void ApplyRestoreBoundaries()
+        {
+            lock (Gate)
+            {
+                if (_copyHook==null)
+                    _copyHook=TryCreateRestoreHook(typeof(PlayerInputProfile),"CopyKeysFrom",
+                        BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic,
+                        new[] { typeof(PlayerInputProfile),typeof(InputMode),typeof(string[]) },typeof(void),
+                        (CopyDetour)CopyProfileKeys);
+                if (_inputSaveHook==null)
+                    _inputSaveHook=TryCreateRestoreHook(typeof(PlayerInput),"Save",
+                        BindingFlags.Static|BindingFlags.Public,Type.EmptyTypes,typeof(bool),
+                        (InputSaveDetour)SaveInputProfiles);
+                if (_reinitializeHook==null)
+                    _reinitializeHook=TryCreateRestoreHook(typeof(PlayerInput),"ReInitialize",
+                        BindingFlags.Static|BindingFlags.Public|BindingFlags.NonPublic,Type.EmptyTypes,typeof(void),
+                        (ReinitializeDetour)ReinitializeProfiles);
+            }
+        }
+
+        private static void ReinitializeProfiles(OrigReinitialize orig)
+        {
+            // Rebuild discards profile objects. Persist the existing A projection before native Load reads disk.
+            // Do not save startup defaults over preferences which have not been loaded yet.
+            if (!_reinitializeSaving && _inputSaveHook?.IsApplied==true && _saveHook?.IsApplied==true)
+            {
+                try
+                {
+                    _reinitializeSaving=true;
+                    var preferences=typeof(Terraria.Main).GetField("InputProfiles",BindingFlags.Public|BindingFlags.Static)?.GetValue(null);
+                    var getKeys=preferences?.GetType().GetMethod("GetAllKeys",BindingFlags.Public|BindingFlags.Instance,null,Type.EmptyTypes,null);
+                    if (getKeys?.Invoke(preferences,null) is IEnumerable<string> keys)
+                        foreach (var key in keys)
+                            if (key=="Selected Profile")
+                            {
+                                var save=typeof(PlayerInput).GetMethod("Save",BindingFlags.Public|BindingFlags.Static,null,Type.EmptyTypes,null);
+                                if (save?.ReturnType==typeof(bool)) save.Invoke(null,null);
+                                break;
+                            }
+                }
+                catch { } // Disk/API failure must not block native input initialization.
+                finally { _reinitializeSaving=false; }
+            }
+            orig(); // Preserve native execution and its original exception behavior.
+        }
+
+        private static void CopyProfileKeys(OrigProfileCopy orig, PlayerInputProfile self,
+            PlayerInputProfile source, InputMode mode, string[] keys)
+        {
+            var snapshots=Array.Empty<global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.CopySnapshot>();
+            try { snapshots=global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.CaptureCopy(self,source,mode,keys); }
+            catch { }
+            orig(self,source,mode,keys); // Preserve the native operation, including its exception behavior.
+            try { global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.CompleteCopy(snapshots); }
+            catch { }
+        }
+
+        private static bool SaveInputProfiles(OrigInputSave orig)
+        {
+            if (!global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.CanPersistProfiles()) return false;
+            try { _inputSaveDepth++; return orig(); }
+            catch (UnprojectableProfileSave) { return false; }
+            finally { _inputSaveDepth--; }
+        }
+
+        private static Dictionary<string,object> GuardProfileSave(PlayerInputProfile profile,
+            global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.SaveSnapshot[] snapshots,
+            Dictionary<string,object> result)
+        {
+            if (_inputSaveDepth>0 && result!=null)
+            {
+                if (!global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.CanPersistProfiles()
+                    || global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.HasUnprojectedSave(profile,snapshots,result))
+                    throw new UnprojectableProfileSave();
+                foreach (var value in result.Values)
+                    if (value is Dictionary<string,List<string>> mode)
+                        foreach (var keys in mode.Values)
+                            if (keys!=null && keys.Exists(AdvancedVanillaOwnershipMarker.IsMarker))
+                                throw new UnprojectableProfileSave();
+            }
+            return result;
         }
 
         internal static void RestoreOwnedProfiles()
@@ -468,11 +589,11 @@ namespace AdvancedKeybinds.Patches
             var result = global::AdvancedKeybinds.Binding.VanillaKeyProfileOverlay.ProjectSave(overlaySave, orig(self));
             Validate(self);
             if (result == null || snapshots.Count == 0)
-                return result;
+                return GuardProfileSave(self,overlaySave,result);
             lock (Gate)
             {
                 if (!TryGetState(self, out var state))
-                    return result;
+                    return GuardProfileSave(self,overlaySave,result);
                 Dictionary<string, object> top = null;
                 var clones = new Dictionary<string, Dictionary<string, List<string>>>(result.Comparer);
                 foreach (var snap in snapshots)
@@ -506,7 +627,7 @@ namespace AdvancedKeybinds.Patches
                     }
                     clone[snap.Trigger] = new List<string>(snap.BaseKeys);
                 }
-                return top ?? result;
+                return GuardProfileSave(self,overlaySave,top ?? result);
             }
         }
 
